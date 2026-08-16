@@ -1,0 +1,401 @@
+@import "tailwindcss";
+@import "highlight.js/styles/github-dark.css";
+
+/* ============================================================
+   设计系统 —— 冷静的「任务控制台」
+   参考 Linear / ChatGPT / Claude 的现代 AI 产品语言:
+   · 近黑底色 + 单一强调色(指挥蓝),青色仅作编排轨道签名
+   · 克制的边框与留白,排版而非装饰
+   · 细滚动条、平滑过渡
+   ============================================================ */
+@theme {
+  --color-bg: #0b0d11;
+  --color-surface: #13151a;
+  --color-surface-2: #1a1d24;
+  --color-surface-3: #22262e;
+  --color-line: #22252d;
+  --color-line-2: #2e323c;
+  --color-ink: #e8eaf0;
+  --color-ink-dim: #9ba2b0;
+  --color-ink-faint: #636a78;
+  --color-accent: #4a7dff;
+  --color-accent-2: #7da2ff;
+  --color-orbit: #22d3ee;
+  --color-ok: #3fb27f;
+  --color-warn: #d9a13b;
+  --color-err: #e5534b;
+  --color-code-bg: #0e1014;
+  --color-code: #d6dbe6;
+  --font-sans: "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+/* ---------- 亮色主题（html.light 时覆盖全部 token） ---------- */
+html.light {
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f4;
+  --color-surface-3: #e3e6ec;
+  --color-line: #e5e8ee;
+  --color-line-2: #cfd5de;
+  --color-ink: #1b1e26;
+  --color-ink-dim: #565e6d;
+  --color-ink-faint: #8a92a2;
+  --color-accent: #3b6fe0;
+  --color-accent-2: #5a86e8;
+  --color-orbit: #0891b2;
+  --color-ok: #2f9e74;
+  --color-warn: #b7791f;
+  --color-err: #d6453d;
+  --color-code-bg: #f2f3f5;
+  --color-code: #1f2328;
+}
+html.light body {
+  color-scheme: light;
+}
+html.light ::selection {
+  background: rgba(59, 111, 224, 0.22);
+}
+/* 亮色下 hljs（github 浅色配色） */
+html.light .hljs {
+  color: #24292e;
+  background: transparent;
+}
+html.light .hljs-keyword,
+html.light .hljs-doctag,
+html.light .hljs-template-tag,
+html.light .hljs-template-variable,
+html.light .hljs-type,
+html.light .hljs-variable.language_ {
+  color: #d73a49;
+}
+html.light .hljs-title,
+html.light .hljs-title.class_,
+html.light .hljs-title.function_,
+html.light .hljs-title.class_.inherited__ {
+  color: #6f42c1;
+}
+html.light .hljs-attr,
+html.light .hljs-attribute,
+html.light .hljs-literal,
+html.light .hljs-number,
+html.light .hljs-operator,
+html.light .hljs-variable,
+html.light .hljs-selector-attr,
+html.light .hljs-selector-class,
+html.light .hljs-selector-id {
+  color: #005cc5;
+}
+html.light .hljs-string,
+html.light .hljs-regexp,
+html.light .hljs-meta .hljs-string {
+  color: #032f62;
+}
+html.light .hljs-built_in,
+html.light .hljs-symbol {
+  color: #e36209;
+}
+html.light .hljs-comment,
+html.light .hljs-code,
+html.light .hljs-formula {
+  color: #6a737d;
+}
+html.light .hljs-name,
+html.light .hljs-quote,
+html.light .hljs-selector-tag,
+html.light .hljs-selector-pseudo {
+  color: #22863a;
+}
+html.light .hljs-section {
+  color: #005cc5;
+  font-weight: bold;
+}
+html.light .hljs-addition {
+  color: #22863a;
+  background: #f0fff4;
+}
+html.light .hljs-deletion {
+  color: #b31d28;
+  background: #ffeef0;
+}
+
+/* ---------- 基础 ---------- */
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  @apply bg-bg text-ink font-sans antialiased overflow-hidden;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+}
+::selection {
+  background: rgba(74, 125, 255, 0.28);
+}
+
+/* 细滚动条 —— 固定显示(用户要求:保留美化、不做自动隐藏)
+   legacy 规格:9px 圆角、thumb 常显、hover 加深、轨道透明 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-2);
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 隐藏滚动条但保留滚动（用于侧边栏等紧凑区域） */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* ---------- 自定义 checkbox（替换原生外观，与暗/亮主题统一） ---------- */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid var(--color-line-2);
+  background-color: var(--color-surface-2);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+input[type="checkbox"]:hover {
+  border-color: var(--color-ink-faint);
+}
+input[type="checkbox"]:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+/* ---------- 通用交互 ---------- */
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: 2px solid rgba(74, 125, 255, 0.55);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+/* 输入控件聚焦由容器 focus-within 光晕表达，去掉默认 outline 描边 */
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+/* 过渡 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+.pop-enter-active {
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pop-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+}
+.pop-leave-active {
+  transition: opacity 0.12s ease;
+}
+.pop-leave-to {
+  opacity: 0;
+}
+
+/* 消息入场 */
+.msg-in {
+  animation: msgIn 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* 打字光标 */
+.typing-caret::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  animation: caretBlink 1s steps(1) infinite;
+}
+@keyframes caretBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Markdown 内容(精致排版) ---------- */
+.md {
+  line-height: 1.65;
+  font-size: 0.9rem;
+  color: var(--color-ink);
+  overflow-wrap: break-word;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  @apply text-ink font-semibold;
+  margin: 18px 0 8px;
+  letter-spacing: -0.01em;
+}
+.md h1 {
+  font-size: 1.15rem;
+}
+.md h2 {
+  font-size: 1.02rem;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--color-line);
+}
+.md h3 {
+  font-size: 0.95rem;
+}
+.md h4 {
+  font-size: 0.9rem;
+}
+.md h1:first-child,
+.md h2:first-child,
+.md h3:first-child {
+  margin-top: 4px;
+}
+.md p {
+  margin: 8px 0;
+}
+.md ul,
+.md ol {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+.md li {
+  margin: 3px 0;
+  line-height: 1.6;
+}
+.md li::marker {
+  color: var(--color-ink-faint);
+}
+.md hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 16px 0;
+}
+.md code {
+  @apply font-mono;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-line);
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 0.82em;
+  color: var(--color-code);
+  word-break: break-word;
+}
+.md pre {
+  background: var(--color-code-bg);
+  border: 1px solid var(--color-line);
+  padding: 12px 14px;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin: 10px 0;
+  max-width: 100%;
+}
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.82em;
+  line-height: 1.6;
+  color: var(--color-ink);
+}
+.md blockquote {
+  border-left: 3px solid var(--color-accent);
+  margin: 10px 0;
+  padding: 2px 14px;
+  color: var(--color-ink-dim);
+  background: rgba(74, 125, 255, 0.04);
+  border-radius: 0 6px 6px 0;
+}
+.md a {
+  color: var(--color-accent-2);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(125, 162, 255, 0.35);
+}
+.md a:hover {
+  border-bottom-color: var(--color-accent-2);
+}
+.md table {
+  border-collapse: collapse;
+  margin: 10px 0;
+  width: 100%;
+  table-layout: fixed;
+  font-size: 0.82em;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-line);
+  padding: 6px 10px;
+  text-align: left;
+  word-break: break-word;
+}
+.md th {
+  background: var(--color-surface-2);
+  font-weight: 600;
+}
+.md strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.md img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+

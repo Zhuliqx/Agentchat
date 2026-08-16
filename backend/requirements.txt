@@ -1,0 +1,42 @@
+# ---- Web 框架 ----
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+python-multipart>=0.0.9
+
+# ---- LangChain / LangGraph ----
+# 已升级至 langchain 1.x（本仓库以 1.x 为基准开发验证）
+langchain>=1.0,<2.0
+langchain-core>=1.0,<2.0
+langchain-openai>=1.0,<2.0
+langchain-ollama>=0.2
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+langgraph>=1.0
+langgraph-checkpoint-postgres>=3.0
+
+# ---- 联网搜索 ----
+tavily-python>=0.5
+langchain-tavily>=0.2
+
+# ---- 向量 / 数据库 ----
+pymilvus>=2.4
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
+
+# ---- MCP（FastMCP 高级 API 在 2.x 被移除，固定 1.x）----
+mcp>=1.2,<2.0
+sqlparse>=0.5
+
+# ---- 嵌入 / 文档解析 ----
+sentence-transformers>=3.0
+pypdf>=4.0
+python-docx>=1.1
+chardet>=5.2          # 文档编码自动检测（GBK 等非 UTF-8 文件）
+
+# ---- 检索（可选：BM25 中文分词，需在 .env 设 BM25_USE_JIEBA=true）----
+jieba>=0.42
+
+# ---- 其他 ----
+httpx>=0.27

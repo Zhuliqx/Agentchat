@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# 环境变量
+.env
+
+# 数据 / 缓存
+*.db
+*.sqlite3
+.data/
+models_cache/
+*.local.json
+data/uploads/
+volumes/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+Thumbs.db
+.DS_Store
+
+# 日志
+*.log

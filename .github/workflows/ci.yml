@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: "Install dependencies"
+        run: |
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: "Ruff lint (errors only: F - undefined / unused)"
+        run: ruff check backend/app --select F
+
+      # Pyright 类型检查：报告但不阻塞（项目含大量第三方库类型噪音，
+      # 见 docs/EXPLAIN.md；待 langchain 1.x 升级后收紧）
+      - name: "Type check (Pyright, non-blocking)"
+        run: pyright backend/app
+        continue-on-error: true
+
+      # 单元测试：纯逻辑，不依赖 Postgres/Milvus/LLM。
+      # API 集成测试（tests/test_api.py）需 Docker 依赖，CI 中忽略。
+      - name: "Unit tests (no external services)"
+        run: pytest backend/tests -q --ignore=backend/tests/test_api.py

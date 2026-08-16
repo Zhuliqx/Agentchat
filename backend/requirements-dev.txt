@@ -1,0 +1,5 @@
+# 开发/测试依赖（单元测试 + CI）：
+#   pip install -r requirements-dev.txt
+pytest>=8.0
+ruff>=0.5
+pyright>=1.1

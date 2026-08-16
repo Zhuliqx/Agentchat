@@ -1,0 +1,98 @@
+# 在 Docker Desktop 中启动本项目的依赖数据库（Postgres + Milvus）
+#
+# 用法:
+#   docker compose up -d
+#   docker compose ps
+#   docker compose down          # 停止（保留数据卷）
+#   docker compose down -v       # 停止并删除数据
+#
+# 说明: 如果你已经有一套运行中的 Postgres / Milvus，可以直接修改
+# backend/.env 指向现有实例，无需重复启动本文件中的服务。
+services:
+  # ---------- 关系数据库：Postgres ----------
+  # 使用 pgvector 镜像：除基础 Postgres 外内置 pgvector 扩展，
+  # 用于 LangGraph Store 的长期记忆语义检索（EmbeddingIndex）。
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agentchat-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agentchat
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentchat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- 向量数据库：Milvus Standalone ----------
+  # Milvus 依赖 etcd（元数据）与 minio（对象存储），一并启动
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  standalone:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.4.9
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"   # Milvus gRPC（应用连接）
+      - "9091:9091"     # 健康检查 / 指标
+    depends_on:
+      - etcd
+      - minio
+    restart: unless-stopped
+
+volumes:
+  pg_data:
