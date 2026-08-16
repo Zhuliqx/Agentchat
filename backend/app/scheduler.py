@@ -21,7 +21,6 @@ from app.db import postgres
 logger = logging.getLogger(__name__)
 
 _SCAN_INTERVAL_SEC = 15
-_CORRUPT_AFTER_SEC = 3600  # 单次执行超过 1 小时视为异常（防止卡死任务永远占坑）
 
 
 # ---------------- 任务注册表 ----------------

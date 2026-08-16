@@ -89,8 +89,9 @@ class McpClientManager:
         logger.info("MCP stdio 服务器 '%s' 已连接，工具数: %d", name, len(tools))
 
     async def _start_http(self, name: str, url: str) -> None:
+        # streamable_http_client 返回 3 元组：read / write / get_session_id
         ctx = make_http_client(url)
-        read, write = await self._stack.enter_async_context(ctx)
+        read, write, _get_session_id = await self._stack.enter_async_context(ctx)
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         tools = (await session.list_tools()).tools
