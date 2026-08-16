@@ -15,9 +15,8 @@ const nodeCls = (type: OrbitNode["type"]) =>
         ? "text-err"
         : "text-orbit";
 
-// 仅「流式生成中」且「当前正在执行的最后一个工具节点」才脉冲闪烁
-const isPulsing = (i: number) =>
-  !!props.streaming && i === props.nodes.length - 1 && props.nodes[i].type === "tool";
+// 仅「工具调用执行中」的节点才闪烁（active 由 store 控制：tool 事件激活、答案 token 停止）
+const isPulsing = (n: OrbitNode) => !!n.active;
 </script>
 
 <template>
@@ -28,12 +27,16 @@ const isPulsing = (i: number) =>
 
       <span
         class="inline-flex items-center gap-1.5 text-[11px]"
-        :class="[nodeCls(n.type), n.type === 'tool' ? 'font-medium' : '']"
+        :class="[
+          nodeCls(n.type),
+          n.type === 'tool' ? 'font-medium' : '',
+          isPulsing(n) ? 'animate-pulse' : '',
+        ]"
       >
         <!-- 节点图标 -->
         <span class="relative grid h-[14px] w-[14px] place-items-center">
           <span
-            v-if="isPulsing(i)"
+            v-if="isPulsing(n)"
             class="absolute h-full w-full animate-ping rounded-full bg-orbit/20"
           />
           <Icon

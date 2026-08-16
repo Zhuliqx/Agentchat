@@ -548,6 +548,10 @@ async def stream_agent(
                                 used_agents.append(name)
                             tool_calls_log.append(name)
                             saw_tool_call = True
+                            # 工具调用前：先把缓冲的开场白完整输出（在工具执行前显示）
+                            if pre_tool_text:
+                                await _push("".join(pre_tool_text))
+                                pre_tool_text.clear()
                             if on_event:
                                 await on_event({"type": "tool", "content": f"工具: {name}"})
                 elif mode == "messages":
@@ -563,10 +567,7 @@ async def stream_agent(
                     if not text:
                         continue
                     if saw_tool_call:
-                        # 已有工具调用：先补推开场白，再推后续答案（连贯输出）
-                        if pre_tool_text:
-                            await _push("".join(pre_tool_text))
-                            pre_tool_text.clear()
+                        # 工具已调用：后续为最终答案，直接推送（开场白已在工具调用前输出）
                         await _push(text)
                     else:
                         # 工具调用前：缓冲（可能是开场白，也可能是直接回答的内容）

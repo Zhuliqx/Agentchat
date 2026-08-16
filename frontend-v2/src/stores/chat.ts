@@ -8,6 +8,7 @@ export type OrbitType = "start" | "agent" | "tool" | "end" | "error";
 export interface OrbitNode {
   type: OrbitType;
   label: string;
+  active?: boolean; // 工具调用执行中（轨道节点闪烁）
 }
 
 export interface ChatMsg {
@@ -195,6 +196,10 @@ export const useChatStore = defineStore("chat", {
       switch (ev.type) {
         case "token":
           agentMsg.content += ev.content;
+          // 工具执行完成（开始输出答案）：停止轨道节点闪烁
+          if (agentMsg.orbit?.some((n) => n.active)) {
+            agentMsg.orbit.forEach((n) => (n.active = false));
+          }
           break;
         case "message": {
           if (ev.data?.session_id) {
@@ -227,7 +232,13 @@ export const useChatStore = defineStore("chat", {
             agentMsg.orbit.some((n) => n.label === label)
           )
             return;
-          agentMsg.orbit.push({ type: t, label });
+          if (t === "tool") {
+            // 新工具调用：前一个停止闪烁，当前节点开始闪烁（执行中）
+            agentMsg.orbit.forEach((n) => (n.active = false));
+            agentMsg.orbit.push({ type: t, label, active: true });
+          } else {
+            agentMsg.orbit.push({ type: t, label });
+          }
         }
       }
     },
