@@ -84,9 +84,9 @@ def _build_supervisor_prompt(
         )
     if settings.hitl_enabled and not settings.hitl_actions:
         tool_lines.append(
-            "- request_confirmation：请求用户确认/授权。当操作有外部影响/副作用/成本"
-            "（联网搜索、修改数据、外部工具调用等），或用户明确要求确认时，调用本工具"
-            "征得用户同意；低风险只读操作无需调用。"
+            "- request_confirmation：请求用户确认/授权。**仅当操作没有对应开关且风险较高**"
+            "（数据库写入、外部 MCP 调用、不可逆操作等），或用户明确要求确认时，调用本工具"
+            "征得用户同意；用户已开启开关的能力（联网/知识库/记忆）无需调用。"
         )
 
     rules = []
@@ -135,12 +135,18 @@ def _build_supervisor_prompt(
         # 强制确认模式（confirm_before）：由系统在调用前强制确认，无需软性工具
         rules.append(f"{rn}. 最终必须给用户一个完整、友好的中文回答。")
     elif settings.hitl_enabled:
-        # LLM 自主判定模式：像 Claude Code/Codex 一样，由模型判断何时需要请求用户授权
+        # LLM 自主判定模式：像 Claude Code/Codex 一样，由模型判断何时需要请求用户授权。
+        # 关键约束：用户已开启的开关=已授权，对应的能力绝不能再请求确认。
         rules.append(
-            f"{rn}. **自主判断是否需要请求用户确认**：对可能产生外部影响/副作用/成本的"
-            "操作（联网搜索、修改数据、外部 MCP 调用等），调用 request_confirmation 征得"
-            "用户同意后再执行；对低风险/只读操作（知识库检索、只读数据库查询等）可直接执行。"
-            "用户已开启的开关（联网/知识库/记忆）表示已授权对应能力，通常无需确认。"
+            f"{rn}. **开关即授权**：用户已开启的开关（联网/知识库/记忆）表示已授权对应能力——"
+            "联网搜索（web_search）、知识库检索（rag_agent）、记忆读写直接执行，"
+            "**绝不要**为这些已授权的能力请求确认。"
+        )
+        rn += 1
+        rules.append(
+            f"{rn}. request_confirmation **仅**用于没有开关控制的高风险/外部操作"
+            "（数据库写入、外部 MCP 调用、不可逆操作等），或用户明确要求确认时，"
+            "才调用它征得用户同意；低风险只读操作（只读查询等）直接执行。"
         )
         rn += 1
         rules.append(f"{rn}. 最终必须给用户一个完整、友好的中文回答。")

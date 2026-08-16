@@ -399,9 +399,9 @@ def build_confirmation_tool() -> StructuredTool:
     return StructuredTool(
         name="request_confirmation",
         description=(
-            "请求用户确认/授权后再继续。当操作有外部影响/副作用/成本（联网搜索、外部 MCP、"
-            "写入等），或用户明确要求确认时调用本工具征得同意；低风险只读操作无需调用。"
-            "用户返回 confirm 后继续，返回 cancelled 则放弃该操作。"
+            "请求用户确认/授权后再继续。**仅**当操作没有对应开关且风险较高（数据库写入、外部 MCP、"
+            "不可逆操作等），或用户明确要求确认时调用；用户已开启开关的能力（联网/知识库/记忆）"
+            "已获授权，不要调用本工具。用户返回 confirm 后继续，返回 cancelled 则放弃该操作。"
         ),
         args_schema=_ConfirmQuery,
         coroutine=_arun,
