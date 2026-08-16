@@ -505,6 +505,17 @@ async def stream_agent(
     used_agents: list[str] = []
     tool_calls_log: list[str] = []
     hitl_pending = None
+    # 工具调用前的 token 缓冲（supervisor 先输出"开场白"再调工具）：
+    # 缓冲直到确定是否调用工具——有工具则工具执行后补推开场白+答案（连贯，不悬停）；
+    # 无工具（直接回答）则流结束时补推（保持内容完整）。
+    pre_tool_text: list[str] = []
+    saw_tool_call = False
+
+    async def _push(text: str) -> None:
+        """推送一段文本到答案流（并记录到 answer_parts）。"""
+        answer_parts.append(text)
+        if on_token:
+            await on_token(text)
 
     try:
         async with asyncio.timeout(settings.agent_timeout):
@@ -536,6 +547,7 @@ async def stream_agent(
                             if name in ("rag_agent", "mcp_agent", "web_search"):
                                 used_agents.append(name)
                             tool_calls_log.append(name)
+                            saw_tool_call = True
                             if on_event:
                                 await on_event({"type": "tool", "content": f"工具: {name}"})
                 elif mode == "messages":
@@ -550,9 +562,19 @@ async def stream_agent(
                     text = extract_text(getattr(chunk, "content", ""))
                     if not text:
                         continue
-                    answer_parts.append(text)
-                    if on_token:
-                        await on_token(text)
+                    if saw_tool_call:
+                        # 已有工具调用：先补推开场白，再推后续答案（连贯输出）
+                        if pre_tool_text:
+                            await _push("".join(pre_tool_text))
+                            pre_tool_text.clear()
+                        await _push(text)
+                    else:
+                        # 工具调用前：缓冲（可能是开场白，也可能是直接回答的内容）
+                        pre_tool_text.append(text)
+        # 流结束：无工具调用（直接回答）→ 补推缓冲内容
+        if pre_tool_text:
+            await _push("".join(pre_tool_text))
+            pre_tool_text.clear()
     except TimeoutError as exc:
         if on_event:
             await on_event({"type": "error", "content": "处理超时，请重试或简化问题"})
