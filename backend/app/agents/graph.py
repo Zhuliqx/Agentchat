@@ -510,6 +510,7 @@ async def stream_agent(
     # 无工具（直接回答）则流结束时补推（保持内容完整）。
     pre_tool_text: list[str] = []
     saw_tool_call = False
+    flushed_prelude: str | None = None  # 工具调用前已推出的开场白（工具后答案去重用）
 
     async def _push(text: str) -> None:
         """推送一段文本到答案流（并记录到 answer_parts）。"""
@@ -550,7 +551,8 @@ async def stream_agent(
                             saw_tool_call = True
                             # 工具调用前：先把缓冲的开场白完整输出（在工具执行前显示）
                             if pre_tool_text:
-                                await _push("".join(pre_tool_text))
+                                flushed_prelude = "".join(pre_tool_text)
+                                await _push(flushed_prelude)
                                 pre_tool_text.clear()
                             if on_event:
                                 await on_event({"type": "tool", "content": f"工具: {name}"})
@@ -567,8 +569,23 @@ async def stream_agent(
                     if not text:
                         continue
                     if saw_tool_call:
-                        # 工具已调用：后续为最终答案，直接推送（开场白已在工具调用前输出）
-                        await _push(text)
+                        # 工具已调用：后续为最终答案。LLM 在工具后常重新生成完整回答
+                        # （重复了开场白）→ 去掉重复的前缀，接着开场白继续输出
+                        if flushed_prelude is not None:
+                            prelude = flushed_prelude
+                            flushed_prelude = None
+                            if text.startswith(prelude):
+                                text = text[len(prelude):].lstrip()
+                            else:
+                                # 退而求其次：按开场白首句（到句号）截断重复前缀
+                                first_sentence = prelude.split("。", 1)[0] + "。"
+                                if (
+                                    first_sentence != "。"
+                                    and text.startswith(first_sentence)
+                                ):
+                                    text = text[len(first_sentence):].lstrip()
+                        if text:
+                            await _push(text)
                     else:
                         # 工具调用前：缓冲（可能是开场白，也可能是直接回答的内容）
                         pre_tool_text.append(text)
