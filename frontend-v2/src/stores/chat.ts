@@ -219,6 +219,9 @@ export const useChatStore = defineStore("chat", {
           if (!["start", "tool", "end", "error"].includes(t)) return;
           if (!agentMsg.orbit) agentMsg.orbit = [];
           if (t === "start" && agentMsg.orbit.length) return;
+          // 工具调用：清掉 supervisor 先输出的"开场白"残留（如"我来…"），
+          // 避免工具执行期间消息区只有几个字悬停；最终答案会完整覆盖
+          if (t === "tool") agentMsg.content = "";
           const label = orbitLabel(t, ev.content);
           // 同标签去重：后端对同一工具会推送 agent("调用 xxx") + tool("工具: xxx")，
           // 两者解析出的轨道标签相同，避免轨道出现重复节点
