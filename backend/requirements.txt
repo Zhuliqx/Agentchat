@@ -25,8 +25,8 @@ pymilvus>=2.4
 sqlalchemy>=2.0
 psycopg[binary]>=3.1
 
-# ---- MCP（FastMCP 高级 API 在 2.x 被移除，固定 1.x）----
-mcp>=1.2,<2.0
+# ---- MCP（FastMCP 高级 API 在 2.x 被移除，固定 1.x；>=1.9 提供 streamable_http_client 新名）----
+mcp>=1.9,<2.0
 sqlparse>=0.5
 
 # ---- 嵌入 / 文档解析 ----

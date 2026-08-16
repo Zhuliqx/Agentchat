@@ -25,12 +25,9 @@ logger = logging.getLogger(__name__)
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    # mcp 2.x 中函数名为 streamable_http_client；兼容旧版 streamablehttp_client
-    try:
-        from mcp.client.streamable_http import streamable_http_client as make_http_client
-    except ImportError:  # pragma: no cover
-        from mcp.client.streamable_http import streamablehttp_client as make_http_client  # type: ignore
-    from mcp.types import TextContent, Tool as McpTool
+    # mcp >= 1.9 提供 streamable_http_client（旧名 streamablehttp_client 已弃用）
+    from mcp.client.streamable_http import streamable_http_client as make_http_client
+    from mcp.types import Tool as McpTool
 except ImportError:  # pragma: no cover
     logger.warning("mcp SDK 未安装，MCP 功能将不可用")
 
@@ -130,10 +127,12 @@ class McpClientManager:
 
         async def _arun(**kwargs: Any) -> str:
             result = await session.call_tool(mcp_tool.name, arguments=kwargs)
-            parts = []
+            parts: list[str] = []
             for content in result.content:
-                if isinstance(content, TextContent):
-                    parts.append(content.text)
+                # 仅 TextContent 有 text 字段；Image/Audio/Resource 等用 str() 兜底
+                text = getattr(content, "text", None)
+                if text is not None:
+                    parts.append(text)
                 else:
                     parts.append(str(content))
             return "\n".join(parts)
