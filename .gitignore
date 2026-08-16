@@ -17,6 +17,18 @@ models_cache/
 *.local.json
 data/uploads/
 volumes/
+backend/data/
+
+# 前端 / 构建产物
+node_modules/
+frontend-v2/dist/
+dist/
+
+# 静态分析 / 测试缓存
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
 
 # IDE
 .vscode/
