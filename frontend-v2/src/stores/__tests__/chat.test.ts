@@ -68,10 +68,10 @@ describe("chat store", () => {
     expect(chat.messages.length).toBe(2); // 仍是 2 条
     expect(chat.messages[1].content).toBe("答案");
     expect(chat.messages[1].hitl).toBeNull();
-    // 轨道在同一消息内继续，且 start 不重复
+    // 轨道在同一消息内继续，且 start 不重复；同工具标签去重（不出现重复节点）
     const types = chat.messages[1].orbit?.map((n) => n.type) || [];
     expect(types.filter((t) => t === "start").length).toBe(1);
-    expect(types).toEqual(["start", "tool", "tool"]);
+    expect(types).toEqual(["start", "tool"]);
   });
 
   it("assistant message object is reactive (streaming updates must re-render DOM)", async () => {

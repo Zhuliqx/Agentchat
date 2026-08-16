@@ -4,7 +4,7 @@ import { sessionsApi, streamChat } from "@/api";
 import { useSessionsStore } from "./sessions";
 import type { Message, SSEEvent } from "@/types/api";
 
-export type OrbitType = "start" | "tool" | "end" | "error";
+export type OrbitType = "start" | "agent" | "tool" | "end" | "error";
 export interface OrbitNode {
   type: OrbitType;
   label: string;
@@ -219,7 +219,15 @@ export const useChatStore = defineStore("chat", {
           if (!["start", "tool", "end", "error"].includes(t)) return;
           if (!agentMsg.orbit) agentMsg.orbit = [];
           if (t === "start" && agentMsg.orbit.length) return;
-          agentMsg.orbit.push({ type: t, label: orbitLabel(t, ev.content) });
+          const label = orbitLabel(t, ev.content);
+          // 同标签去重：后端对同一工具会推送 agent("调用 xxx") + tool("工具: xxx")，
+          // 两者解析出的轨道标签相同，避免轨道出现重复节点
+          if (
+            (t === "agent" || t === "tool") &&
+            agentMsg.orbit.some((n) => n.label === label)
+          )
+            return;
+          agentMsg.orbit.push({ type: t, label });
         }
       }
     },
