@@ -5,6 +5,7 @@ eval_rag.py 的命中判定 helper。
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -20,8 +21,8 @@ from app.evaluation.judge_llm import (
     jump_to_json,
 )
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+SCRIPTS = Path(__file__).resolve().parent.parent.parent / "scripts"
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
 
 # ---------------- metrics ----------------
@@ -152,3 +153,32 @@ def test_eval_rag_hit_logic():
     assert eval_rag._hit("source", ["company.md"], "C:/uploads/company.md", "") is True
     assert eval_rag._hit("source", ["other.md"], "C:/uploads/company.md", "") is False
     assert eval_rag._hit("keywords", [], "a.md", "任何") is False
+
+
+def test_eval_rag_load_cases_skips_no_source(tmp_path):
+    """GT 中无 expected_sources 的 case 应被跳过，而非退回'问题分词'导致误报。"""
+    sys.path.insert(0, str(SCRIPTS))
+    import eval_rag  # noqa: E402
+
+    gt = tmp_path / "gt.json"
+    gt.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {"id": "a", "question": "q1", "expected_sources": ["x.md"]},
+                    {"id": "b", "question": "q2"},  # 无 sources → 应跳过
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    cases, mode = eval_rag.load_cases(str(gt))
+    assert mode == "source"
+    assert len(cases) == 1 and cases[0]["question"] == "q1"
+
+    # 全部无 sources → 退回内置案例
+    gt2 = tmp_path / "gt2.json"
+    gt2.write_text('{"cases": [{"id": "a", "question": "q1"}]}', encoding="utf-8")
+    cases2, mode2 = eval_rag.load_cases(str(gt2))
+    assert mode2 == "keywords"
+    assert len(cases2) == len(eval_rag.CASES)

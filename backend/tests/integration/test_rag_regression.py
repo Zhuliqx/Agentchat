@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-BACKEND = Path(__file__).resolve().parent.parent
+BACKEND = Path(__file__).resolve().parent.parent.parent
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 KB_DOC = FIXTURES / "kb_ci.txt"
 
 # 检索回归案例：(问题, 期望关键词列表)——基于 kb_ci.txt 内容

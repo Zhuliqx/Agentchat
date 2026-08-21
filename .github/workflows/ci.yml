@@ -29,9 +29,9 @@ jobs:
         continue-on-error: true
 
       # 单元测试：纯逻辑，不依赖 Postgres/Milvus/LLM。
-      # API 集成测试（tests/test_api.py）需 Docker 依赖，CI 中忽略。
+      # 集成测试（tests/integration）需 Docker 依赖，由 rag-regression job 跑。
       - name: "Unit tests (no external services)"
-        run: pytest backend/tests -q --ignore=backend/tests/test_api.py
+        run: pytest backend/tests/unit -q
 
   frontend:
     name: Frontend
@@ -99,5 +99,5 @@ jobs:
 
       - name: "Retrieval regression (hit-rate threshold)"
         working-directory: backend
-        run: pytest tests/test_rag_regression.py -q
+        run: pytest tests/integration/test_rag_regression.py -q
 

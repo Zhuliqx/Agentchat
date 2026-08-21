@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# unit/ 子目录下：__file__ -> unit -> tests -> backend
+# integration/ 子目录下：__file__ -> integration -> tests -> backend
 BACKEND = Path(__file__).resolve().parent.parent.parent
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
