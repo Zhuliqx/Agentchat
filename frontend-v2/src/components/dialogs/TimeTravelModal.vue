@@ -6,6 +6,7 @@ import EmptyState from "@/components/common/EmptyState.vue";
 import { sessionsApi } from "@/api";
 import { useSessionsStore } from "@/stores/sessions";
 import { useChatStore } from "@/stores/chat";
+import { AGENT_META } from "@/utils/agentMeta";
 import type { Checkpoint } from "@/types/api";
 
 const open = defineModel<boolean>({ default: false });
@@ -15,18 +16,9 @@ const list = ref<Checkpoint[]>([]);
 const loading = ref(false);
 const error = ref("");
 
-const NODE_META: Record<string, [string, string]> = {
-  rag_agent: ["doc", "知识库"],
-  mcp_agent: ["db", "数据库/工具"],
-  web_search: ["globe", "联网搜索"],
-  search_agent: ["globe", "联网搜索"], // 兼容旧事件（改名前的历史记录）
-  recall_memory: ["brain", "记忆"],
-  remember_memory: ["brain", "记忆"],
-  request_confirmation: ["warn", "人工确认"],
-};
 function nodeLabel(name: string) {
-  const meta = NODE_META[name];
-  if (meta) return `${meta[1]}`;
+  const meta = AGENT_META[name];
+  if (meta) return meta.label;
   return { model: "思考", tools: "工具", __start__: "开始" }[name] || name;
 }
 

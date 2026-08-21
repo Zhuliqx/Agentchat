@@ -27,18 +27,12 @@ _SCAN_INTERVAL_SEC = 15
 
 def _run_reindex_documents() -> dict:
     """全量重建知识库索引：按 (用户, source) 逐文件重新摄入。"""
-    from sqlalchemy import select
-
-    from app.db.models import Document
-    from app.db.postgres import SessionLocal
-    from app.rag.ingestion import ingest_file
     from pathlib import Path
 
-    with SessionLocal() as db:
-        rows = db.execute(
-            select(Document.user_id, Document.source).distinct()
-        ).all()
-    pairs = [(u, s) for u, s in rows if s]
+    from app.db.postgres import distinct_document_sources
+    from app.rag.ingestion import ingest_file
+
+    pairs = distinct_document_sources()
 
     results = {"sources": len(pairs), "changed": 0, "errors": 0}
     for user_id, source in pairs:
@@ -64,17 +58,11 @@ def _run_vacuum_documents() -> dict:
     """清理源文件已不存在的文档记录（Postgres 行 + Milvus 向量，按用户分组）。"""
     from pathlib import Path
 
-    from sqlalchemy import select
-
     from app.db.models import Document
-    from app.db.postgres import SessionLocal
+    from app.db.postgres import SessionLocal, distinct_document_sources
     from app.rag import vector_store
 
-    with SessionLocal() as db:
-        rows = db.execute(
-            select(Document.user_id, Document.source).distinct()
-        ).all()
-    pairs = [(u, s) for u, s in rows if s]
+    pairs = distinct_document_sources()
 
     removed_ids: list[str] = []
     removed_sources: list[str] = []

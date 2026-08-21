@@ -15,6 +15,7 @@
 - **RAG Agent**：知识库问答（向量检索 + 生成）
 - **MCP Agent**：数据库查询、时间计算、外部工具
 - **web_search**：Tavily 直接联网搜索工具（非子 Agent）
+- **code_agent**：受限沙箱执行 Python（计算 / 算法 / 数据处理）
 - **记忆工具**：三层记忆（短期 / 运行时 / 长期）
 
 数据层：**Milvus**（向量库）+ **PostgreSQL**（关系库）。
@@ -83,8 +84,7 @@ Agentchat/
 │   │   └── schemas/chat.py   #   ChatRequest / Response / AgentEvent
 │   ├── tests/                # pytest 测试（单元 + API 集成，DB 不可达自动跳过）
 │   └── scripts/              # init_db / ingest_docs / smoke_test / MCP 入口
-├── frontend/                 # 旧版纯静态前端（已弃用，保留参考）
-├── frontend-v2/              # 新版前端（Vue 3 + Vite + TS + Tailwind 4）
+├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
 ├── data/
 │   ├── kb/                   # 示例知识库文档
 │   └── uploads/              # 网页上传的原始文件（可下载/预览）
@@ -104,6 +104,7 @@ graph TD
     G -->|工具| RAG[RAG Agent]
     G -->|工具| MCP[MCP Agent]
     G -->|工具| SEARCH[web_search]
+    G -->|工具| CODE[code_agent]
     RAG --> MV[Milvus 向量库]
     MCP --> MCS[自建/外部 MCP 服务器]
     SEARCH --> TAV[Tavily 联网搜索]
@@ -134,7 +135,7 @@ sequenceDiagram
     L->>DB: init_store() → AsyncPostgresStore（无pgvector则降级）
     L->>DB: cleanup_stale_checkpoints() 清孤儿
     L->>M: start_all() 拉起 db / time 两个MCP
-    L->>L: 后台线程预热 rerank 模型
+    L->>L: 后台线程预热 rerank/embedding 模型 + BM25 索引 + Supervisor 图
     Note over L: 应用就绪 → 监听 http://localhost:8000
 ```
 
@@ -161,7 +162,7 @@ sequenceDiagram
     G->>S: graph.astream(stream_mode=["updates","messages"])
     S->>S: LLM 决策
     S-->>FE: updates流 → [工具]/[Agent] 事件
-    S-->>FE: messages流 → token 帧（答案逐字）
+    S-->>FE: messages流 → token 帧（开场白一次性推送 + 答案逐字）
     G-->>C: 返回 answer + used_agents
     C->>DB: 线程池: 保存 assistant 消息
     C-->>FE: SSE: message 帧（最终快照 + session_id）
@@ -178,6 +179,10 @@ sequenceDiagram
 | 7 | 前端实时追加答案 | `frontend-v2: stores/chat.ts + MessageItem` |
 | 8 | 保存回答 + 发最终快照帧 | `chat.py` |
 | 9 | 会话 updated_at 刷新 → 排最前 | `postgres.py` |
+
+> **流式时序细节**：工具调用前的**开场白**会被缓冲（不立即推送），检测到 `tool_call` 时一次性推送完整开场白
+> （`_emit_tool`），随后工具执行（前端轨道光晕）；工具完成后的答案才逐 token 推送，且经 `_PreludeDedupe`
+> **前缀去重**（LLM 常把开场白连同答案一起重新生成，需跳过重复前缀）。无工具的直接回答在流结束时一次性补推。
 
 ---
 
@@ -204,7 +209,7 @@ sequenceDiagram
 
 ### 7.3 Agent 编排 `agents/`
 - `graph.py`：`get_supervisor_graph()`（构建+缓存）、`_build_supervisor_prompt()`（动态提示词）、`_prepare_run()`（输入组装/Time Travel 分叉）、`run_agent()`（非流式）、`stream_agent()`（token 流式）
-- `tools.py`：构建子 Agent、记忆工具（remember 带语义去重）、`agent_to_tool()` 包装
+- `tools.py`：构建子 Agent（rag/mcp/code）、web_search 直接搜索工具、记忆工具（remember 带语义去重）、`request_confirmation` 确认工具、`agent_to_tool()` 包装
 - `llm.py`：LLM 工厂（provider 选择 + 统一超时/重试）
 - `context.py`：`UserContext(user_id)` 运行时上下文
 
@@ -238,9 +243,12 @@ flowchart LR
 | 路由 | 端点 | 职责 |
 |------|------|------|
 | chat | `/api/chat`、`/api/chat/stream` | 非流式 / SSE token 流式 |
-| sessions | `/api/sessions` CRUD + `/batch-delete` + `GET /{id}/checkpoints` | 会话管理 + 历史 + 批量删除（含消息与 checkpoint）+ 版本历史（Time Travel） |
+| sessions | `/api/sessions` CRUD + `/batch-delete` + `GET /{id}/stats` + `GET /{id}/export` + `GET /{id}/checkpoints` | 会话管理 + 历史 + 批量删除 + 数据分析 + 导出 Markdown + 版本历史（Time Travel） |
 | rag | `/upload`、`/documents`、`/documents/file`、`/search` | 上传/列表/预览下载/删除/检索 |
 | memory | `/api/memory` | 长期记忆 CRUD（`?query=` 语义检索）|
+| auth | `/api/auth/register`、`/login`、`/me`、`/stats` | 注册 / 登录 / 当前用户 / 统计 |
+| tasks | `/api/tasks` CRUD + `/registry` + `/{id}/run` | 定时任务管理 + 手动触发 |
+| models | `/api/models`、`/api/models/current` | 可用模型列表 + 运行时切换 |
 | health | `/api/health` | Postgres / Milvus / MCP 健康 |
 
 ### 7.8 前端 `frontend-v2/`（Vue 3 + Vite + TypeScript）
@@ -573,6 +581,8 @@ Checkpointer 每执行一步都会落一个 checkpoint，`parent_checkpoint_id` 
 
 ### 14.2 一次确认的完整时序
 
+> 注：下图描述的是**强制确认模式**（`HITL_ACTIONS` 非空，工具设 `confirm_before`）。默认 **LLM 自主判定**（`HITL_ACTIONS=[]`）时，supervisor 改为主动调用 `request_confirmation` 工具请求授权，机制（`interrupt` + `Command(resume)`）相同。
+
 ```mermaid
 sequenceDiagram
     participant U as 前端
@@ -598,17 +608,17 @@ sequenceDiagram
 
 **1) 强制确认（`app/agents/tools.py`）**
 ```python
-# 子 Agent 工具（rag/mcp）：agent_to_tool._arun
+# 子 Agent 工具（rag/mcp）：agent_to_tool._arun（经共享帮助函数 _confirm_or_cancel）
 async def _arun(query: str) -> str:
     if confirm_before:
-        choice = interrupt({"type": "confirmation", "question": ..., "data": ...})
-        if choice != "confirmed":
+        # _confirm_or_cancel 内部 interrupt 并校验返回是否为 confirmed
+        if not await _confirm_or_cancel(question, data):
             return f"操作已取消：用户未确认调用 {name}。"  # 不执行子 Agent
     result = await agent.ainvoke({"messages": [("user", query)]})
     ...
 ```
 搜索（`build_search_tool`）是**直接 Tavily 工具**，同样支持工具内部 `interrupt` 确认
-（`_make_search_arun`，逻辑与上一致）。
+（`_make_search_arun`，经同一 `_confirm_or_cancel`）。
 `graph.py` 里 `_needs_confirm(action)` 按 `settings.hitl_actions` 决定哪些子 Agent/工具加 `confirm_before=True`。
 **HITL 两种模式**：默认 `HITL_ACTIONS=[]` 为 **LLM 自主判定**（注册 `request_confirmation` 工具，由模型判断
 何时请求授权，类似 Claude Code/Codex）；配置非空时为**强制确认**，且有前端开关的动作
@@ -618,7 +628,7 @@ async def _arun(query: str) -> str:
 当 `HITL_ACTIONS` 为空时注册 `request_confirmation` 工具，supervisor 主动请求确认。
 > 设计取舍：`HITL_ACTIONS` 非空时**不注册**该工具——否则 LLM 可能"先 request_confirmation 再触发 confirm_before"造成双重确认。强制确认更可靠。
 >
-> **可靠性优化**：`_build_supervisor_prompt` 软性分支与工具描述采用**强约束措辞**（"调用 web_search/mcp_agent 之前必须先调用 request_confirmation，绝不要未经确认直接执行"），使 supervisor 对联网搜索/外部工具调用稳定地先请求确认（实测可稳定触发，问题由 supervisor 生成，如"是否同意我进行搜索？"）。
+> **开关即授权**：`_build_supervisor_prompt` 的 LLM 自主判定分支明确约束——**开关已开启的能力（联网 / 知识库 / 记忆）视为已授权，直接执行、绝不请求确认**；`request_confirmation` **仅**用于没有开关控制的高风险 / 外部操作（数据库写入、外部 MCP 调用、不可逆操作等），或用户明确要求确认时。
 
 **3) 恢复链路（`app/api/routes/chat.py` + `graph.py`）**
 - `ChatRequest.resume` 透传到 `run_agent`/`stream_agent`；非空时用 `Command(resume=resume)`，**跳过**保存用户消息（消息已在历史中）。

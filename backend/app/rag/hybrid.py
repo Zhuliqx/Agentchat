@@ -89,10 +89,7 @@ def search_hybrid(
         else settings.rag_score_threshold
     )
     # 按用户隔离的向量过滤表达式
-    filter_expr = None
-    if user_id:
-        uid = user_id.replace('"', '\\"')
-        filter_expr = f'user_id == "{uid}"'
+    filter_expr = vector_store.user_filter_expr(user_id) or None
 
     # 1. 向量通道（Milvus 语义检索，限定用户）
     dense = vector_store.search(

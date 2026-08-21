@@ -1,0 +1,11 @@
+# Docker 构建上下文排除项（backend/）
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/
+.env
+.env.*
+!.env.example
+tests/

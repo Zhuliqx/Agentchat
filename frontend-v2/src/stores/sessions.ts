@@ -34,6 +34,15 @@ export const useSessionsStore = defineStore("sessions", {
       const idx = this.list.findIndex((x) => x.id === id);
       if (idx >= 0) this.list[idx].title = s.title;
     },
+    async pin(id: string, pinned: boolean) {
+      const s = await sessionsApi.pin(id, pinned);
+      const idx = this.list.findIndex((x) => x.id === id);
+      if (idx >= 0) {
+        this.list[idx].pinned = s.pinned;
+        // 置顶排前（稳定排序，非置顶保持原序）
+        this.list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+      }
+    },
     async remove(id: string) {
       await sessionsApi.remove(id);
       this.list = this.list.filter((x) => x.id !== id);

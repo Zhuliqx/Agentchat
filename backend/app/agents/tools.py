@@ -4,12 +4,15 @@
 - MCP Agent：调用 MCP 工具（自建 + 外部）
 - web_search：直接 Tavily 联网搜索工具（非子 Agent）
 - 长期记忆工具：remember_memory / recall_memory（Supervisor 使用）
+- code_agent：受限沙箱执行 Python（受 CODE_AGENT_ENABLED 控制）
+- request_confirmation：HITL 人工确认工具（未配置自动确认动作时注册）
 - agent_to_tool：把子 Agent 包装成工具，供 Supervisor 调用（层级模式）
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import uuid
 from functools import lru_cache
 from pathlib import Path
@@ -36,7 +39,11 @@ RAG_SYSTEM_PROMPT = """你是一个严谨的知识库问答助手。
 3. 如果检索结果不足以回答，明确告知用户"知识库中没有相关信息"，不要猜测或编造。
 4. 回答使用中文，条理清晰；引用来源时标注来源文件（如「来源：company.md」）。
 5. 避免重复罗列相同信息，把相关片段整合成连贯、完整的回答。
-6. 必须调用 search_knowledge_base 工具获取上下文，再作答。"""
+6. 必须调用 search_knowledge_base 工具获取上下文，再作答。
+7. 【归纳推理】当问题明确需要对比、筛选或归纳（如比较两个对象、判断哪个套餐满足条件）时，
+   可综合多个检索块中分散的信息推理作答；但若检索内容完全无法支撑答案，必须如实说
+   "知识库中没有相关信息"，**禁止为凑出答案而把不同来源的信息强行拼凑**（如把 A 产品
+   规则套用到 B 产品）。普通事实型问题直接给出准确信息即可，不要额外扩展。"""
 
 MCP_SYSTEM_PROMPT = """你是一个工具调用专家，负责使用 MCP 工具完成用户请求。
 
@@ -72,13 +79,19 @@ def _format_search_results(raw: Any) -> str:
 
 
 def _get_tavily_search_tool() -> Any:
-    """返回（并缓存）Tavily 搜索工具实例。"""
+    """返回 Tavily 搜索工具实例。"""
     from langchain_tavily import TavilySearch
 
     return TavilySearch(
         tavily_api_key=settings.tavily_api_key,
         max_results=settings.tavily_max_results,
     )
+
+
+async def _confirm_or_cancel(question: str, data: dict) -> bool:
+    """HITL：interrupt 请求用户确认，返回是否继续（confirmed 才继续）。"""
+    choice = interrupt({"type": "confirmation", "question": question, "data": data})
+    return choice == "confirmed"
 
 
 def _make_search_arun(tool: Any, confirm_before: bool):
@@ -92,14 +105,10 @@ def _make_search_arun(tool: Any, confirm_before: bool):
 
     async def _arun(query: str) -> str:
         if confirm_before:
-            choice = interrupt(
-                {
-                    "type": "confirmation",
-                    "question": f"确认进行联网搜索：{query[:80]}{'…' if len(query) > 80 else ''}？",
-                    "data": {"action": "web_search", "query": query},
-                }
-            )
-            if choice != "confirmed":
+            if not await _confirm_or_cancel(
+                f"确认进行联网搜索：{query[:80]}{'…' if len(query) > 80 else ''}？",
+                {"action": "web_search", "query": query},
+            ):
                 return "操作已取消：用户未确认联网搜索。"
         try:
             return _format_search_results(await _invoke(query))
@@ -160,7 +169,7 @@ CODE_SYSTEM_PROMPT = """你是一个 Python 代码专家，负责编写并执行
 @lru_cache(maxsize=1)
 def build_rag_agent():
     """构建 RAG 子 Agent（检索工具 + LLM）。缓存，避免不同开关组合重复构建。"""
-    from langchain.agents import create_agent  # 延迟导入：避免启动时加载 langchain.agents（含 torch/transformers）
+    from langchain.agents import create_agent
 
     return create_agent(
         get_llm("light"),  # 子 Agent 用轻量模型（配置了 LLM_LIGHT_MODEL 时）
@@ -176,11 +185,28 @@ class _RagQuery(BaseModel):
     query: str = Field(description="要检索知识库的用户问题")
 
 
+# ---- 引用溯源：最近一次知识库检索命中的来源（按 user_id 单槽） ----
+# 检索工具执行后写入，Supervisor 发 tool 事件时读取附加到 data.sources。
+_RAG_SOURCES: dict[str, list[str]] = {}
+_RAG_SOURCES_LOCK = threading.Lock()
+
+
+def _record_rag_sources(user_id: str, sources: list[str]) -> None:
+    with _RAG_SOURCES_LOCK:
+        _RAG_SOURCES[user_id] = list(sources)
+
+
+def get_recent_rag_sources(user_id: str) -> list[str]:
+    with _RAG_SOURCES_LOCK:
+        return list(_RAG_SOURCES.get(user_id, []))
+
+
 def _build_search_knowledge_base_tool() -> StructuredTool:
     """知识库检索工具（按用户隔离）。
 
     从 LangGraph 运行时上下文读取当前 user_id，只检索该用户的知识库，
     避免跨用户泄露文档内容（与 remember/recall 记忆工具同一机制）。
+    检索命中的来源会记录到 _RAG_SOURCES（按 user_id），供前端「引用溯源」展示。
     """
 
     async def _arun(query: str) -> str:
@@ -191,11 +217,16 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
             docs = await asyncio.to_thread(retriever.invoke, query)
             if not docs:
                 return "知识库中没有检索到相关内容。"
+            sources: list[str] = []
             parts = []
             for i, d in enumerate(docs, 1):
                 src = d.metadata.get("source", "")
                 name = Path(src).name if src else ""
+                if src and src not in sources:
+                    sources.append(src)
                 parts.append(f"[{i}] 来源: {name}\n{d.page_content}")
+            # 记录最近检索来源（供引用溯源）
+            _record_rag_sources(user, sources)
             return "\n\n".join(parts)
         except Exception as exc:
             return f"知识库检索失败: {exc}"
@@ -211,7 +242,7 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
 @lru_cache(maxsize=1)
 def build_mcp_agent():
     """构建 MCP 子 Agent（当前已连接的所有 MCP 工具 + LLM）。缓存。"""
-    from langchain.agents import create_agent  # 延迟导入：避免启动时加载 langchain.agents（含 torch/transformers）
+    from langchain.agents import create_agent
 
     mcp_tools = get_mcp_manager().get_langchain_tools()
     return create_agent(
@@ -233,7 +264,7 @@ class _CodeExecQuery(BaseModel):
 @lru_cache(maxsize=1)
 def build_code_agent():
     """构建代码 Agent（受限执行 Python + LLM）。缓存。"""
-    from langchain.agents import create_agent  # 延迟导入：避免启动时加载 langchain.agents
+    from langchain.agents import create_agent
 
     return create_agent(
         get_llm("light"),
@@ -338,7 +369,7 @@ def build_remember_tool() -> StructuredTool:
 
 
 def build_recall_tool() -> StructuredTool:
-    """读取当前用户的长期记忆（从 LangGraph Store，优先语义检索）。"""
+    """读取当前用户的长期记忆（从 LangGraph Store 全量列出，最多 50 条）。"""
 
     async def _arun(unused: Optional[str] = None) -> str:
         try:
@@ -422,14 +453,10 @@ def agent_to_tool(
 
     async def _arun(query: str) -> str:
         if confirm_before:
-            choice = interrupt(
-                {
-                    "type": "confirmation",
-                    "question": f"确认调用 {name} 处理：{query[:80]}{'…' if len(query) > 80 else ''}？",
-                    "data": {"action": name, "query": query},
-                }
-            )
-            if choice != "confirmed":
+            if not await _confirm_or_cancel(
+                f"确认调用 {name} 处理：{query[:80]}{'…' if len(query) > 80 else ''}？",
+                {"action": name, "query": query},
+            ):
                 return f"操作已取消：用户未确认调用 {name}。"
         # 子 Agent 调用容错：失败按退避重试（subagent_retries 次）
         retries = settings.subagent_retries
@@ -438,10 +465,9 @@ def agent_to_tool(
             try:
                 result = await agent.ainvoke({"messages": [("user", query)]})
                 messages = result["messages"]
-                for msg in reversed(messages):
-                    if getattr(msg, "type", "") == "ai":
-                        return extract_text(msg.content)
-                return extract_text(getattr(messages[-1], "content", str(messages[-1])))
+                return last_ai_text(messages) or extract_text(
+                    getattr(messages[-1], "content", str(messages[-1]))
+                )
             except Exception as exc:
                 last_exc = exc
                 if attempt < retries:
@@ -469,3 +495,11 @@ def extract_text(content: Any) -> str:
                 parts.append(block)
         return "\n".join(parts)
     return str(content)
+
+
+def last_ai_text(messages: list) -> str:
+    """逆序取最后一条 AI 消息的文本（无则空串）。"""
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "ai":
+            return extract_text(getattr(msg, "content", ""))
+    return ""

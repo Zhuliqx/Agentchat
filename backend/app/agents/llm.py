@@ -15,20 +15,15 @@ from __future__ import annotations
 import json
 import logging
 from functools import lru_cache
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app.config import settings
+from app.config import BASE_DIR, settings
 
 logger = logging.getLogger(__name__)
 
-# 项目根（backend/）：与 app/config.py 的 BASE_DIR 一致
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # 运行时模型选择持久化文件（data/ 已 gitignore）
 MODEL_CHOICE_FILE = BASE_DIR / "data" / "model_choice.json"
 
-# 仅类型注解用（`from __future__ import annotations` 下运行时不会求值）；
-# 顶层导入会连锁引入 torch/transformers（约 9s），故改为 TYPE_CHECKING 延迟。
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 

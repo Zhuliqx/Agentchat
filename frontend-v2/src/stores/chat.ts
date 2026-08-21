@@ -2,6 +2,8 @@ import { defineStore } from "pinia";
 import { reactive } from "vue";
 import { sessionsApi, streamChat } from "@/api";
 import { useSessionsStore } from "./sessions";
+import { useChatOptionsStore } from "./chatOptions";
+import { AGENT_META } from "@/utils/agentMeta";
 import type { Message, SSEEvent } from "@/types/api";
 
 export type OrbitType = "start" | "agent" | "tool" | "end" | "error";
@@ -18,6 +20,8 @@ export interface ChatMsg {
   streaming?: boolean;
   orbit?: OrbitNode[];
   hitl?: { question: string; sessionId: string } | null;
+  backendId?: string; // 后端 messages.id（用于删除/定位）
+  sources?: string[]; // 引用溯源：RAG 检索命中的文档来源
 }
 
 export interface SendOptions {
@@ -27,16 +31,7 @@ export interface SendOptions {
   checkpointId?: string; // Time Travel 分叉起点
 }
 
-const ORBIT_META: Record<string, [string, string]> = {
-  rag_agent: ["📚", "知识库"],
-  mcp_agent: ["🗄", "数据库/工具"],
-  web_search: ["🌐", "联网搜索"],
-  search_agent: ["🌐", "联网搜索"], // 兼容旧事件（改名前的历史记录）
-  recall_memory: ["🧠", "记忆"],
-  remember_memory: ["🧠", "记忆"],
-  request_confirmation: ["⚠️", "人工确认"],
-};
-const ORBIT_NAME_RE = new RegExp(Object.keys(ORBIT_META).join("|"));
+const ORBIT_NAME_RE = new RegExp(Object.keys(AGENT_META).join("|"));
 
 let uid = 0;
 const nid = () => `m${Date.now()}_${uid++}`;
@@ -47,7 +42,7 @@ function orbitLabel(type: OrbitType, text: string): string {
   if (type === "error") return "错误";
   const m = String(text || "").match(ORBIT_NAME_RE);
   const name = m ? m[0] : null;
-  if (name && ORBIT_META[name]) return `${name} · ${ORBIT_META[name][1]}`;
+  if (name && AGENT_META[name]) return `${name} · ${AGENT_META[name].label}`;
   return name || String(text || "").slice(0, 18);
 }
 
@@ -58,6 +53,8 @@ export const useChatStore = defineStore("chat", {
     abortController: null as AbortController | null,
     // HITL：interrupt 时记录所在消息 id，确认后在同一个气泡/轨道内继续
     hitlMsgId: null as string | null,
+    // 正在发送的用户消息（SSE meta 帧回填其后端 id）
+    pendingUserMsg: null as ChatMsg | null,
   }),
   getters: {
     lastAssistant: (s): ChatMsg | null => {
@@ -74,8 +71,10 @@ export const useChatStore = defineStore("chat", {
       msgs.forEach((m: Message) => {
         this.messages.push({
           id: nid(),
+          backendId: m.id,
           role: m.role === "user" ? "user" : "assistant",
           content: m.content,
+          sources: m.sources,
         });
       });
     },
@@ -84,20 +83,52 @@ export const useChatStore = defineStore("chat", {
       this.hitlMsgId = null;
     },
 
+    /** 最后一条用户消息（无则 null）。 */
+    findLastUserMsg(): ChatMsg | null {
+      for (let i = this.messages.length - 1; i >= 0; i--) {
+        if (this.messages[i].role === "user") return this.messages[i];
+      }
+      return null;
+    },
+
+    /** 统一构建 chat/stream 请求 payload。
+     * 未显式传开关时，默认取当前 chatOptions 开关状态（而非硬编码 true），
+     * 确保建议按钮（ask→send(q)）等未传 opts 的路径也遵守用户关闭的开关，
+     * 否则关闭联网后点建议按钮仍会带 use_search=true。 */
+    _buildPayload(
+      sessionId: string,
+      message: string,
+      opts: {
+        useRag?: boolean;
+        useSearch?: boolean;
+        useMemory?: boolean;
+        resume?: "confirmed" | "cancelled";
+        checkpointId?: string;
+      } = {}
+    ): Record<string, unknown> {
+      const options = useChatOptionsStore();
+      const payload: Record<string, unknown> = {
+        session_id: sessionId,
+        message,
+        use_rag: opts.useRag ?? options.useRag,
+        use_search: opts.useSearch ?? options.useSearch,
+        use_memory: opts.useMemory ?? options.useMemory,
+      };
+      if (opts.resume) payload.resume = opts.resume;
+      if (opts.checkpointId) payload.checkpoint_id = opts.checkpointId;
+      return payload;
+    },
+
     /** 发送消息（SSE 流式）。fromModal 用于 Time Travel 分叉等程序化发送。 */
     async send(text: string, opts: SendOptions = {}) {
       if (this.sending || !text.trim()) return;
       const sessions = useSessionsStore();
-      const payload: Record<string, unknown> = {
-        session_id: sessions.currentId,
-        message: text,
-        use_rag: opts.useRag ?? true,
-        use_search: opts.useSearch ?? true,
-        use_memory: opts.useMemory ?? true,
-      };
-      if (opts.checkpointId) payload.checkpoint_id = opts.checkpointId;
+      const payload = this._buildPayload(sessions.currentId, text, opts);
 
       this.messages.push({ id: nid(), role: "user", content: text });
+      // 记录待回填后端 id 的用户消息（SSE meta 帧到达时写入 backendId）
+      const userMsg = this.messages[this.messages.length - 1];
+      this.pendingUserMsg = userMsg;
       // reactive 包装：_handleEvent 通过闭包修改该对象时能触发渲染
       const agentMsg: ChatMsg = reactive({
         id: nid(),
@@ -111,13 +142,13 @@ export const useChatStore = defineStore("chat", {
       this.hitlMsgId = null;
 
       await this._runStream(payload, agentMsg);
+      this.pendingUserMsg = null;
     },
 
     /** HITL：确认/取消后在同一气泡/轨道内继续（不新建气泡） */
     async resume(choice: "confirmed" | "cancelled", sessionId: string) {
       if (this.sending) return;
-      const pending = this.messages.find((m) => m.role === "user" && !m.streaming);
-      const userMsg = [...this.messages].reverse().find((m) => m.role === "user");
+      const userMsg = this.findLastUserMsg();
       if (!userMsg) return;
       // 复用 interrupt 时的消息（仍在 DOM/列表里）
       const agentMsg = this.hitlMsgId
@@ -131,19 +162,32 @@ export const useChatStore = defineStore("chat", {
       target.streaming = true;
       this.hitlMsgId = null;
 
-      const payload: Record<string, unknown> = {
-        session_id: sessionId,
-        message: userMsg.content,
-        use_rag: true,
-        use_search: true,
+      const payload = this._buildPayload(sessionId, userMsg.content, {
         resume: choice,
-      };
+      });
       await this._runStream(payload, target);
     },
 
     /** 停止生成 */
     stop() {
       this.abortController?.abort();
+    },
+
+    /** 删除消息：调用后端删除后本地移除（无后端 id 时仅本地移除）。 */
+    async deleteMessage(msg: ChatMsg) {
+      const sessions = useSessionsStore();
+      const idx = this.messages.findIndex((m) => m.id === msg.id);
+      if (idx < 0) return;
+      if (msg.backendId && sessions.currentId) {
+        try {
+          await sessionsApi.deleteMessage(sessions.currentId, msg.backendId);
+        } catch (e) {
+          alert(`删除失败：${(e as Error).message}`);
+          return;
+        }
+      }
+      this.messages.splice(idx, 1);
+      if (this.hitlMsgId === msg.id) this.hitlMsgId = null;
     },
 
     /** 重试：删除该助手消息及其前面的用户问题，截断后续消息后重新发送该问题 */
@@ -165,6 +209,19 @@ export const useChatStore = defineStore("chat", {
       this.messages.splice(start, this.messages.length - start);
       this.hitlMsgId = null;
       await this.send(userMsg.content);
+    },
+
+    /** 编辑重发：替换用户消息文本，截断其后所有消息后重新发送 */
+    async editAndResend(userMsg: ChatMsg, newText: string) {
+      if (this.sending) return;
+      const text = newText.trim();
+      if (!text) return;
+      const start = this.messages.indexOf(userMsg);
+      if (start < 0) return;
+      userMsg.content = text;
+      this.messages.splice(start + 1, this.messages.length - start - 1);
+      this.hitlMsgId = null;
+      await this.send(text);
     },
 
     async _runStream(payload: Record<string, unknown>, agentMsg: ChatMsg) {
@@ -208,6 +265,14 @@ export const useChatStore = defineStore("chat", {
             sessions.load(); // 刷新标题（首条用户消息生成标题）
           }
           agentMsg.content = ev.content;
+          if (ev.data?.message_id) agentMsg.backendId = ev.data.message_id as string;
+          break;
+        }
+        case "meta": {
+          // 回填用户消息的后端 id（供删除）
+          if (this.pendingUserMsg && ev.data?.user_message_id) {
+            this.pendingUserMsg.backendId = ev.data.user_message_id as string;
+          }
           break;
         }
         case "interrupt": {
@@ -236,6 +301,10 @@ export const useChatStore = defineStore("chat", {
             // 新工具调用：前一个停止闪烁，当前节点开始闪烁（执行中）
             agentMsg.orbit.forEach((n) => (n.active = false));
             agentMsg.orbit.push({ type: t, label, active: true });
+            // 引用溯源：收集 RAG 检索命中的文档来源
+            if (Array.isArray(ev.data?.sources) && ev.data.sources.length) {
+              agentMsg.sources = ev.data.sources as string[];
+            }
           } else {
             agentMsg.orbit.push({ type: t, label });
           }

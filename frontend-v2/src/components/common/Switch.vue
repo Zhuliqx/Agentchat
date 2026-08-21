@@ -20,7 +20,7 @@ const emit = defineEmits<{ "update:modelValue": [v: boolean] }>();
       "
     >
       <span
-        class="absolute top-[2px] h-[10px] w-[10px] rounded-full transition-all"
+        class="absolute top-1/2 h-[10px] w-[10px] -translate-y-1/2 rounded-full transition-all"
         :class="modelValue ? 'left-[14px] bg-white' : 'left-[2px] bg-ink-faint'"
       />
     </span>

@@ -19,7 +19,7 @@
   - 运行时上下文（仅当次调用）：**`context_schema=UserContext`** + `context=` 传入，不持久化，工具经 `Runtime` 访问
   - 长期记忆（跨会话）：**Store**（`AsyncPostgresStore`）按 namespace 持久化，Agent 经 `remember_memory` / `recall_memory` 读写，前端记忆面板管理
   - 支持**语义检索**（pgvector 索引）与**写入去重**（相似记忆合并覆盖）
-- **流式输出（SSE）**：`POST /api/chat/stream` **token 级流式**——Agent 调度事件实时推送，supervisor 的答案逐 token 推送，前端实时渲染；同步 DB 调用放线程池，不阻塞事件循环
+- **流式输出（SSE）**：`POST /api/chat/stream` **token 级流式**——Agent 调度事件实时推送，工具调用前先一次性推送完整开场白、工具完成后的答案逐 token 推送（自动去重重复前缀），前端实时渲染；同步 DB 调用放线程池，不阻塞事件循环
 - **人工确认（HITL）**：基于 LangGraph `interrupt`/`Command(resume)` 机制，前端弹出确认卡片，用户确认/取消后从断点继续（同一 `thread_id`）。**默认 LLM 自主判定**（类似 Claude Code/Codex）：由模型根据操作影响自主决定是否请求用户授权（`request_confirmation` 工具）；也可配置 `HITL_ACTIONS` 切换为**强制确认**（调用前无条件中断；有开关的动作在开关打开时自动豁免）
 - **版本历史（Time Travel）**：基于 Checkpointer 的 checkpoint 版本链，前端可查看会话**每一步的历史状态**（时间线 + 摘要），并**从任意历史步骤分叉重新生成**（产生新分支，不影响原历史）；`GET /api/sessions/{id}/checkpoints` 拉取历史，`/api/chat(/stream)` 传 `checkpoint_id` 触发分叉
 - **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未登录访客自动归入 `default` 用户（不破坏单用户体验）；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
@@ -70,8 +70,7 @@ Agentchat/
 │   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / verify_auth_tasks / MCP 服务器入口
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/                 # 旧版纯静态前端（已弃用，保留参考）
-├── frontend-v2/              # 新版前端（Vue 3 + Vite + TS + Tailwind 4）
+├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
 ├── data/
 │   ├── kb/                   # 示例知识库文档
 │   └── uploads/              # 网页上传的原始文件（自动生成，可下载/预览）
@@ -201,7 +200,7 @@ CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类
 
 ## 🧩 其他建议（后续可扩展）
 
-- **更多 Agent**：添加代码 Agent 等，只需在 supervisor 里注册新工具
+- **更多 Agent**：注册新工具即可扩展（现有 rag / mcp / code / web_search / 记忆工具，见 `backend/app/agents/tools.py`）
 - **可观测性**：接入 LangSmith / Langfuse 追踪 Agent 调用链
 - **记忆语义检索**：`docker-compose.yml` 已用 pgvector 镜像；若你仍在使用旧的 `postgres:16` 容器，重建（`docker compose down && up -d`，数据卷保留）即可启用长期记忆语义检索（当前自动降级为关键词检索）
 - **认证加固**：接入 OAuth / 企业 SSO；为 `default` 访客用户设置密码；给 API 加速率限制

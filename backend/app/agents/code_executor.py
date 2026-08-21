@@ -21,10 +21,8 @@ import sys
 import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
-# 项目根目录（供子进程定位 app 包）：code_executor.py -> agents -> app -> backend
-_BACKEND_DIR = Path(__file__).resolve().parents[2]
+from app.config import BASE_DIR as _BACKEND_DIR
 
 # 允许暴露给代码的安全内置子集（纯计算/常用工具，无 IO/系统能力）
 _ALLOWED_BUILTIN_NAMES = frozenset(

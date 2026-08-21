@@ -124,6 +124,7 @@ def cleanup_stale_checkpoints(thread_ids: list[str] | None = None) -> int:
 
     - thread_ids 给定：定向清理这些线程的 checkpoint（删除会话后调用，避免全表扫）。
     - 否则：全量清理（启动时调用一次）。
+    返回 0 表示成功、-1 表示失败（注意：非实际清理条数）。
     """
     try:
         from sqlalchemy import text as _text

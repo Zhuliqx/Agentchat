@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.db import postgres
 from app.scheduler import TASK_REGISTRY, compute_next_run
+
+_SCHEDULE_ERROR = "调度表达式非法（支持 interval:<秒> 或 cron:<分钟>）"
 
 router = APIRouter()
 
@@ -30,11 +32,25 @@ class TaskIn(BaseModel):
     task_type: str = Field(..., min_length=1, max_length=64)
     schedule: str = Field(default="interval:3600", max_length=64)
 
+    @field_validator("schedule")
+    @classmethod
+    def _valid_schedule(cls, v: str) -> str:
+        if compute_next_run(v) is None:
+            raise ValueError(_SCHEDULE_ERROR)
+        return v
+
 
 class TaskPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     schedule: str | None = Field(default=None, max_length=64)
     enabled: bool | None = None
+
+    @field_validator("schedule")
+    @classmethod
+    def _valid_schedule(cls, v: str | None) -> str | None:
+        if v is not None and compute_next_run(v) is None:
+            raise ValueError(_SCHEDULE_ERROR)
+        return v
 
 
 def _out(t) -> TaskOut:
@@ -72,8 +88,6 @@ def list_tasks():
 def create_task(body: TaskIn):
     if body.task_type not in TASK_REGISTRY:
         raise HTTPException(400, f"未知任务类型: {body.task_type}")
-    if compute_next_run(body.schedule) is None:
-        raise HTTPException(400, "调度表达式非法（支持 interval:<秒> 或 cron:<分钟>）")
     t = postgres.create_task(body.name, body.task_type, body.schedule)
     postgres.mark_task_result(t.id, "", None, compute_next_run(body.schedule))
     return _out(t)
@@ -81,8 +95,6 @@ def create_task(body: TaskIn):
 
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(task_id: str, body: TaskPatch):
-    if body.schedule is not None and compute_next_run(body.schedule) is None:
-        raise HTTPException(400, "调度表达式非法（支持 interval:<秒> 或 cron:<分钟>）")
     t = postgres.update_task(task_id, name=body.name, schedule=body.schedule, enabled=body.enabled)
     if not t:
         raise HTTPException(404, "任务不存在")

@@ -10,7 +10,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
+PROJECT_ROOT = BASE_DIR.parent  # 项目根（Agentchat/）
 
 
 class Settings(BaseSettings):
@@ -109,7 +110,7 @@ class Settings(BaseSettings):
     rag_top_k: int = 4
     rag_score_threshold: float = 0.35
     # 检索去重：同一文档(source)最多保留的块数（去重 + 相邻块合并后），释放 Top-K 给更多文档
-    rag_max_per_doc: int = 2
+    rag_max_per_doc: int = 3
     # 上下文压缩：传给 LLM 的单个块最大字符数（超长截断，减少噪音 token）
     rag_max_chunk_chars: int = 1500
     chunk_size: int = 800
@@ -166,10 +167,12 @@ class Settings(BaseSettings):
     # 生产环境务必在 .env 中设置强随机 auth_secret（≥32 字节）；默认值仅用于本地开发，
     # 使 token 在后端重启后仍有效（临时密钥会导致每次重启全部登出）。
     auth_secret: str = "dev-secret-change-me-in-env-0123456789abcdef"
-    # token 有效期（分钟），默认 7 天
+    # 预留：token 有效期（分钟）。注意 create_token 当前未签发 exp，此配置暂未生效
     token_expire_minutes: int = 60 * 24 * 7
     # 未登录访客使用的默认用户 id（保持现有单用户体验不破坏）
     guest_user_id: str = "default"
+    # 管理员用户名（逗号分隔，如 "admin,zhangsan"）；命中者可在管理后台查看/删除用户
+    admin_usernames: str = ""
 
     @property
     def milvus_connection_uri(self) -> str:

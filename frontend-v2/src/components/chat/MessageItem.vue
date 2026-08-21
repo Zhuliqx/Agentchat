@@ -4,8 +4,10 @@ import { useThrottleFn } from "@vueuse/core";
 import { useChatStore, type ChatMsg } from "@/stores/chat";
 import { md } from "@/utils/markdown";
 import { useAuthStore } from "@/stores/auth";
+import { docsApi } from "@/api";
 import OrbitFlow from "./OrbitFlow.vue";
 import Icon from "@/components/common/Icon.vue";
+import { avatarColor } from "@/utils/avatar";
 
 const props = defineProps<{ msg: ChatMsg }>();
 const chat = useChatStore();
@@ -46,6 +48,28 @@ function confirmHitl(choice: "confirmed" | "cancelled") {
   const sessionId = props.msg.hitl?.sessionId || "";
   chat.resume(choice, sessionId);
 }
+
+const editing = ref(false);
+const editText = ref("");
+function startEdit() {
+  editText.value = props.msg.content;
+  editing.value = true;
+}
+function cancelEdit() {
+  editing.value = false;
+}
+function saveEdit() {
+  const text = editText.value.trim();
+  if (!text) return;
+  chat.editAndResend(props.msg, text);
+  editing.value = false;
+}
+
+function deleteMsg() {
+  if (chat.sending) return;
+  if (!confirm("确定删除这条消息？")) return;
+  chat.deleteMessage(props.msg);
+}
 </script>
 
 <template>
@@ -58,7 +82,7 @@ function confirmHitl(choice: "confirmed" | "cancelled") {
       class="mt-0.5 grid h-7 w-7 flex-shrink-0 place-items-center rounded-full text-[11px]"
       :class="
         msg.role === 'user'
-          ? 'bg-accent/18 font-semibold text-accent'
+          ? avatarColor(auth.user).bg + ' font-semibold ' + avatarColor(auth.user).text
           : 'border border-line-2 bg-surface-2 text-ink-faint'
       "
     >
@@ -71,9 +95,59 @@ function confirmHitl(choice: "confirmed" | "cancelled") {
       <!-- 用户消息 -->
       <div
         v-if="msg.role === 'user'"
-        class="rounded-2xl rounded-tr-md border border-line bg-surface-2 px-4 py-2.5 text-[13.5px] leading-relaxed"
+        class="group/user relative rounded-2xl rounded-tr-md border px-4 py-2.5 text-[13.5px] leading-relaxed transition"
+        :class="editing ? 'border-accent/40 bg-surface' : 'border-line bg-surface-2'"
       >
-        <div class="md" v-html="md.render(msg.content)" />
+        <!-- 编辑态：就地改写问题 -->
+        <template v-if="editing">
+          <textarea
+            v-model="editText"
+            rows="3"
+            class="w-full resize-y rounded-xl border border-line-2 bg-surface px-3.5 py-2.5 text-[13.5px] leading-relaxed text-ink outline-none transition placeholder:text-ink-faint/70 focus:border-accent focus:ring-2 focus:ring-accent/15"
+          />
+          <div class="mt-2.5 flex items-center justify-between gap-2">
+            <span class="text-[11px] text-ink-faint">修改后将从此处重新生成回复</span>
+            <div class="flex gap-2">
+              <button
+                class="h-8 rounded-lg border border-line-2 px-3.5 text-[12.5px] text-ink-dim transition hover:border-line hover:text-ink active:scale-[0.98]"
+                @click="cancelEdit"
+              >
+                取消
+              </button>
+              <button
+                class="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-[12.5px] font-medium text-white transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                :disabled="chat.sending || !editText.trim()"
+                @click="saveEdit"
+              >
+                <Icon name="send" :size="13" />
+                保存并重发
+              </button>
+            </div>
+          </div>
+        </template>
+        <!-- 普通态：内容 + hover 编辑/删除按钮 -->
+        <template v-else>
+          <div class="md" v-html="md.render(msg.content)" />
+          <div
+            v-if="!chat.sending"
+            class="absolute -left-8 top-0.5 flex flex-col gap-0.5 opacity-0 transition group-hover/user:opacity-100"
+          >
+            <button
+              class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
+              title="编辑并重新发送"
+              @click="startEdit"
+            >
+              <Icon name="edit" :size="13" />
+            </button>
+            <button
+              class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err"
+              title="删除消息"
+              @click="deleteMsg"
+            >
+              <Icon name="trash" :size="13" />
+            </button>
+          </div>
+        </template>
       </div>
 
       <!-- 助手消息 -->
@@ -108,6 +182,22 @@ function confirmHitl(choice: "confirmed" | "cancelled") {
         <!-- Agent 编排轨道 -->
         <OrbitFlow v-if="msg.orbit?.length" :nodes="msg.orbit" :streaming="msg.streaming" />
 
+        <!-- 引用溯源：RAG 检索命中的文档来源 -->
+        <div v-if="msg.sources?.length" class="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span class="text-[10.5px] text-ink-faint">来源</span>
+          <a
+            v-for="(s, i) in msg.sources"
+            :key="i"
+            :href="docsApi.fileUrl(s)"
+            target="_blank"
+            rel="noreferrer"
+            class="max-w-[200px] truncate rounded-full border border-line-2 px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:border-accent/50 hover:text-accent"
+            :title="s"
+          >
+            {{ s.split("/").pop() }}
+          </a>
+        </div>
+
         <!-- 操作按钮：复制 / 重新生成 -->
         <div v-if="!msg.streaming && msg.content" class="mt-1 flex items-center gap-0.5">
           <button
@@ -125,6 +215,14 @@ function confirmHitl(choice: "confirmed" | "cancelled") {
             @click="chat.retry(msg)"
           >
             <Icon name="refresh" :size="13" />
+          </button>
+          <button
+            class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err disabled:cursor-not-allowed disabled:opacity-40"
+            title="删除消息"
+            :disabled="chat.sending"
+            @click="deleteMsg"
+          >
+            <Icon name="trash" :size="13" />
           </button>
         </div>
       </div>

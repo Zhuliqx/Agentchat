@@ -26,11 +26,7 @@ _resilience_middleware: Any | None = None
 
 
 def resilience_middleware(timeout: float | None = None) -> Any:
-    """返回「超时 / 日志」的模型调用中间件（全局单例，配置一致性 + 复用）。
-
-    类定义与 `AgentMiddleware` 基类延迟到首次调用才导入——避免启动时加载
-    `langchain.agents`（其会连锁引入 `transformers` / `torch`，约 9s）。
-    """
+    """返回「超时 / 日志」的模型调用中间件（全局单例，配置一致性 + 复用）。"""
     global _resilience_middleware
     if _resilience_middleware is None:
         from langchain.agents.middleware import AgentMiddleware

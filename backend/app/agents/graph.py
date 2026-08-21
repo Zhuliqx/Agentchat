@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
 from langchain_core.caches import InMemoryCache
@@ -40,6 +41,8 @@ from app.agents.tools import (
     build_remember_tool,
     build_search_tool,
     extract_text,
+    get_recent_rag_sources,
+    last_ai_text,
 )
 from app.config import settings
 from app.db.memory_store import get_checkpointer, get_store
@@ -47,6 +50,45 @@ from app.db.memory_store import get_checkpointer, get_store
 
 class AgentTimeoutError(Exception):
     """单轮对话执行超时。"""
+
+
+class _PreludeDedupe:
+    """流式去重：跳过与"已推送开场白"匹配的前缀。
+
+    工具调用后，LLM 常把开场白连同最终答案一起重新生成（完整重复一遍）。
+    由于流式输出按小分块到达（首个分块往往只是开场白的一小段前缀），
+    不能直接 `text.startswith(整段开场白)` 判断（首个分块永远不等于整段开场白，
+    导致去重失败、完整重复）。这里按字符逐块前缀匹配：
+
+    - 分块完全属于开场白前缀 → 丢弃（开场白已推送过）；
+    - 一旦出现分歧 → 只推送分歧后的部分，之后不再去重；
+    - 完全没重复 → 首个字符即分歧，原样推送（无额外延迟）。
+    """
+
+    __slots__ = ("expected", "matched")
+
+    def __init__(self, expected: str):
+        self.expected = expected or ""
+        self.matched = 0
+
+    @property
+    def active(self) -> bool:
+        return self.matched < len(self.expected)
+
+    def feed(self, text: str) -> str:
+        """输入一个 token 分块，返回应推送的文本（可能为空串）。"""
+        if self.matched >= len(self.expected):
+            return text
+        i, j = self.matched, 0
+        n = len(text)
+        while j < n and i < len(self.expected) and text[j] == self.expected[i]:
+            j += 1
+            i += 1
+        self.matched = i
+        if j < n:
+            self.matched = len(self.expected)  # 出现分歧：之后直接推送
+            return text[j:]
+        return ""
 
 
 def _build_supervisor_prompt(
@@ -112,6 +154,12 @@ def _build_supervisor_prompt(
     if use_search:
         rules.append(f"{rn}. 需要实时资讯/最新信息/新闻 -> 调用 web_search。")
         rn += 1
+    else:
+        rules.append(
+            f"{rn}. **联网搜索已关闭**：禁止调用 web_search，也不要声称\"联网搜索\""
+            "或\"获取了最新资讯\"；不要编造实时新闻/信息，直接说明当前无法联网获取最新资讯。"
+        )
+        rn += 1
     if use_memory:
         rules.append(
             f"{rn}. 用户提供个人信息、偏好，或说\"记住/我叫/我的名字/我喜欢\"时，"
@@ -160,6 +208,9 @@ def _build_supervisor_prompt(
         + "\n".join(rules)
     )
 
+
+# 参与 used_agents 统计的 Agent 工具名（web_search 为直接工具；code_agent 有意不统计）
+AGENT_TOOL_NAMES = ("rag_agent", "mcp_agent", "web_search")
 
 # 缓存不同配置下的图
 _graph_cache: dict[tuple, Any] = {}
@@ -303,7 +354,6 @@ def _prepare_run(
     )
     cp = get_checkpointer()
     config = {"configurable": {"thread_id": session_id}} if (cp and session_id) else None
-    # Time Travel：从指定历史 checkpoint 继续（LangGraph 据此 fork 新分支）
     if config and checkpoint_id:
         config["configurable"]["checkpoint_id"] = checkpoint_id
     if resume is not None:
@@ -334,11 +384,7 @@ async def list_checkpoint_history(
             parent_cfg = (snap.parent_config or {}).get("configurable", {}) or {}
             msgs = snap.values.get("messages") or []
             # 摘要：最后一条 AI 消息的文本（截断展示）
-            summary = ""
-            for m in reversed(msgs):
-                if getattr(m, "type", "") == "ai":
-                    summary = extract_text(getattr(m, "content", ""))
-                    break
+            summary = last_ai_text(msgs)
             created = getattr(snap, "created_at", None)
             iso = None
             if created is not None and hasattr(created, "isoformat"):
@@ -372,16 +418,11 @@ def _analyze_result(msgs: list) -> tuple[list[str], list[str], str]:
     for m in msgs:
         if getattr(m, "type", "") == "tool":
             name = getattr(m, "name", "")
-            if name in ("rag_agent", "mcp_agent", "web_search"):
+            if name in AGENT_TOOL_NAMES:
                 used_agents.append(name)
             tool_calls_log.append(name)
     # 最终答案：逆序找最后一条 AI 消息（避免工具末轮取到原始输出）
-    answer = extract_text(getattr(msgs[-1], "content", ""))
-    for m in reversed(msgs):
-        if getattr(m, "type", "") == "ai":
-            answer = extract_text(m.content)
-            break
-    return list(dict.fromkeys(used_agents)), list(dict.fromkeys(tool_calls_log)), answer
+    return list(dict.fromkeys(used_agents)), list(dict.fromkeys(tool_calls_log)), last_ai_text(msgs)
 
 
 def _extract_hitl(result: dict) -> Any:
@@ -418,6 +459,18 @@ async def _emit_final_events(
         await on_event({"type": "end", "content": "编排完成"})
 
 
+@asynccontextmanager
+async def _agent_timeout_scope(on_event: Callable[[dict], Awaitable[None]] | None):
+    """统一 agent 执行超时处理：超时发 error 事件并抛 AgentTimeoutError。"""
+    try:
+        async with asyncio.timeout(settings.agent_timeout):
+            yield
+    except TimeoutError as exc:
+        if on_event:
+            await on_event({"type": "error", "content": "处理超时，请重试或简化问题"})
+        raise AgentTimeoutError("Agent 执行超时") from exc
+
+
 async def run_agent(
     question: str,
     use_rag: bool = True,
@@ -445,17 +498,12 @@ async def run_agent(
     if on_event:
         await on_event({"type": "start", "content": "Supervisor 开始调度..."})
 
-    try:
-        async with asyncio.timeout(settings.agent_timeout):
-            result = await graph.ainvoke(
-                input_data,
-                config=config,
-                context=UserContext(user_id=user_id or "default"),
-            )
-    except TimeoutError as exc:
-        if on_event:
-            await on_event({"type": "error", "content": "处理超时，请重试或简化问题"})
-        raise AgentTimeoutError("Agent 执行超时") from exc
+    async with _agent_timeout_scope(on_event):
+        result = await graph.ainvoke(
+            input_data,
+            config=config,
+            context=UserContext(user_id=user_id or "default"),
+        )
     msgs = result["messages"]
 
     hitl_pending = _extract_hitl(result)
@@ -505,12 +553,31 @@ async def stream_agent(
     used_agents: list[str] = []
     tool_calls_log: list[str] = []
     hitl_pending = None
-    # 工具调用前的 token 缓冲（supervisor 先输出"开场白"再调工具）：
-    # 缓冲直到确定是否调用工具——有工具则工具执行后补推开场白+答案（连贯，不悬停）；
-    # 无工具（直接回答）则流结束时补推（保持内容完整）。
-    pre_tool_text: list[str] = []
+    # 开场白处理：工具调用前的短文本（如“我来帮您”）缓冲后不逐字显示（避免
+    # “只出现几个不完整字”的碎片感），待工具触发时直接丢弃；一旦缓冲超过阈值即
+    # 判定为直接回答，此后逐字平滑流式（打字机效果，避免攒一段推一段的卡顿）。
+    # prelude_total 累积全部开场白用于工具后的去重（LLM 常把开场白连同最终答案
+    # 一起重新生成）。
+    PRELUDE_FLUSH = 40  # 超过该长度判定为直接回答，开始逐字流式
+    prelude_total: list[str] = []  # 全部开场白（含已流式部分），供工具后去重
+    prelude_buf: list[str] = []    # 尚未判定是否直接回答的缓冲文本
+    streaming_direct = False       # 已判定为直接回答 → 后续逐字流式
     saw_tool_call = False
-    flushed_prelude: str | None = None  # 工具调用前已推出的开场白（工具后答案去重用）
+    dedupe: _PreludeDedupe | None = None  # 工具后答案流式去重（跳过重复开场白前缀）
+    pending_tool_name: str | None = None  # 最近已发出 tool 事件的工具名（避免重复）
+    # 本次运行实际注册的工具名集合（按开关）。过滤模型幻觉调用的未注册工具
+    # （如开关关闭时仍吐 web_search chunk），避免误发 phantom tool 事件让用户
+    # 误以为真的联网了。
+    registered_tools: set[str] = {"mcp_agent"}
+    if use_rag:
+        registered_tools.add("rag_agent")
+    if use_search:
+        registered_tools.add("web_search")
+    if use_memory:
+        registered_tools.add("remember_memory")
+        registered_tools.add("recall_memory")
+    if settings.code_agent_enabled:
+        registered_tools.add("code_agent")
 
     async def _push(text: str) -> None:
         """推送一段文本到答案流（并记录到 answer_parts）。"""
@@ -518,85 +585,125 @@ async def stream_agent(
         if on_token:
             await on_token(text)
 
-    try:
-        async with asyncio.timeout(settings.agent_timeout):
-            async for mode, data in graph.astream(
-                input_data,
-                config=config,
-                context=UserContext(user_id=user_id or "default"),
-                stream_mode=["updates", "messages"],
-            ):
-                if mode == "updates":
-                    for node, update in data.items():
-                        # HITL 中断：特殊节点 __interrupt__ 携带待确认内容
-                        if node == "__interrupt__":
-                            hits = (
-                                update
-                                if isinstance(update, (list, tuple))
-                                else [update]
-                            )
-                            if hits:
-                                hitl_pending = getattr(hits[0], "value", None)
-                            continue
-                        if not (isinstance(update, dict) and "messages" in update):
-                            continue
-                        for m in update["messages"]:
-                            mtype = getattr(m, "type", "")
-                            if mtype != "tool":
-                                continue
-                            name = getattr(m, "name", "")
-                            if name in ("rag_agent", "mcp_agent", "web_search"):
-                                used_agents.append(name)
-                            tool_calls_log.append(name)
-                            saw_tool_call = True
-                            # 工具调用前：先把缓冲的开场白完整输出（在工具执行前显示）
-                            if pre_tool_text:
-                                flushed_prelude = "".join(pre_tool_text)
-                                await _push(flushed_prelude)
-                                pre_tool_text.clear()
-                            if on_event:
-                                await on_event({"type": "tool", "content": f"工具: {name}"})
-                elif mode == "messages":
-                    chunk, meta = data
-                    # 只流式顶层 supervisor（model 节点）的 AI 文本 token。
-                    # checkpoint_ns 用 "|" 分隔嵌套任务：顶层形如 "model:<task_id>"，
-                    # 子 Agent 形如 "model:<id>|mcp_agent:<id>"（含 "|"），跳过后者。
-                    if "|" in (meta.get("langgraph_checkpoint_ns") or ""):
-                        continue  # 子 Agent 的嵌套命名空间
-                    if not isinstance(chunk, AIMessageChunk):
-                        continue  # 只取 AI 生成文本，排除工具结果
-                    text = extract_text(getattr(chunk, "content", ""))
-                    if not text:
+    async def _emit_tool(name: str) -> None:
+        """统一处理工具调用：丢弃未流式的开场白碎片并发出 tool 事件。
+
+        工具调用前的短开场白（如“我来帮您”）尚未流式时直接丢弃 prelude_buf，
+        避免碎片感；若已判定为直接回答（streaming_direct）则开场白已流式，无需
+        处理。仅用 prelude_total 记录完整开场白供工具后去重。仅对本次实际注册的
+        工具（registered_tools）生效——模型可能幻觉吐出未注册工具（如开关关闭
+        时的 web_search）的 tool_call chunk，这类不应点亮工具轨道，也不应计入
+        saw_tool_call（否则会干扰后续去重与开场白逻辑）。
+        """
+        nonlocal saw_tool_call, dedupe, pending_tool_name
+        is_real = name in registered_tools
+        if is_real and not saw_tool_call:
+            if not streaming_direct:
+                prelude_buf.clear()  # 丢弃未显示的开场白碎片
+            dedupe = _PreludeDedupe("".join(prelude_total))
+            saw_tool_call = True
+        if on_event and is_real and name != pending_tool_name:
+            pending_tool_name = name
+            data: dict = {}
+            # 引用溯源：rag_agent 执行后附带检索命中的文档来源
+            if name == "rag_agent":
+                data["sources"] = get_recent_rag_sources(user_id or "default")
+            await on_event({"type": "tool", "content": f"工具: {name}", "data": data})
+
+    async with _agent_timeout_scope(on_event):
+        async for mode, data in graph.astream(
+            input_data,
+            config=config,
+            context=UserContext(user_id=user_id or "default"),
+            stream_mode=["updates", "messages"],
+        ):
+            if mode == "updates":
+                for node, update in data.items():
+                    # HITL 中断：特殊节点 __interrupt__ 携带待确认内容
+                    if node == "__interrupt__":
+                        hits = (
+                            update
+                            if isinstance(update, (list, tuple))
+                            else [update]
+                        )
+                        if hits:
+                            hitl_pending = getattr(hits[0], "value", None)
                         continue
-                    if saw_tool_call:
-                        # 工具已调用：后续为最终答案。LLM 在工具后常重新生成完整回答
-                        # （重复了开场白）→ 去掉重复的前缀，接着开场白继续输出
-                        if flushed_prelude is not None:
-                            prelude = flushed_prelude
-                            flushed_prelude = None
-                            if text.startswith(prelude):
-                                text = text[len(prelude):].lstrip()
-                            else:
-                                # 退而求其次：按开场白首句（到句号）截断重复前缀
-                                first_sentence = prelude.split("。", 1)[0] + "。"
-                                if (
-                                    first_sentence != "。"
-                                    and text.startswith(first_sentence)
-                                ):
-                                    text = text[len(first_sentence):].lstrip()
-                        if text:
+                    if not (isinstance(update, dict) and "messages" in update):
+                        continue
+                    for m in update["messages"]:
+                        mtype = getattr(m, "type", "")
+                        if mtype != "tool":
+                            continue
+                        name: str = str(getattr(m, "name", "") or "")
+                        if name in AGENT_TOOL_NAMES:
+                            used_agents.append(name)
+                        tool_calls_log.append(name)
+                        # 兜底：若未在流式 token 中检测到 tool_call（个别模型不
+                        # 流式返回 tool_call_chunks），_emit_tool 会补推开场白
+                        await _emit_tool(name)
+            elif mode == "messages":
+                chunk, meta = data
+                # 只流式顶层 supervisor（model 节点）的 AI 文本 token。
+                # checkpoint_ns 用 "|" 分隔嵌套任务：顶层形如 "model:<task_id>"，
+                # 子 Agent 形如 "model:<id>|mcp_agent:<id>"（含 "|"），跳过后者。
+                if "|" in (meta.get("langgraph_checkpoint_ns") or ""):
+                    continue  # 子 Agent 的嵌套命名空间
+                if not isinstance(chunk, AIMessageChunk):
+                    continue  # 只取 AI 生成文本，排除工具结果
+                # 检测工具调用：AIMessageChunk 携带 tool_call_chunks 说明本
+                # LLM 调用即将执行工具（工具执行前，token 流已给出完整开场白）
+                tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
+                has_tool = any(
+                    isinstance(tc, dict) and tc.get("name") for tc in tool_chunks
+                )
+                text = extract_text(getattr(chunk, "content", ""))
+                if has_tool:
+                    # 工具即将执行：同 chunk 的 content 属于开场白，缓冲后由
+                    # _emit_tool 丢弃（不显示碎片）；若已判定为直接回答则已流式
+                    if not saw_tool_call and text:
+                        prelude_total.append(text)
+                        if streaming_direct:
                             await _push(text)
-                    else:
-                        # 工具调用前：缓冲（可能是开场白，也可能是直接回答的内容）
-                        pre_tool_text.append(text)
-        # 流结束：无工具调用（直接回答）→ 补推缓冲内容
-        if pre_tool_text:
-            await _push("".join(pre_tool_text))
-            pre_tool_text.clear()
-    except TimeoutError as exc:
-        if on_event:
-            await on_event({"type": "error", "content": "处理超时，请重试或简化问题"})
-        raise AgentTimeoutError("Agent 执行超时") from exc
+                        else:
+                            prelude_buf.append(text)
+                    name: str = str(
+                        next(
+                            (
+                                tc.get("name")
+                                for tc in tool_chunks
+                                if isinstance(tc, dict) and tc.get("name")
+                            ),
+                            "",
+                        )
+                        or ""
+                    )
+                    await _emit_tool(name)
+                elif saw_tool_call:
+                    # 工具已调用：后续为最终答案。LLM 在工具后常重新生成完整回答
+                    # （重复了开场白）→ 流式前缀匹配，跳过重复的开场白前缀
+                    if dedupe is not None and dedupe.active:
+                        text = dedupe.feed(text)
+                    if text:
+                        await _push(text)
+                else:
+                    # 工具调用前（或直接回答）：未判定时缓冲；超过阈值即判定为直接
+                    # 回答并开始逐字流式（此后不再攒段，保证平滑不卡顿）
+                    if text:
+                        prelude_total.append(text)
+                        if streaming_direct:
+                            await _push(text)
+                        else:
+                            prelude_buf.append(text)
+                            if len("".join(prelude_buf)) >= PRELUDE_FLUSH:
+                                streaming_direct = True
+                                await _push("".join(prelude_buf))
+                                prelude_buf.clear()
+
+        # 流结束：尚未判定的短文本（<阈值）补推（例如很短的直接回答）
+        if prelude_buf:
+            await _push("".join(prelude_buf))
+            prelude_buf.clear()
 
     await _emit_final_events(
         on_event, list(dict.fromkeys(used_agents)), [], hitl_pending

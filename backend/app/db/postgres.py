@@ -24,11 +24,25 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     # 已存在的表不会自动补建索引/列，这里显式幂等创建（会话/文档排序查询加速 + 旧库迁移）
     with engine.begin() as conn:
-        # 迁移：旧版 sessions 表无 user_id 列 → 补列并回填为 guest
+        # 迁移：旧版 sessions 表无 user_id 列 → 补列并回填为 'default'
         conn.execute(
             _text(
                 "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS "
                 "user_id VARCHAR(64) NOT NULL DEFAULT 'default'"
+            )
+        )
+        # 迁移：旧版 users 表无 avatar_color 列 → 补列（头像色板，默认 accent）
+        conn.execute(
+            _text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "avatar_color VARCHAR(16) NOT NULL DEFAULT 'accent'"
+            )
+        )
+        # 迁移：旧版 sessions 表无 pinned 列 → 补列（会话置顶，默认 false）
+        conn.execute(
+            _text(
+                "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS "
+                "pinned BOOLEAN NOT NULL DEFAULT FALSE"
             )
         )
         conn.execute(
@@ -39,6 +53,19 @@ def init_db() -> None:
             _text(
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
                 "user_id VARCHAR(64) NOT NULL DEFAULT 'default'"
+            )
+        )
+        # 迁移：旧版 documents 表无 tag 列 → 补列（文档标签/分组）
+        conn.execute(
+            _text(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
+                "tag VARCHAR(50)"
+            )
+        )
+        # 迁移：旧版 messages 表无 sources 列 → 补列（引用溯源，JSON 数组）
+        conn.execute(
+            _text(
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS sources JSON"
             )
         )
         conn.execute(
@@ -89,9 +116,15 @@ def _ensure_guest_user() -> None:
 
 # ---------------- 用户管理 ----------------
 
-def create_user(username: str, password_hash: str) -> User:
+def create_user(
+    username: str, password_hash: str, avatar_color: str = "accent"
+) -> User:
     with SessionLocal() as db:
-        u = User(username=username, password_hash=password_hash)
+        u = User(
+            username=username,
+            password_hash=password_hash,
+            avatar_color=avatar_color,
+        )
         db.add(u)
         db.commit()
         db.refresh(u)
@@ -106,6 +139,40 @@ def get_user_by_username(username: str) -> User | None:
 def get_user(user_id: str) -> User | None:
     with SessionLocal() as db:
         return db.get(User, user_id)
+
+
+def delete_user(user_id: str) -> bool:
+    """删除用户及其级联数据（sessions / messages）。"""
+    with SessionLocal() as db:
+        u = db.get(User, user_id)
+        if not u:
+            return False
+        db.delete(u)
+        db.commit()
+        return True
+
+
+def update_user(
+    user_id: str,
+    *,
+    username: str | None = None,
+    password_hash: str | None = None,
+    avatar_color: str | None = None,
+) -> User | None:
+    """更新用户名/密码哈希/头像颜色（传 None 的字段保持不变）。"""
+    with SessionLocal() as db:
+        u = db.get(User, user_id)
+        if not u:
+            return None
+        if username is not None:
+            u.username = username
+        if password_hash is not None:
+            u.password_hash = password_hash
+        if avatar_color is not None:
+            u.avatar_color = avatar_color
+        db.commit()
+        db.refresh(u)
+        return u
 
 
 # ---------------- 用户统计（个人主页） ----------------
@@ -139,6 +206,15 @@ def count_documents() -> int:
         return db.scalar(select(func.count()).select_from(Document)) or 0
 
 
+def distinct_document_sources() -> list[tuple[str, str]]:
+    """所有 (user_id, source) 文档组合（source 非空）。"""
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(Document.user_id, Document.source).distinct()
+        ).all()
+    return [(u, s) for u, s in rows if s]
+
+
 # ---------------- 会话管理 ----------------
 
 def create_session(title: str = "新会话", user_id: str | None = None) -> Session:
@@ -155,21 +231,35 @@ def get_session(session_id: str) -> Session | None:
         return db.get(Session, session_id)
 
 
+def get_owned_session(session_id: str, user_id: str) -> Session | None:
+    """读取会话并校验归属：不存在或非本人返回 None（避免泄露存在性）。"""
+    with SessionLocal() as db:
+        s = db.get(Session, session_id)
+        return s if s and s.user_id == user_id else None
+
+
 def list_sessions(user_id: str | None = None, limit: int = 50) -> list[Session]:
     with SessionLocal() as db:
-        stmt = select(Session).order_by(Session.updated_at.desc())
+        stmt = select(Session).order_by(
+            Session.pinned.desc(), Session.updated_at.desc()
+        )
         if user_id:
             stmt = stmt.where(Session.user_id == user_id)
         stmt = stmt.limit(limit)
         return list(db.scalars(stmt))
 
 
-def rename_session(session_id: str, title: str) -> Session | None:
+def rename_session(
+    session_id: str, title: str | None = None, pinned: bool | None = None
+) -> Session | None:
     with SessionLocal() as db:
         s = db.get(Session, session_id)
         if not s:
             return None
-        s.title = title
+        if title is not None:
+            s.title = title
+        if pinned is not None:
+            s.pinned = pinned
         db.commit()
         db.refresh(s)
         return s
@@ -187,9 +277,16 @@ def delete_session(session_id: str) -> bool:
 
 # ---------------- 消息管理 ----------------
 
-def add_message(session_id: str, role: str, content: str) -> Message:
+def add_message(
+    session_id: str,
+    role: str,
+    content: str,
+    sources: list[str] | None = None,
+) -> Message:
     with SessionLocal() as db:
-        msg = Message(session_id=session_id, role=role, content=content)
+        msg = Message(
+            session_id=session_id, role=role, content=content, sources=sources
+        )
         db.add(msg)
         # 会话标题：取第一条用户消息前 20 字；并显式刷新 updated_at。
         # onupdate 只在 UPDATE 语句触发——不改标题时不会刷新，导致活跃会话排后面。

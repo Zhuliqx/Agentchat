@@ -9,6 +9,7 @@ DB 不可达时自动跳过整个模块（不影响纯单元测试）。
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,12 +120,24 @@ def test_rag_upload_search_delete(client, tmp_path):
     try:
         with open(p, "rb") as f:
             r = client.post(
-                "/api/rag/upload", files={"file": (p.name, f, "text/plain")}
+                "/api/rag/upload",
+                files=[("file", (p.name, f, "text/plain"))],
             )
         assert r.status_code == 200
         body = r.json()
-        source = body["source"]
-        assert body["chunks"] >= 1
+        assert "tasks" in body and len(body["tasks"]) == 1
+        task_id = body["tasks"][0]["task_id"]
+        # 上传改为后台任务：轮询摄入完成（上限 30s）
+        st = {"status": "pending"}
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            st = client.get(f"/api/rag/ingest/{task_id}").json()
+            if st["status"] in ("done", "error"):
+                break
+            time.sleep(0.3)
+        assert st["status"] == "done", st
+        assert st["result"]["chunks"] >= 1
+        source = st["result"]["source"]
         # 用唯一 token 检索，确保命中本次上传的文档（端点为 POST）
         r = client.post("/api/rag/search", params={"query": token, "top_k": 5})
         assert r.status_code == 200
@@ -140,7 +153,7 @@ def test_rag_upload_search_delete(client, tmp_path):
 def test_rag_upload_unsupported_type(client):
     r = client.post(
         "/api/rag/upload",
-        files={"file": ("evil.exe", b"MZ", "application/octet-stream")},
+        files=[("file", ("evil.exe", b"MZ", "application/octet-stream"))],
     )
     assert r.status_code == 415
 

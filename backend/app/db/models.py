@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -40,6 +42,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=gen_uuid)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
+    avatar_color: Mapped[str] = mapped_column(String(16), default="accent")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     sessions: Mapped[list["Session"]] = relationship(
@@ -60,6 +63,7 @@ class Session(Base):
         index=True,
     )
     title: Mapped[str] = mapped_column(String(255), default="新会话")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, index=True
@@ -80,6 +84,8 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(16))  # user | assistant | system
     content: Mapped[str] = mapped_column(Text)
+    # 引用溯源：assistant 消息的 RAG 检索命中来源（文档路径列表），持久化以便切换会话后回溯
+    sources: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     session: Mapped["Session"] = relationship(back_populates="messages")
@@ -104,6 +110,7 @@ class Document(Base):
     )  # 知识库归属用户
     filename: Mapped[str] = mapped_column(String(255))
     source: Mapped[str] = mapped_column(String(500), index=True)  # 文档来源标识
+    tag: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)  # 文档标签（分组用）
     chunk_index: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -128,7 +135,7 @@ class Task(Base):
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # success | failed
+    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # running | success | failed
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True

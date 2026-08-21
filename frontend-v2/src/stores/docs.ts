@@ -18,11 +18,19 @@ export const useDocsStore = defineStore("docs", {
     },
     async upload(files: File[]) {
       const r = await docsApi.upload(files);
-      await this.load();
-      return r;
+      return r.tasks;
     },
     async remove(source: string) {
       await docsApi.remove(source);
+      await this.load();
+    },
+    async removeMany(sources: string[]) {
+      if (!sources.length) return;
+      await docsApi.batchRemove(sources);
+      await this.load();
+    },
+    async setTag(source: string, tag: string | null) {
+      await docsApi.setTag(source, tag);
       await this.load();
     },
   },

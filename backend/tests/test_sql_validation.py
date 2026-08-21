@@ -1,8 +1,6 @@
 """数据库查询 MCP 服务器的只读 SQL 校验单元测试。"""
 from __future__ import annotations
 
-import pytest
-
 from app.mcp_integration.servers.db_query_server import _validate_readonly
 
 

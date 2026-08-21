@@ -86,10 +86,7 @@ class MilvusRetriever(BaseRetriever):
 
     def _user_filter(self) -> str:
         """按用户隔离的向量过滤表达式。"""
-        if self.user_id:
-            uid = self.user_id.replace('"', '\\"')
-            return f'user_id == "{uid}"'
-        return ""
+        return vector_store.user_filter_expr(self.user_id)
 
     def _get_relevant_documents(self, query: str) -> list[LCDocument]:
         # 候选：rerank 开启时最多取 rerank_candidate_k 条供精排（控制 CPU 推理量）

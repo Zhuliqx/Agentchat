@@ -26,6 +26,7 @@ from app.agents.graph import (
     run_agent,
     stream_agent,
 )
+from app.agents.tools import get_recent_rag_sources
 from app.api.deps import get_current_user_id
 from app.db import postgres
 from app.db.memory_store import get_checkpointer
@@ -43,13 +44,18 @@ _hitl_checked: dict[str, float] = {}  # session_id -> monotonic ts
 
 # ---------------- 会话准备（同步 DB，放线程池） ----------------
 
+def _ensure_resume_checkpoint_conflict(
+    resume: str | None, checkpoint_id: str | None
+) -> None:
+    """resume（HITL 恢复）与 checkpoint_id（Time Travel 分叉）互斥。"""
+    if resume is not None and checkpoint_id is not None:
+        raise HTTPException(400, "resume 与 checkpoint_id 不能同时使用")
+
+
 def _prepare_session(session_id: str | None, user_id: str) -> str:
     """确保会话存在并返回 session_id（归属当前用户）。同步函数，调用方用线程池执行。"""
     if session_id:
-        s = postgres.get_session(session_id)
-        if not s:
-            raise HTTPException(404, "会话不存在")
-        if s.user_id != user_id:
+        if not postgres.get_owned_session(session_id, user_id):
             raise HTTPException(404, "会话不存在")
     else:
         session = postgres.create_session(user_id=user_id)
@@ -89,8 +95,12 @@ async def _check_pending_interrupt(session_id: str, use_rag: bool, use_search: b
         pass  # 状态读取失败则放行，不阻塞正常对话
 
 
-async def _prepare_context(req: ChatRequest, user_id: str) -> str:
-    """会话准备 + HITL 防护 + 保存用户消息（resume 时跳过）。返回 session_id。"""
+async def _prepare_context(req: ChatRequest, user_id: str) -> tuple[str, str | None]:
+    """会话准备 + HITL 防护 + 保存用户消息（resume 时跳过）。
+
+    返回 (session_id, 用户消息 id)；resume 场景用户消息已存在，返回 None。
+    """
+    user_msg_id: str | None = None
     try:
         session_id = await anyio.to_thread.run_sync(
             _prepare_session, req.session_id, user_id
@@ -104,26 +114,32 @@ async def _prepare_context(req: ChatRequest, user_id: str) -> str:
         if req.checkpoint_id is None:
             await _check_pending_interrupt(session_id, req.use_rag, req.use_search)
         # 保存用户消息（HITL 恢复时消息已在历史中，跳过避免重复）
-        await anyio.to_thread.run_sync(
+        msg = await anyio.to_thread.run_sync(
             postgres.add_message, session_id, "user", req.message
         )
-    return session_id
+        user_msg_id = msg.id
+    return session_id, user_msg_id
 
 
-async def _save_assistant_if_final(session_id: str, result: dict) -> bool:
-    """HITL 等待确认时不保存空答案；否则保存 assistant 消息并返回 True。
+async def _save_assistant_if_final(
+    session_id: str, result: dict, user_id: str
+) -> str | None:
+    """HITL 等待确认时不保存空答案；否则保存 assistant 消息并返回其 id。
 
-    产生人工确认（pending interrupt）时，同时清除该会话的 TTL 短路缓存：
-    否则 _check_pending_interrupt 的 5s 短路会让用户随后的普通新消息跳过
-    检查，把含"未完成 tool_calls"的历史发给 LLM 触发 400，而非明确的 409。
+    保存时把本轮 RAG 检索命中的来源（引用溯源）一起持久化，切换会话后
+    重新加载历史仍能看到来源。产生人工确认（pending interrupt）时清除
+    该会话的 TTL 短路缓存：否则 _check_pending_interrupt 的 5s 短路会让
+    用户随后的普通新消息跳过检查，把含"未完成 tool_calls"的历史发给 LLM
+    触发 400，而非明确的 409。
     """
     if result.get("hitl_pending") is not None:
         _hitl_checked.pop(session_id, None)
-        return False
-    await anyio.to_thread.run_sync(
-        postgres.add_message, session_id, "assistant", result["answer"]
+        return None
+    sources = get_recent_rag_sources(user_id or "default") or None
+    msg = await anyio.to_thread.run_sync(
+        postgres.add_message, session_id, "assistant", result["answer"], sources
     )
-    return True
+    return msg.id
 
 
 # ---------------- 非流式 ----------------
@@ -133,9 +149,8 @@ async def chat(
     req: ChatRequest, user_id: str = Depends(get_current_user_id)
 ) -> ChatResponse:
     """单轮对话：保存历史，运行多 Agent，返回答案与执行事件。"""
-    if req.resume is not None and req.checkpoint_id is not None:
-        raise HTTPException(400, "resume 与 checkpoint_id 不能同时使用")
-    session_id = await _prepare_context(req, user_id)
+    _ensure_resume_checkpoint_conflict(req.resume, req.checkpoint_id)
+    session_id, _ = await _prepare_context(req, user_id)
 
     # 事件收集
     events: list[AgentEvent] = []
@@ -162,7 +177,7 @@ async def chat(
         raise HTTPException(504, "处理超时，请重试或简化问题")
 
     hitl_pending = result.get("hitl_pending")
-    await _save_assistant_if_final(session_id, result)
+    await _save_assistant_if_final(session_id, result, user_id)
 
     events.append(AgentEvent(type="message", content=result["answer"]))
     return ChatResponse(
@@ -187,9 +202,8 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
 
     前端可逐事件渲染 Agent 调用过程，答案出来后打字机展示。
     """
-    if req.resume is not None and req.checkpoint_id is not None:
-        raise HTTPException(400, "resume 与 checkpoint_id 不能同时使用")
-    session_id = await _prepare_context(req, user_id)
+    _ensure_resume_checkpoint_conflict(req.resume, req.checkpoint_id)
+    session_id, user_msg_id = await _prepare_context(req, user_id)
 
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -209,6 +223,15 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
     async def produce():
         """运行 Agent（token 流式）并把事件/结果送入队列。"""
         try:
+            # 先推用户消息 id（供前端删除/定位）
+            if user_msg_id:
+                await queue.put(
+                    {
+                        "type": "meta",
+                        "content": "",
+                        "data": {"user_message_id": user_msg_id},
+                    }
+                )
             result = await stream_agent(
                 question=req.message,
                 use_rag=req.use_rag,
@@ -223,7 +246,8 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
             )
             # HITL：等待用户确认时不保存空答案、不发 message 帧
             #（interrupt 事件已由 on_event 推送，待用户 resume 后继续）
-            if not await _save_assistant_if_final(session_id, result):
+            assistant_id = await _save_assistant_if_final(session_id, result, user_id)
+            if assistant_id is None:
                 return
             await queue.put(
                 {
@@ -232,6 +256,7 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
                     "data": {
                         "used_agents": result["used_agents"],
                         "session_id": session_id,
+                        "message_id": assistant_id,
                     },
                 }
             )

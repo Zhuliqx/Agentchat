@@ -30,6 +30,14 @@ def _client() -> MilvusClient:
     return MilvusClient(uri=settings.milvus_connection_uri)
 
 
+def user_filter_expr(user_id: str | None) -> str:
+    """按用户隔离的 Milvus 过滤表达式片段（空 user_id 返回空串）。"""
+    if not user_id:
+        return ""
+    uid = user_id.replace('"', '\\"')
+    return f'user_id == "{uid}"'
+
+
 def _build_schema() -> CollectionSchema:
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=32),
@@ -175,9 +183,9 @@ def delete_by_source(source: str, user_id: str | None = None) -> None:
     """
     escaped = source.replace("\\", "\\\\").replace('"', '\\"')
     expr = f'source == "{escaped}"'
-    if user_id is not None:
-        uid = user_id.replace('"', '\\"')
-        expr += f' and user_id == "{uid}"'
+    uf = user_filter_expr(user_id)
+    if uf:
+        expr += f" and {uf}"
     _client().delete(settings.milvus_collection, filter=expr)
 
 

@@ -90,6 +90,12 @@ function onDblClickTitle(e: MouseEvent, id: string) {
         @click.stop
         @change="sessions.toggleSelect(s.id)"
       />
+      <Icon
+        v-if="s.pinned"
+        name="bookmark"
+        :size="11"
+        class="flex-shrink-0 text-accent"
+      />
       <span
         class="min-w-0 flex-1 truncate"
         :title="s.title"
@@ -97,6 +103,14 @@ function onDblClickTitle(e: MouseEvent, id: string) {
       >
         {{ s.title }}
       </span>
+      <button
+        v-if="!sessions.batchMode"
+        class="hidden flex-shrink-0 text-ink-faint transition hover:text-accent group-hover:block"
+        :title="s.pinned ? '取消置顶' : '置顶'"
+        @click.stop="sessions.pin(s.id, !s.pinned)"
+      >
+        <Icon :name="s.pinned ? 'bookmark' : 'pin'" :size="13" />
+      </button>
       <button
         v-if="!sessions.batchMode"
         class="hidden flex-shrink-0 text-ink-faint transition hover:text-err group-hover:block"

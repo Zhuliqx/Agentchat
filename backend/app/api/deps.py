@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from fastapi import Header
+from fastapi import Header, HTTPException
 
 from app.config import settings
 from app.security import decode_token
@@ -29,3 +29,26 @@ def require_user_id(authorization: str | None = Header(default=None)) -> str | N
         if uid:
             return uid
     return None
+
+
+def admin_usernames() -> set[str]:
+    """当前配置的管理员用户名集合（逗号分隔）。"""
+    return {x.strip() for x in settings.admin_usernames.split(",") if x.strip()}
+
+
+def is_admin_username(username: str) -> bool:
+    """用户名是否为管理员。"""
+    return username in admin_usernames()
+
+
+def require_admin(authorization: str | None = Header(default=None)) -> str:
+    """要求管理员登录的依赖：未登录 401，非管理员 403。"""
+    uid = require_user_id(authorization)
+    if not uid:
+        raise HTTPException(401, "未登录")
+    from app.db import postgres
+
+    u = postgres.get_user(uid)
+    if not u or not is_admin_username(u.username):
+        raise HTTPException(403, "需要管理员权限")
+    return uid

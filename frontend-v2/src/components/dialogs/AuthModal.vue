@@ -52,15 +52,19 @@ async function submit() {
   }
 }
 
-function guest() {
+async function guest() {
   auth.logoutLocal();
   auth.authOpen = false;
-  // 切换回访客域：重置当前会话与聊天区，刷新文档/记忆
+  // 切回访客域：重置会话与聊天区，再加载访客数据并选中首个会话
   sessions.currentId = "";
   chat.clear();
-  sessions.load();
-  memory.load();
-  docs.load();
+  await Promise.all([sessions.load(), memory.load(), docs.load()]);
+  if (sessions.list.length) {
+    sessions.currentId = sessions.list[0].id;
+    await chat.loadHistory(sessions.currentId);
+  } else {
+    await sessions.create();
+  }
 }
 </script>
 

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { useChatStore } from "@/stores/chat";
 import { useChatOptionsStore } from "@/stores/chatOptions";
 import { useModelStore } from "@/stores/model";
+import { useSessionsStore } from "@/stores/sessions";
 import Icon from "@/components/common/Icon.vue";
 import Switch from "@/components/common/Switch.vue";
 import Dropdown from "@/components/common/Dropdown.vue";
@@ -10,10 +11,43 @@ import Dropdown from "@/components/common/Dropdown.vue";
 const chat = useChatStore();
 const options = useChatOptionsStore();
 const model = useModelStore();
+const sessions = useSessionsStore();
 const input = ref("");
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const modelOpen = ref(false);
-onMounted(() => model.load());
+
+// ---- 输入草稿：按会话持久化到 localStorage（刷新/切换不丢失） ----
+const draftKey = (sid: string) => `chat_draft_${sid}`;
+function saveDraft() {
+  if (sessions.currentId) {
+    localStorage.setItem(draftKey(sessions.currentId), input.value);
+  }
+}
+function loadDraft() {
+  input.value = sessions.currentId
+    ? localStorage.getItem(draftKey(sessions.currentId)) || ""
+    : "";
+  autoResize();
+}
+
+let lastSid = sessions.currentId;
+// 切换会话：先把当前草稿存入旧会话，再恢复新会话草稿
+watch(
+  () => sessions.currentId,
+  (newId) => {
+    if (lastSid) localStorage.setItem(draftKey(lastSid), input.value);
+    lastSid = newId;
+    input.value = newId
+      ? localStorage.getItem(draftKey(newId)) || ""
+      : "";
+    autoResize();
+  }
+);
+
+onMounted(() => {
+  model.load();
+  loadDraft();
+});
 
 function autoResize() {
   const el = inputEl.value;
@@ -24,6 +58,9 @@ function autoResize() {
 
 function onInput() {
   autoResize();
+  if (sessions.currentId) {
+    localStorage.setItem(draftKey(sessions.currentId), input.value);
+  }
 }
 
 async function send() {
@@ -31,6 +68,10 @@ async function send() {
   if (!text || chat.sending) return;
   input.value = "";
   autoResize();
+  // 发送后清除该会话草稿
+  if (sessions.currentId) {
+    localStorage.removeItem(draftKey(sessions.currentId));
+  }
   await chat.send(text, {
     useRag: options.useRag,
     useSearch: options.useSearch,

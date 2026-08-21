@@ -83,7 +83,8 @@ flowchart TB
 | 应用 | `log_level` / `agent_timeout` | INFO / 120 | 日志级别、单轮超时 |
 | Postgres | `postgres_*` | localhost / 5432 / agentchat | 提供 `postgres_dsn`（SQLAlchemy）与 `postgres_conninfo`（psycopg 原生）两个派生串 |
 | Milvus | `milvus_host/port/uri` | localhost / 19530 / "" | `milvus_connection_uri` 属性自动拼 `http://host:port` |
-| LLM | `llm_provider`（默认 `deepseek`）/ `llm_timeout=60` / `llm_max_retries=2` | — | 多 provider 切换（`llm_model` 仅 ollama 用） |
+| LLM | `llm_provider`（默认 `deepseek`）/ `llm_timeout=60` / `llm_max_retries=2` / `llm_light_model` | — | 多 provider 切换（`llm_model` 仅 ollama 用）；配置 `llm_light_model` 后子 Agent 用轻量模型 |
+| Agent 工具 | `code_agent_enabled` / `code_exec_timeout` / `tavily_api_key` / `tavily_max_results` | true / 15 / - / 5 | 代码沙箱与联网搜索 |
 | 检索 | `hybrid_search` / `bm25_*` / `rrf_k` / `rerank_*` | true / 60 / 4 | 混合检索 + rerank |
 | 上传 | `upload_dir` / `max_upload_mb` | data/uploads / 50 | 原始文件持久化 + 大小上限（413） |
 | 记忆 | `memory_semantic_search` / `memory_dedup_threshold` | true / 0.86 | Store 语义索引与去重阈值 |
@@ -125,25 +126,28 @@ def milvus_connection_uri(self):
 
 所有 OpenAI 兼容系统一注入 `_openai_kwargs()`：`timeout=60` + `max_retries=2`，网络抖动自动重试、防挂起。**lru_cache 保证全项目共享同一个 LLM 实例**（避免每次请求重建连接）。
 
+**轻量模型与运行时切换**：`get_llm(kind="main"|"light")` 支持 `LLM_LIGHT_MODEL`——配置后 Supervisor 用主模型、子 Agent 用轻量模型（`_model_name("light")`）。`available_models()` / `set_current_model()` 支撑前端 `/api/models` 运行时切换：选择持久化到 `data/model_choice.json`，并清空 LLM/图缓存，立即生效（重启后仍保留）。
+
 ---
 
 ## 4. Agent 编排 `graph.py`
 
 `app/agents/graph.py` 是核心：构建 Supervisor 图 + 提供两个运行入口。顶层 `from langchain.agents import create_agent`（官方高层 API，内部即 `add_node`/`add_edge`/`compile` 的封装，见 EXPLAIN 第 11 章）。
 
-### 4.1 图构建 `get_supervisor_graph(use_rag, use_search)`
+### 4.1 图构建 `get_supervisor_graph(use_rag, use_search, use_memory)`
 
-- **按配置指纹缓存**：`key = (use_rag, use_search, checkpointer就绪, store就绪)`，同一开关组合只构建一次。
+- **按配置指纹缓存**：`key = (use_rag, use_search, use_memory, checkpointer就绪, store就绪)`，同一开关组合只构建一次。
 - 按开关动态组装工具列表：
   - `use_rag` → `rag_agent` 包装成工具（`confirm_before=_needs_confirm("rag")`）
   - 恒有 → `mcp_agent`（`confirm_before=_needs_confirm("mcp")`）
   - `use_search` → `web_search`（**直接 Tavily 工具**，非子 Agent；若 Tavily key 存在；`confirm_before=_needs_confirm("search")`）
-  - 恒有 → `remember_memory` / `recall_memory`（长期记忆）
+  - `code_agent_enabled` → `code_agent`（受限沙箱执行 Python）
+  - `use_memory` → `remember_memory` / `recall_memory`（长期记忆；关闭时不注册）
   - HITL 且 `hitl_actions` 为空 → `request_confirmation`（软性确认工具）
 - `create_agent(get_llm(), tools, system_prompt, checkpointer, store, context_schema=UserContext)`。
 - 配置指纹里含 checkpointer/store 就绪状态，**避免状态变化后继续用过期图**。
 
-### 4.2 动态提示词 `_build_supervisor_prompt(use_rag, use_search)`
+### 4.2 动态提示词 `_build_supervisor_prompt(use_rag, use_search, use_memory)`
 
 > **关键修复**：曾经是静态 `SUPERVISOR_PROMPT`，关闭知识库时 LLM 仍幻觉调用不存在的 `rag_agent`。现在按开关**同步增删工具描述 + 规则**，并显式禁止调用已关闭的 Agent。
 
@@ -166,7 +170,7 @@ result = await graph.ainvoke(
 - `resume` 非空时改走 `graph.ainvoke(Command(resume=resume), ...)`（HITL 断点恢复）。
 - `checkpoint_id` 非空时（Time Travel）config 里带上 `"checkpoint_id"`，LangGraph 据此从该历史点**分叉新分支**继续（见 4.6）。
 - 检测 `result.get("__interrupt__")` → `hitl_pending`（HITL）。
-- 逆序遍历消息找最后一条 `ai` 消息作为答案（`extract_text` 兼容 content blocks）。
+- 经 `last_ai_text()` 逆序取最后一条 AI 消息作为答案（复用 `extract_text`，兼容 content blocks）。
 - 通过 `on_event` 回调发出 `start` / `agent` / `tool` / `interrupt` / `end` / `error` 事件。
 
 ### 4.4 `stream_agent()`（token 级流式，SSE 用）
@@ -189,6 +193,8 @@ async for mode, data in graph.astream(
 ```
 
 **关键点**：`checkpoint_ns` 用 `"|"` 分隔嵌套任务——顶层形如 `model:<task_id>`，子 Agent 形如 `model:<id>|mcp_agent:<id>`。**只有不含 `|` 的才是 supervisor 的输出**，避免子 Agent 中间文本污染答案流。
+
+**开场白缓冲 + 去重**：工具调用前的 token 先缓冲（`pre_tool_text`），检测到 `tool_call_chunks` 时经 `_emit_tool` **一次性推送完整开场白**（工具执行前显示并点亮轨道光晕）；工具后的答案流经 `_PreludeDedupe` **前缀去重**（LLM 常把开场白连同答案一起重新生成）。统一超时经 `_agent_timeout_scope` 上下文管理器。
 
 ### 4.5 多轮历史（Checkpointer 自动恢复）
 
@@ -218,10 +224,11 @@ async for mode, data in graph.astream(
 | `build_rag_agent()` | 子 Agent（`create_agent` 独立小图） | `create_retriever_tool(retriever, "search_knowledge_base", ...)` | 仅基于检索内容回答、不编造、必须调用检索工具 |
 | `build_mcp_agent()` | 子 Agent（`create_agent` 独立小图） | `get_mcp_manager().get_langchain_tools()`（全部已连 MCP 工具） | 数据库只读 SELECT/WITH、整理清晰答案 |
 | `build_search_tool()` | **直接工具**（`StructuredTool`） | `langchain_tavily.TavilySearch`，兜底 `langchain_community.tavily_search` | 单次 Tavily 调用即返回结果，Supervisor 自行总结 |
+| `build_code_agent()` | 子 Agent（受限沙箱） | `execute_python_code` 工具 | 子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断 |
 
 > **搜索为何是直接工具而非子 Agent**：子 Agent 方案实测一次搜索会触发
 > 4 次 Tavily + 3 次 LLM（ReAct 反复搜索），耗时 ~23s；改为直接工具后单次
-> 调用 ~2s，Supervisor 直接基于结果总结。`build_search_tool` 无
+> 调用 ~3s，Supervisor 直接基于结果总结。`build_search_tool` 无
 > `TAVILY_API_KEY` 时返回 `None`，supervisor 工具列表相应跳过。
 
 ### 5.2 `agent_to_tool()`：层级模式（子 Agent 作工具）
@@ -264,9 +271,9 @@ async def _arun(query: str) -> str:
 ### 6.2 向量存储 `vector_store.py`
 
 - `MilvusClient` 单例（pymilvus 3.0 新 API）。
-- `_ensure_indexes`：embedding 向量建 **IVF_FLAT** 索引 + source 字段建 **Trie** 索引（支持按来源过滤）。
+- `_ensure_indexes`：embedding 向量建 **IVF_FLAT** 索引 + source / user_id 字段建 **Trie** 索引（支持按来源与用户过滤）。
 - `_validate_embedding_dim`：与 `embedding_dim`（512）校验，防止模型切换后维度不匹配。
-- 提供 `search` / `add_chunks` / `delete_by_source` / `stats`。
+- 提供 `search` / `add_chunks` / `delete_by_source` / `delete_by_ids` / `stats`；`user_filter_expr` 统一生成按用户隔离的过滤表达式。
 
 ### 6.3 混合检索 `hybrid.py` + `bm25.py`
 
@@ -288,7 +295,7 @@ flowchart LR
 ### 6.4 rerank `rerank.py`
 
 - `CrossEncoder("BAAI/bge-reranker-base")`，`lru_cache` 单例，后台线程预热（`main.py` `_warmup_sync`）。
-- 仅对 `rerank_candidate_k`（8）条候选精排，输入按 `rerank_max_length`（512）截断；失败自动降级（跳过精排）。
+- 仅对 `rerank_candidate_k`（6）条候选精排，输入按 `rerank_max_length`（512）截断；失败自动降级（跳过精排）。
 
 ### 6.5 检索器 `retriever.py`
 
@@ -352,14 +359,15 @@ async def lifespan(app):
     await init_store()              # 长期记忆
     cleanup_stale_checkpoints()     # 孤儿清理
     await get_mcp_manager().start_all()   # MCP 服务器
-    threading.Thread(target=_warmup_sync).start()  # rerank + embedding 模型预热
+    threading.Thread(target=_warmup_sync).start()  # rerank/embedding 模型 + BM25 索引 + Supervisor 图预热
     yield
     await get_mcp_manager().stop_all()
     await close_checkpointer(); await close_store()
 ```
 
-- 挂载路由：`/api/health` `/api/sessions` `/api/memory` `/api/rag` `/api/chat`。
-- `app.mount("/", StaticFiles(directory=FRONTEND_V2_DIST, html=True))` 优先托管 `frontend-v2/dist` 构建产物（Vue 3 前端），目录不存在时回退旧版 `frontend/`。
+- 挂载路由：`/api/health` `/api/sessions` `/api/memory` `/api/rag` `/api/chat` `/api/auth` `/api/tasks` `/api/models`。
+- 后台 `scheduler_loop`（asyncio 任务）按 `interval:<秒>` / `cron:<分钟>` 周期执行注册的批处理任务。
+- `app.mount("/", StaticFiles(directory=APP_DIST, html=True))` 托管 `frontend-v2/dist` 构建产物（Vue 3 前端）。
 - CORS 显式白名单。
 
 ### 8.2 路由总览
@@ -367,10 +375,13 @@ async def lifespan(app):
 | 路由文件 | 前缀 | 端点 | 说明 |
 |----------|------|------|------|
 | `health.py` | `/api` | `GET /health` | Postgres / Milvus / MCP 健康状态 |
-| `sessions.py` | `/api/sessions` | `GET/POST`、`GET/PATCH/DELETE /{id}`、`POST /batch-delete`、`GET /{id}/checkpoints` | 会话 CRUD + 历史 + 批量删除（同步清 checkpoint，单删也定向清理）+ **版本历史（Time Travel）** |
+| `sessions.py` | `/api/sessions` | `GET/POST`、`GET/PATCH/DELETE /{id}`、`POST /batch-delete`、`GET /{id}/stats`、`GET /{id}/export`、`GET /{id}/checkpoints` | 会话 CRUD + 历史 + 批量删除（同步清 checkpoint）+ 数据分析 + 导出 Markdown + **版本历史（Time Travel）** |
 | `memory.py` | `/api/memory` | `GET/POST`、`DELETE /{id}`、`DELETE ""` | 长期记忆管理（操作 Store） |
-| `rag.py` | `/api/rag` | 上传（≤`MAX_UPLOAD_MB`）/ 文档列表 / 预览 / 删除 | 文档管理（上传 413 限流、删除失效 BM25 签名） |
+| `rag.py` | `/api/rag` | 上传（≤`MAX_UPLOAD_MB`）/ 文档列表 / 预览 / 删除 / 检索测试 | 文档管理（上传 413 限流、删除失效 BM25 签名） |
 | `chat.py` | `/api/chat` | `POST ""` 非流式、`POST /stream` SSE | 对话 |
+| `auth.py` | `/api/auth` | `register` / `login` / `me` / `stats` | 用户注册 / 登录 / 当前用户 / 统计 |
+| `tasks.py` | `/api/tasks` | `GET/POST`、`PATCH/DELETE /{id}`、`GET /registry`、`POST /{id}/run` | 定时任务管理 + 手动触发 |
+| `models.py` | `/api/models` | `GET ""`、`PUT /current` | 可用模型列表 + 运行时切换 |
 
 ### 8.3 chat 路由（核心）
 
@@ -378,7 +389,7 @@ async def lifespan(app):
 
 - `_prepare_session(session_id)`：有 id 校验存在（404），无 id 则 `create_session()` 新建（同时是 `thread_id`）。
 - `_prepare_context(req)`：会话准备 + HITL 防护 + 保存用户消息（resume 时跳过）；历史不再手动组装（由 Checkpointer 从 `thread_id` 恢复）。
-- `_check_pending_interrupt`（HITL 防护）：复用会话发普通新消息时，`graph.aget_state` 查 `tasks[].interrupts`，有则 **409 明确提示**（避免把未完成 tool_calls 历史发给 LLM 触发 400）。**Time Travel 分叉（`checkpoint_id`）时跳过该检查**——新分支与当前 pending 无关。
+- `_check_pending_interrupt`（HITL 防护）：复用会话发普通新消息时，`graph.aget_state` 查 `tasks[].interrupts`，有则 **409 明确提示**（避免把未完成 tool_calls 历史发给 LLM 触发 400）。带 **5s TTL 短路缓存**（`_hitl_checked`）避免每个请求都恢复图状态；产生 pending interrupt 时主动清缓存，确保用户后续请求重新检查。**Time Travel 分叉（`checkpoint_id`）时跳过该检查**——新分支与当前 pending 无关。
 - **Time Travel**：`ChatRequest.checkpoint_id` 透传给 `run_agent/stream_agent` → `_prepare_run` 在 config 里加 `checkpoint_id` 分叉（详见 4.6）；`resume` 与 `checkpoint_id` 互斥（同时传 → 400）。
 - **SSE 流式 `chat_stream`**：
 
@@ -401,7 +412,7 @@ async def produce():
 
 ### 8.4 schemas（`schemas/chat.py`）
 
-- `ChatRequest`：`session_id?` / `user_id?` / `message` / `use_rag` / `use_search` / `resume?`（HITL）/ `checkpoint_id?`（Time Travel 分叉起点）。
+- `ChatRequest`：`session_id?` / `user_id?` / `message` / `use_rag` / `use_search` / `use_memory` / `resume?`（HITL）/ `checkpoint_id?`（Time Travel 分叉起点）。
 - `AgentEvent`：`type` 为 Literal 含 `interrupt`，`content` + `data`。
 - `ChatResponse`：`answer` / `events` / `used_agents` / `hitl_pending?`。
 
@@ -409,7 +420,7 @@ async def produce():
 
 - `Session`（id 32 位 hex / title / created_at / updated_at **索引**）。
 - `Message`（session_id 外键 CASCADE / role / content）。
-- `Document`（source+chunk_index 唯一约束 / metadata_json，向量在 Milvus，id 一致）。
+- `Document`（`user_id`+source+chunk_index 唯一约束 / metadata_json / text，向量在 Milvus，id 一致；知识库按用户隔离）。
 
 ### 8.6 会话刷新排序（坑与修复）
 
@@ -424,7 +435,7 @@ async def produce():
 `McpClientManager` 统一管理两类连接：
 
 - **自建 stdio**（`db` / `time`）：`StdioServerParameters` + `stdio_client` + `ClientSession`，cwd=项目根。
-- **外部 http**（`EXTERNAL_MCP_SERVERS`，逗号分隔 `name=url`）：`streamable_http_client`（mcp 2.x 改名，已做兼容）。
+- **外部 http**（`EXTERNAL_MCP_SERVERS`，逗号分隔 `name=url`）：`streamable_http_client`（mcp ≥1.9 提供，直接使用）。
 
 生命周期用 `AsyncExitStack` 统一管理，`start_all`/`stop_all` 幂等；单服务器失败只告警不影响整体。
 
@@ -450,7 +461,7 @@ def get_langchain_tools(self):
 
 前端为 `frontend-v2/`（**Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia**）：
 开发时 Vite dev server（`:5173`，`/api` 代理到 `:8000`）；生产 `npm run build` 后
-`dist/` 由 FastAPI 托管。旧的 `frontend/`（纯静态）已弃用保留参考。
+`dist/` 由 FastAPI 托管。
 
 ### 10.1 目录结构
 
@@ -516,7 +527,7 @@ frontend-v2/src/
 
 | # | 决策/坑 | 方案 |
 |---|---------|------|
-| 1 | 静态 supervisor prompt 导致关闭 RAG 后幻觉调用 rag_agent | `_build_supervisor_prompt(use_rag, use_search)` 动态生成，工具描述与规则同步开关 |
+| 1 | 静态 supervisor prompt 导致关闭 RAG 后幻觉调用 rag_agent | `_build_supervisor_prompt(use_rag, use_search, use_memory)` 动态生成，工具描述与规则同步开关 |
 | 2 | 不改 ORM 为异步 | SQLAlchemy 保持同步 + `anyio.to_thread.run_sync` 线程池（热点路由不卡事件循环） |
 | 3 | Windows psycopg 异步事件循环不兼容 | 三层 SelectorEventLoop 保障，统一 `run.py` 启动 |
 | 4 | 会话活跃排序失效（onupdate 不触发） | `add_message` 显式 `s.updated_at = utcnow()` |
@@ -524,7 +535,7 @@ frontend-v2/src/
 | 6 | pgvector 缺失导致 Store 无语义索引 | `init_store` 自动降级关键词检索（日志告警），镜像就绪即自动启用 |
 | 7 | HITL 双重确认（主动 request_confirmation + confirm_before 叠加） | `hitl_actions` 非空时不注册 `request_confirmation`，只保留强制确认 |
 | 8 | 中断会话续发新消息触发 LLM 400 | `_check_pending_interrupt` 返回 409 明确提示 |
-| 9 | mcp 2.x 改名 streamable_http_client | try/except 兼容两种导入名 |
+| 9 | mcp 2.x 改名 streamable_http_client | 直接使用 mcp ≥1.9 的 streamable_http_client（requirements 下限 1.9） |
 | 10 | rerank 首个请求下载慢卡顿 | 后台线程预热 + 候选数/长度截断 |
 | 11 | Milvus embedding 维度漂移 | `_validate_embedding_dim` 启动校验 |
 | 12 | 删除会话后 checkpoint 膨胀 | `cleanup_stale_checkpoints` 启动清理孤儿 |
@@ -548,7 +559,7 @@ frontend-v2/src/
 ```python
 graph = create_agent(
     get_llm(), tools=tools, system_prompt=...,
-    middleware=[resilience_middleware()],   # supervisor 与三个子 Agent 共用单例
+    middleware=[resilience_middleware()],   # supervisor 与各子 Agent（rag/mcp/code）共用单例
 )
 ```
 

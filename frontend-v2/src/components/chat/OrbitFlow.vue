@@ -27,17 +27,13 @@ const isPulsing = (n: OrbitNode) => !!n.active;
 
       <span
         class="inline-flex items-center gap-1.5 text-[11px]"
-        :class="[
-          nodeCls(n.type),
-          n.type === 'tool' ? 'font-medium' : '',
-          isPulsing(n) ? 'animate-pulse' : '',
-        ]"
+        :class="[nodeCls(n.type), n.type === 'tool' ? 'font-medium' : '']"
       >
         <!-- 节点图标 -->
         <span class="relative grid h-[14px] w-[14px] place-items-center">
           <span
             v-if="isPulsing(n)"
-            class="absolute h-full w-full animate-ping rounded-full bg-orbit/20"
+            class="absolute -inset-0.5 animate-ping rounded-full bg-orbit/40"
           />
           <Icon
             v-if="n.type === 'start'"
@@ -57,7 +53,10 @@ const isPulsing = (n: OrbitNode) => !!n.active;
             :size="12"
             class="relative"
           />
-          <span v-else class="relative h-1.5 w-1.5 rounded-full bg-orbit" />
+          <span
+            v-else
+            class="relative h-1.5 w-1.5 rounded-full bg-orbit"
+          />
         </span>
         <span class="tracking-tight">{{ n.label }}</span>
       </span>

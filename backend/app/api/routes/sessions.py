@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from app.agents.graph import list_checkpoint_history
 from app.api.deps import get_current_user_id
 from app.db import postgres
+from app.db.models import Message
+from app.db.postgres import SessionLocal
 
 router = APIRouter()
 
@@ -16,6 +18,7 @@ router = APIRouter()
 class SessionOut(BaseModel):
     id: str
     title: str
+    pinned: bool = False
     created_at: str
     updated_at: str
 
@@ -24,10 +27,12 @@ class MessageOut(BaseModel):
     id: str
     role: str
     content: str
+    sources: list[str] = []
 
 
 class RenameIn(BaseModel):
-    title: str = Field(..., min_length=1, max_length=100)
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    pinned: bool | None = None
 
 
 class BatchDeleteIn(BaseModel):
@@ -40,6 +45,7 @@ def _session_out(s):
     return SessionOut(
         id=s.id,
         title=s.title,
+        pinned=bool(s.pinned),
         created_at=s.created_at.isoformat(),
         updated_at=s.updated_at.isoformat(),
     )
@@ -59,10 +65,8 @@ def _cleanup_checkpoints(thread_ids: list[str]) -> None:
 
 def _owned_or_404(session_id: str, user_id: str):
     """读取会话并校验归属（他人会话返回 404，避免泄露存在性）。"""
-    s = postgres.get_session(session_id)
+    s = postgres.get_owned_session(session_id, user_id)
     if not s:
-        raise HTTPException(404, "会话不存在")
-    if s.user_id != user_id:
         raise HTTPException(404, "会话不存在")
     return s
 
@@ -105,9 +109,24 @@ def get_history(session_id: str, user_id: str = Depends(get_current_user_id)):
             id=m.id,
             role=m.role,
             content=m.content,
+            sources=m.sources or [],
         )
         for m in msgs
     ]
+
+
+@router.delete("/{session_id}/messages/{message_id}", status_code=204)
+def delete_message(
+    session_id: str, message_id: str, user_id: str = Depends(get_current_user_id)
+):
+    """删除会话中的单条消息（仅限当前用户；不影响 LangGraph checkpoint 历史）。"""
+    _owned_or_404(session_id, user_id)
+    with SessionLocal() as db:
+        m = db.get(Message, message_id)
+        if not m or m.session_id != session_id:
+            raise HTTPException(404, "消息不存在")
+        db.delete(m)
+        db.commit()
 
 
 @router.get("/{session_id}/stats")
@@ -134,7 +153,6 @@ def session_stats(session_id: str, user_id: str = Depends(get_current_user_id)) 
     def _chars(lst):
         return sum(len(m.content) for m in lst)
 
-    # 最长单次助手回复
     longest_response = max((len(m.content) for m in asst_msgs), default=0)
 
     first_at = msgs[0].created_at if msgs else None
@@ -194,7 +212,9 @@ def rename(
     session_id: str, body: RenameIn, user_id: str = Depends(get_current_user_id)
 ):
     _owned_or_404(session_id, user_id)
-    s = postgres.rename_session(session_id, body.title)
+    if body.title is None and body.pinned is None:
+        raise HTTPException(400, "缺少要修改的字段")
+    s = postgres.rename_session(session_id, title=body.title, pinned=body.pinned)
     if not s:
         raise HTTPException(404, "会话不存在")
     return _session_out(s)

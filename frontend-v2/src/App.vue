@@ -5,6 +5,7 @@ import Sidebar from "@/components/Sidebar.vue";
 import ChatView from "@/components/chat/ChatView.vue";
 import AuthModal from "@/components/dialogs/AuthModal.vue";
 import ProfileModal from "@/components/dialogs/ProfileModal.vue";
+import AdminModal from "@/components/dialogs/AdminModal.vue";
 import Icon from "@/components/common/Icon.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useSessionsStore } from "@/stores/sessions";
@@ -21,6 +22,7 @@ const chat = useChatStore();
 const healthOk = ref(false);
 const healthText = ref("检查中…");
 const showProfile = ref(false);
+const showAdmin = ref(false);
 
 // 侧边栏显隐与宽度（持久化）
 const SIDEBAR_MIN = 180;
@@ -79,16 +81,17 @@ onMounted(async () => {
     </button>
 
     <Sidebar
-      v-show="sidebarOpen"
-      :width="sidebarWidth"
+      :width="sidebarOpen ? sidebarWidth : 0"
       :health-text="healthText"
       :health-ok="healthOk"
       @toggle="setSidebarOpen(!sidebarOpen)"
       @width-change="setSidebarWidth"
       @profile="showProfile = true"
+      @admin="showAdmin = true"
     />
     <ChatView />
     <AuthModal />
     <ProfileModal v-model="showProfile" />
+    <AdminModal v-model="showAdmin" />
   </div>
 </template>

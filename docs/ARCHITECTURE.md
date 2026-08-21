@@ -87,8 +87,8 @@ supervisor(LLM + [rag_agent, web_search, mcp_agent] 作为工具)
             └─► 外部 MCP（streamable http）
 ```
 
-> **提示词动态化**：supervisor 的 system prompt 由 `_build_supervisor_prompt(use_rag, use_search)`
-> **按开关动态生成**——关闭知识库/搜索时，提示词同步移除对应工具描述并明确禁止调用，
+> **提示词动态化**：supervisor 的 system prompt 由 `_build_supervisor_prompt(use_rag, use_search, use_memory)`
+> **按开关动态生成**——关闭知识库/搜索/记忆时，提示词同步移除对应工具描述并明确禁止调用，
 > 避免 LLM 幻觉调用不存在的工具（曾导致"关闭开关仍显示调用 rag_agent"的假象）。
 
 ## RAG 流程
@@ -176,6 +176,7 @@ supervisor(LLM + [rag_agent, web_search, mcp_agent] 作为工具)
 Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 - `updates` 模式识别工具调用/子 Agent 调度 → 发 `tool`/`agent` 事件；命中 `__interrupt__` 节点 → 发 `interrupt` 事件（HITL，携带待确认问题 + `session_id`）。
 - `messages` 模式产出 `(AIMessageChunk, metadata)`；仅接受**顶层 supervisor**（`checkpoint_ns` 不含 `|`）的 AI 文本 token，子 Agent 的嵌套命名空间（`model:xx|mcp_agent:xx`）被跳过，避免中间输出混乱。
+- **开场白缓冲 + 去重**：工具调用前的开场白 token 先缓冲，检测到 `tool_call` 时一次性推送完整开场白（避免半句/悬停）；工具后的答案流经 `_PreludeDedupe` 前缀去重（LLM 常重新生成完整开场白），保证"开场白 + 答案"无缝衔接。
 
 同步 DB 调用（会话/消息/历史）通过 `anyio.to_thread` 放入线程池，避免阻塞事件循环——
 这是"不改 ORM 为异步"的轻量方案（SQLAlchemy 保持同步，热点路由不卡 IO）。
