@@ -66,14 +66,17 @@ Agentchat/
 │   │   ├── security.py       # 密码哈希 + JWT（用户认证）
 │   │   ├── scheduler.py      # 定时/批处理任务调度器（asyncio，零依赖）
 │   │   └── schemas/          # Pydantic 请求/响应模型
-│   ├── tests/                # pytest 单元测试（BM25 / SQL校验 / 分块 / RRF / 路由 / 安全 / 调度）
+│   ├── tests/                # pytest 测试（unit/ 单元 + integration/ 集成）
+│   │   ├── unit/             # 纯逻辑单元测试（BM25 / 分块 / 评估 / RRF / 流式去重…）
+│   │   └── integration/      # 需 Postgres+Milvus 的集成测试（test_api / 检索回归）
 │   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / verify_auth_tasks / MCP 服务器入口
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
-├── data/
+├── data/                     # 用户内容（知识库文档 / 上传文件）
 │   ├── kb/                   # 示例知识库文档
 │   └── uploads/              # 网页上传的原始文件（自动生成，可下载/预览）
+├── backend/data/             # 应用运行时数据（model_choice.json + eval/ 评估产物）
 └── docs/
     ├── ARCHITECTURE.md       # 架构与设计说明
     ├── SETUP.md              # 环境搭建指南
