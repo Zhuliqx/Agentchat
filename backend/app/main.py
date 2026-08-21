@@ -14,7 +14,6 @@ import os
 import sys
 import threading
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import settings
+# 前端 dist 路径直接基于项目根计算（见下方 APP_DIST）
+
+from app.config import PROJECT_ROOT, settings
 
 # 按配置设置根日志级别（便于生产观测模型耗时等 debug 信息）
 logging.getLogger().setLevel(
@@ -48,12 +49,14 @@ if settings.hf_offline:
         pass
 
 from app.api.routes import (
+    admin,
     auth,
     chat,
     health,
     memory,
     models,
     rag,
+    search,
     sessions,
     tasks,
 )
@@ -69,8 +72,7 @@ from app.mcp_integration.client import get_mcp_manager
 from app.rag.vector_store import ensure_vector_store
 from app.scheduler import scheduler_loop
 
-FRONTEND_V2_DIST = Path(__file__).resolve().parent.parent.parent / "frontend-v2" / "dist"
-FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
+APP_DIST = PROJECT_ROOT / "frontend-v2" / "dist"
 
 
 def _warmup_sync() -> None:
@@ -126,6 +128,10 @@ async def lifespan(app: FastAPI):
         _root.addHandler(_handler)
     _root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
     init_db()
+    # 运行时配置覆盖（DB app_settings 优先级高于 .env；管理后台可在线调整）
+    from app.db.runtime_settings import load_runtime_settings
+
+    load_runtime_settings()
     try:
         ensure_vector_store()
     except Exception as exc:  # 数据库未启动时不阻塞应用
@@ -207,6 +213,8 @@ app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
+app.include_router(search.router, prefix="/api/search", tags=["search"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
 # 托管前端（最后挂载，作为兜底；"/" 返回 index.html）
 class _NoCacheStaticFiles(StaticFiles):
@@ -218,15 +226,10 @@ class _NoCacheStaticFiles(StaticFiles):
         return response
 
 
-if FRONTEND_V2_DIST.exists():
-    # 优先托管新版前端 frontend-v2 的构建产物（Vue 3 + Vite + TS）
+if APP_DIST.exists():
+    # 托管新版前端 frontend-v2 的构建产物（Vue 3 + Vite + TS）
     app.mount(
         "/",
-        _NoCacheStaticFiles(directory=FRONTEND_V2_DIST, html=True),
-        name="frontend-v2",
-    )
-elif FRONTEND_DIR.exists():
-    # 回退旧版纯静态前端（legacy）
-    app.mount(
-        "/", _NoCacheStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend"
+        _NoCacheStaticFiles(directory=APP_DIST, html=True),
+        name="frontend",
     )
