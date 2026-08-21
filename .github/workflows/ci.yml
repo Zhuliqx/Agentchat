@@ -56,3 +56,48 @@ jobs:
 
       - name: "Unit tests (Vitest)"
         run: npm run test -- --run
+
+  # RAG 检索回归：真实启动 Postgres + Milvus，摄入固定测试文档，
+  # 断言检索命中率不低于阈值，防止改检索代码/参数导致质量退化。
+  rag-regression:
+    name: RAG Retrieval Regression
+    runs-on: ubuntu-latest
+    env:
+      # CI 中关闭 rerank（避免下载 ~1.1GB 模型），只验证混合检索召回
+      RAG_RERANK_ENABLED: "false"
+      # 允许从 HF 下载 bge-small-zh-v1.5（~100MB，首次拉取）
+      HF_OFFLINE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: "Install dependencies"
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: "Start Postgres + Milvus"
+        run: docker compose up -d postgres etcd minio standalone
+
+      - name: "Wait for Milvus healthy"
+        run: |
+          for i in $(seq 1 90); do
+            if docker compose ps --status running --format '{{.Service}} {{.Health}}' | grep -q 'standalone healthy'; then
+              echo "Milvus healthy"; break
+            fi
+            sleep 5
+          done
+          docker compose ps
+
+      - name: "Init DB + ingest fixture"
+        working-directory: backend
+        run: |
+          python scripts/init_db.py
+          python -c "from pathlib import Path; from app.rag.ingestion import ingest_file; print(ingest_file(Path('tests/fixtures/kb_ci.txt'), user_id='default'))"
+
+      - name: "Retrieval regression (hit-rate threshold)"
+        working-directory: backend
+        run: pytest tests/test_rag_regression.py -q
+
