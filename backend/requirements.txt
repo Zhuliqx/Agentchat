@@ -38,5 +38,8 @@ chardet>=5.2          # 文档编码自动检测（GBK 等非 UTF-8 文件）
 # ---- 检索（可选：BM25 中文分词，需在 .env 设 BM25_USE_JIEBA=true）----
 jieba>=0.42
 
+# ---- 可观测性（Langfuse，未配置 LANGFUSE_* 时自动禁用，不影响运行）----
+langfuse>=3.0
+
 # ---- 其他 ----
 httpx>=0.27

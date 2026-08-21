@@ -1,0 +1,155 @@
+# Langfuse 自托管（Open Source LLM Observability）— v4
+#
+# 用法：
+#   docker compose -f docker-compose.langfuse.yml up -d     # 启动
+#   docker compose -f docker-compose.langfuse.yml down      # 停止（保留数据卷）
+#   docker compose -f docker-compose.langfuse.yml down -v   # 停止并删数据
+#
+# 访问：http://localhost:3000（首次用 LANGFUSE_INIT_USER_* 自动创建的账号登录）
+# 说明：独立 project（name: langfuse），与主 docker-compose.yml 的
+#       Postgres/Milvus/Minio 完全隔离，端口也已避开冲突。
+name: langfuse
+
+services:
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    restart: always
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    ports:
+      - 127.0.0.1:3030:3030
+    environment: &lf-env
+      NEXTAUTH_URL: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      SALT: ${LANGFUSE_SALT:-mysalt-dev-change-me}
+      # 生成: openssl rand -hex 32
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: "false"
+      REDIS_CONNECTION_STRING: redis://redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:clickhouse@clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      # 事件/媒体上传 -> 内部 minio（S3 协议）
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4
+    restart: always
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    ports:
+      - 3000:3000
+    environment:
+      <<: *lf-env
+      # 自动初始化项目（v4 必须设置 ORG_ID，否则初始化被忽略）
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-mysecret-dev-change-me}
+      LANGFUSE_INIT_ORG_ID: org_agentchat
+      LANGFUSE_INIT_ORG_NAME: Agentchat
+      LANGFUSE_INIT_PROJECT_ID: proj_agentchat
+      LANGFUSE_INIT_PROJECT_NAME: agentchat
+      # 本项目后端将使用这两个 key 上报 trace（.env -> LANGFUSE_PUBLIC_KEY/SECRET_KEY）
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-agentchat-dev
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-agentchat-dev
+      LANGFUSE_INIT_USER_EMAIL: admin@langfuse.local
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:-admin123456}
+
+  postgres:
+    image: pgvector/pgvector:pg16   # 复用本地已有镜像（Langfuse 仅需标准 PG，pgvector 镜像完全兼容）
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    # 不暴露宿主端口（web/worker 经内部网络访问），避免与主 compose 的 5432 冲突
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: docker.io/redis:7
+    restart: always
+    command: --maxmemory-policy noeviction
+    ports:
+      - 127.0.0.1:16379:6379   # 宿主端口改为 16379，避免占用 6379
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12
+    restart: always
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - 127.0.0.1:18123:8123   # 仅 API 端口，避开主 compose 的 9000(minio)
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  minio:
+    image: cgr.dev/chainguard/minio
+    restart: always
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    ports:
+      - 127.0.0.1:19090:9000   # 避开主 compose 的 9000/9001
+      - 127.0.0.1:19091:9001
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+volumes:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:
+  langfuse_redis_data:

@@ -171,6 +171,9 @@ async def lifespan(app: FastAPI):
     scheduler_stop.set()
     scheduler_task.cancel()
     await get_mcp_manager().stop_all()
+    from app.observability import flush_langfuse
+
+    flush_langfuse()  # Langfuse 尾部 trace 刷出
     await close_checkpointer()
     await close_store()
 

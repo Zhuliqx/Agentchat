@@ -356,6 +356,13 @@ def _prepare_run(
     config = {"configurable": {"thread_id": session_id}} if (cp and session_id) else None
     if config and checkpoint_id:
         config["configurable"]["checkpoint_id"] = checkpoint_id
+    # 可观测性：挂 Langfuse handler（未配置则 None，fail-open）。
+    # 放在每次 invocation 的 config 而非 lru 缓存的图实例，避免跨会话复用。
+    from app.observability import get_langfuse_handler
+
+    lf_handler = get_langfuse_handler()
+    if config and lf_handler is not None:
+        config["callbacks"] = [lf_handler]
     if resume is not None:
         input_data: Any = Command(resume=resume)
     else:

@@ -1,0 +1,66 @@
+"""Langfuse 可观测性接入（fail-open）。
+
+设计：
+- 仅在 LANGFUSE_HOST / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY 三个变量
+  都配置时才创建 handler；否则返回 None（后端照常运行，零侵入）。
+- 接入方式：在 `run_agent`/`stream_agent` 的**每次 invocation** 把 handler
+  放进 config["callbacks"]，由 LangGraph 传播给子 agent/LLM/tool——
+  不写进 lru 缓存的图实例，避免跨会话复用 handler。
+- 关闭时 flush，确保尾部 trace 不丢。
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Optional
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def langfuse_enabled() -> bool:
+    return bool(
+        getattr(settings, "langfuse_host", "")
+        and getattr(settings, "langfuse_public_key", "")
+        and getattr(settings, "langfuse_secret_key", "")
+    )
+
+
+_handler: Optional[Any] = None
+
+
+def get_langfuse_handler() -> Optional[Any]:
+    """返回 Langfuse CallbackHandler（未配置则 None）。"""
+    global _handler
+    if not langfuse_enabled():
+        return None
+    if _handler is not None:
+        return _handler
+    try:
+        # langfuse 4.x：环境变量驱动。注入 .env 配置后，
+        # Langfuse() 全局客户端 + 无参 CallbackHandler() 自动读取。
+        import os
+
+        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
+        os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
+        os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
+
+        from langfuse import Langfuse
+        from langfuse.langchain import CallbackHandler
+
+        Langfuse()  # 初始化全局客户端（读取 LANGFUSE_* 环境变量）
+        _handler = CallbackHandler()
+        logger.info("Langfuse 已启用（%s）", settings.langfuse_host)
+        return _handler
+    except Exception as exc:  # noqa: BLE001 - 观测失败不影响主流程
+        logger.warning("Langfuse 初始化失败（自动禁用）: %s", exc)
+        return None
+
+
+def flush_langfuse() -> None:
+    """关闭时 flush，避免尾部 trace 丢失。"""
+    if _handler is not None:
+        try:
+            _handler.flush()
+        except Exception:  # noqa: BLE001
+            pass

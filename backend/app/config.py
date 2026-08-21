@@ -160,6 +160,11 @@ class Settings(BaseSettings):
     code_exec_timeout: float = 15.0  # 单段代码执行超时（秒），settrace 计时中断
     code_exec_max_output: int = 8000  # stdout/stderr 截断上限（字符）
 
+    # ---- 可观测性（Langfuse，可选；三个变量都配置才启用）----
+    langfuse_host: str = ""
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
     # ---- CORS（显式白名单；避免 "*"+credentials 回显任意 Origin）----
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
 
