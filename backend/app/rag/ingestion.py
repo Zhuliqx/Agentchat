@@ -14,6 +14,7 @@ from app.config import settings
 from app.db.models import Document
 from app.db.postgres import SessionLocal
 from app.rag import vector_store
+from app.rag.hybrid import invalidate_docs_signature
 
 _MARKDOWN_SUFFIX = {".md", ".markdown"}
 _MD_HEADERS = [("#", "H1"), ("##", "H2"), ("###", "H3")]
@@ -22,15 +23,27 @@ _MD_HEADERS = [("#", "H1"), ("##", "H2"), ("###", "H3")]
 def _base_splitter():
     """通用分块器：中文按段落/句号/感叹号/问号切分，兼顾语义完整性。
 
-    langchain_text_splitters 延迟导入：其包 __init__ 会连锁引入
-    torch/transformers/numpy（约 13s），只在真正摄入文档时才加载。
+    separators 首位加入 `=====`：兼容用等号线分章的文本（如客服知识库），
+    让章节独立成块、块内语义聚焦，避免"章节说明 + 正文"混块稀释 embedding。
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     return RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
-        separators=["\n\n", "\n", "。", "！", "？", ". ", "! ", "? ", " ", ""],
+        separators=[
+            "=====",
+            "\n\n",
+            "\n",
+            "。",
+            "！",
+            "？",
+            ". ",
+            "! ",
+            "? ",
+            " ",
+            "",
+        ],
     )
 
 
@@ -180,7 +193,10 @@ def _chunk_hash(text: str) -> str:
 
 
 def ingest_file(
-    path: Path, filename: str | None = None, user_id: str = "default"
+    path: Path,
+    filename: str | None = None,
+    user_id: str = "default",
+    progress_cb=None,
 ) -> dict[str, Any]:
     """摄入单个文件到向量库（按用户隔离），返回统计信息。
 
@@ -190,18 +206,29 @@ def ingest_file(
     - 旧文档中已消失的块 → 从 Postgres 与 Milvus 删除；
     - 整篇无变化 → 直接返回 unchanged=True（不触碰任何数据）。
     原子性：先解析成功再删旧增新，失败时旧数据不受影响。
+
+    progress_cb(percent: int, stage: str)：摄入阶段回调（供前端展示进度）。
     """
+
+    def _progress(percent: int, stage: str) -> None:
+        if progress_cb:
+            progress_cb(percent, stage)
+
     path = Path(path)
     source = str(path.resolve())
     filename = filename or path.name
 
     # 1. 解析 + 分块（失败则不触碰旧数据）
+    _progress(5, "读取文件")
     text = load_text(path)
+    _progress(15, "分块中")
     is_markdown = path.suffix.lower() in _MARKDOWN_SUFFIX
     chunks = split_text(text, source, is_markdown=is_markdown)
     if not chunks:
+        _progress(100, "无内容可摄入")
         return {"filename": filename, "chunks": 0, "source": source}
     new_hashes = [_chunk_hash(c["text"]) for c in chunks]
+    _progress(25, "分块完成")
 
     # 2. 读取该用户已有同 source 块：hash -> id，用于增量对比
     existing: dict[str, str] = {}  # hash -> doc_id
@@ -220,10 +247,12 @@ def ingest_file(
 
     # 3. 整篇无变化：直接返回，不触碰任何数据
     if not stale_ids and not to_write:
+        _progress(100, "内容无变化，跳过")
         return {"filename": filename, "chunks": len(chunks), "source": source, "unchanged": True}
 
     # 4. 删除已消失的块（Postgres + Milvus，仅该用户）
     if stale_ids:
+        _progress(35, "清理过期分块")
         with SessionLocal() as db:
             db.query(Document).filter(Document.id.in_(stale_ids)).delete(
                 synchronize_session=False
@@ -235,8 +264,10 @@ def ingest_file(
     if to_write:
         from app.rag.embedding import get_embedder
 
+        _progress(40, "生成向量嵌入")
         new_chunks = [c for _, c in to_write]
         vectors = get_embedder().embed_texts([c["text"] for c in new_chunks])
+        _progress(80, "写入向量库")
         with SessionLocal() as db:
             docs = []
             for orig_i, (_, chunk) in enumerate(to_write):
@@ -261,12 +292,8 @@ def ingest_file(
         )
 
     # 6. 失效文档集签名缓存（使 BM25 关键词通道立即包含新文档）
-    try:
-        from app.rag.hybrid import invalidate_docs_signature
-
-        invalidate_docs_signature()
-    except Exception:
-        pass
+    invalidate_docs_signature()
+    _progress(100, "完成")
 
     return {
         "filename": filename,

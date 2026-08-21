@@ -1,0 +1,20 @@
+{
+  "name": "rag-ground-truth-example",
+  "note": "公共示例数据集（可提交、CI 用）。请勿用它替代私有真实基准；仅用于演示 eval_quality.py / eval_rag.py 流程与单测。",
+  "cases": [
+    {
+      "id": "demo_01",
+      "question": "公司有多少名员工？",
+      "answer": "公司现有约 120 名员工。",
+      "expected_sources": [],
+      "notes": "示例：来源需指向真实文档"
+    },
+    {
+      "id": "demo_02",
+      "question": "公司的旗舰产品是什么？",
+      "answer": "公司的旗舰产品是一个多 Agent 平台。",
+      "expected_sources": [],
+      "notes": "示例："
+    }
+  ]
+}
