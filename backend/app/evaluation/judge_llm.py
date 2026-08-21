@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -27,8 +28,9 @@ JUDGE_MODEL = "deepseek-chat"  # 评审固定模型（DeepSeek 直连）
 EVAL_TEMPERATURE = 0.0
 
 
+@lru_cache(maxsize=1)
 def get_judge_llm() -> ChatOpenAI:
-    """评审 LLM：确定性打分（独立实例，不缓存在主 LLM 工厂）。"""
+    """评审 LLM：确定性打分（独立实例，lru_cache 复用，避免每次调用新建）。"""
     return ChatOpenAI(
         model=JUDGE_MODEL,
         api_key=settings.deepseek_api_key,
@@ -40,6 +42,7 @@ def get_judge_llm() -> ChatOpenAI:
     )
 
 
+@lru_cache(maxsize=1)
 def get_eval_generator() -> ChatOpenAI:
     """评估用答案生成 LLM（与主对话同模型；temperature 0.2 贴近生产）。"""
     model = settings.deepseek_model or settings.llm_model or JUDGE_MODEL

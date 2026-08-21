@@ -211,7 +211,12 @@ def compare(path_a: Path, path_b: Path) -> int:
     sa, sb = a["summary"], b["summary"]
     print(f"对比 {path_a.name}  →  {path_b.name}\n")
     print(f"{'问题':<30}{'MRR(A)':<10}{'MRR(B)':<10}变化")
-    for ra, rb in zip(a.get("cases", []), b.get("cases", [])):
+    # 按 query 对齐（两份 JSON 的 case 顺序/数量可能不同，不能按位置 zip）
+    mb = {r.get("query", ""): r for r in b.get("cases", [])}
+    for ra in a.get("cases", []):
+        rb = mb.get(ra.get("query", ""))
+        if rb is None:
+            continue
         mrr_a = ra.get("mrr_contrib", 0.0)
         mrr_b = rb.get("mrr_contrib", 0.0)
         delta = "→MRR↑" if mrr_b > mrr_a else ("→MRR↓" if mrr_b < mrr_a else "—")
@@ -227,22 +232,28 @@ def load_cases(dataset_path: str | None) -> tuple[list[dict], str]:
     """案例来源：内置(关键词模式) 或 GT 文件(source 模式优先，退回关键词)。"""
     if not dataset_path:
         return list(CASES), "keywords"
-    cases = [c for c in CASES]
     try:
         gts = load_ground_truth(dataset_path)
     except Exception as exc:
         print(f"⚠ 读取 GT 失败: {exc}；退回内置案例")
-        return cases, "keywords"
+        return list(CASES), "keywords"
     gt_cases = []
     for c in gts:
+        # 仅当 GT 提供了 expected_sources 才判"来源命中"；
+        # 无来源的 case 无判定依据，跳过（避免退回"问题分词"导致误报 miss）
+        if not c.expected_sources:
+            continue
         gt_cases.append(
             {
                 "question": c.question,
-                "expected": c.expected_sources or c.question.split(),
+                "expected": c.expected_sources,
                 "top_k": 4,
             }
         )
-    return gt_cases or cases, "source" if gts and gts[0].expected_sources else "keywords"
+    if not gt_cases:
+        print("GT 均未提供 expected_sources，退回内置案例")
+        return list(CASES), "keywords"
+    return gt_cases, "source"
 
 
 def main() -> None:

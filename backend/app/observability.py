@@ -7,15 +7,20 @@
   放进 config["callbacks"]，由 LangGraph 传播给子 agent/LLM/tool——
   不写进 lru 缓存的图实例，避免跨会话复用 handler。
 - 关闭时 flush，确保尾部 trace 不丢。
+- 线程安全：初始化用 lock 保护；多 worker 并发首次调用只创建一次。
 """
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Optional
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+_init_lock = threading.Lock()
+_handler: Optional[Any] = None
 
 
 def langfuse_enabled() -> bool:
@@ -26,35 +31,35 @@ def langfuse_enabled() -> bool:
     )
 
 
-_handler: Optional[Any] = None
-
-
 def get_langfuse_handler() -> Optional[Any]:
-    """返回 Langfuse CallbackHandler（未配置则 None）。"""
+    """返回 Langfuse CallbackHandler（未配置则 None）。线程安全、只初始化一次。"""
     global _handler
     if not langfuse_enabled():
         return None
     if _handler is not None:
         return _handler
-    try:
-        # langfuse 4.x：环境变量驱动。注入 .env 配置后，
-        # Langfuse() 全局客户端 + 无参 CallbackHandler() 自动读取。
-        import os
+    with _init_lock:
+        if _handler is not None:  # 双检锁：并发首次调用只创建一次
+            return _handler
+        try:
+            # langfuse 4.x：环境变量驱动。以 settings(.env) 为权威来源，
+            # 强制覆盖进程环境变量，避免与已有环境变量冲突导致 host/key 不一致。
+            import os
 
-        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
-        os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
-        os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
+            os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key
+            os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key
+            os.environ["LANGFUSE_HOST"] = settings.langfuse_host
 
-        from langfuse import Langfuse
-        from langfuse.langchain import CallbackHandler
+            from langfuse import Langfuse
+            from langfuse.langchain import CallbackHandler
 
-        Langfuse()  # 初始化全局客户端（读取 LANGFUSE_* 环境变量）
-        _handler = CallbackHandler()
-        logger.info("Langfuse 已启用（%s）", settings.langfuse_host)
-        return _handler
-    except Exception as exc:  # noqa: BLE001 - 观测失败不影响主流程
-        logger.warning("Langfuse 初始化失败（自动禁用）: %s", exc)
-        return None
+            Langfuse()  # 初始化全局客户端（读取 LANGFUSE_* 环境变量）
+            _handler = CallbackHandler()
+            logger.info("Langfuse 已启用（%s）", settings.langfuse_host)
+            return _handler
+        except Exception as exc:  # noqa: BLE001 - 观测失败不影响主流程
+            logger.warning("Langfuse 初始化失败（自动禁用）: %s", exc)
+            return None
 
 
 def flush_langfuse() -> None:
@@ -64,3 +69,4 @@ def flush_langfuse() -> None:
             _handler.flush()
         except Exception:  # noqa: BLE001
             pass
+
