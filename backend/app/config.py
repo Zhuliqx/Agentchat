@@ -153,8 +153,12 @@ class Settings(BaseSettings):
 
     # ---- Prompt 注入防护 ----
     # 检索/搜索外部内容按「不可信数据块」隔离（总是生效）；本开关控制注入指令检测：
-    # 外部内容命中→剔除该块并告警，用户 query 命中→拒绝请求（见 app/security/prompt_injection.py）
+    # 外部内容命中→剔除该块并告警，用户 query 命中→拒绝请求（见 app/rag/prompt_injection.py）
     injection_detection_enabled: bool = True
+    # 规则命中后用 LLM 复核再剔除（进一步降误报；有 LLM 调用成本，默认关）
+    injection_llm_review: bool = False
+    # 输出侧泄露检测（系统提示词片段/密钥模式；零成本正则，常开，仅告警不改回答）
+    injection_output_filter: bool = True
 
     # 模型离线加载：embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查
     # 卡住（HF 网络不可达场景）。需下载新模型时临时设 False。

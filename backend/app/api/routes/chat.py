@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
+from app.config import settings
 from app.agents.graph import (
     AgentTimeoutError,
     get_supervisor_graph,
@@ -31,7 +32,7 @@ from app.api.deps import get_current_user_id
 from app.db import postgres
 from app.db.memory_store import get_checkpointer
 from app.schemas.chat import AgentEvent, ChatRequest, ChatResponse
-from app.rag.prompt_injection import detect_injection
+from app.rag.prompt_injection import detect_injection, detect_leak
 
 router = APIRouter()
 
@@ -143,6 +144,11 @@ async def _save_assistant_if_final(
     if result.get("hitl_pending") is not None:
         _hitl_checked.pop(session_id, None)
         return None
+    # 输出侧泄露检测：回答含系统提示词片段/密钥模式 → 告警（不改回答）
+    if settings.injection_output_filter:
+        leaked, kinds = detect_leak(result.get("answer", ""))
+        if leaked:
+            logger.warning("检测到回答泄露信号 session=%s kinds=%s", session_id, kinds)
     sources = get_recent_rag_sources(user_id or "default") or None
     msg = await anyio.to_thread.run_sync(
         postgres.add_message, session_id, "assistant", result["answer"], sources
