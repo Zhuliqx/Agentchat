@@ -89,3 +89,32 @@ python scripts/eval_rag.py --compare data/eval/rag_eval_A.json data/eval/rag_eva
 
 _结论：改写的"正确性"已通过实验验证（两档零降损、llm 质量达标），但"有效性"受限于
 当前测试集的天花板。若后续知识库规模化或检索基线变差，启用路径已就绪。_
+
+## 8. 端到端（生成侧）验证（补充）
+
+检索侧无增益后，补跑**生成侧**验证：同一口语集 8 条，rewrite off/rule/llm 三档端到端
+（`eval_quality.py` LLM-judge 四指标，生产同路径 retriever）。
+
+| 配置 | CP | CR | **faithfulness** | relevancy |
+|------|-----|-----|------|-----------|
+| off（基线） | 0.854 | 0.875 | **0.975** | 1.0 |
+| rule | 0.854 | 0.875 | **0.863**（-0.112） | 1.0 |
+| llm | 0.854 | 0.875 | **0.853**（-0.122） | 1.0 |
+
+对比 off vs llm：faithfulness 胜 0 / 平 5 / 负 3，下降集中在 s08(-0.50)/s01(-0.33)/s07(-0.14)。
+
+结论：
+- 检索指标（CP/CR）完全不变 → 改写未改变召回集合（基线已饱和，与 §4 一致）；
+- 生成侧 faithfulness 反而下降 → 双路检索使生成器采信了排序微变的块（或 judge 方差）；
+- **端到端再次确认：改写默认关闭是正确决策**；若启用应走「触发式」（仅低召回时）。
+
+系统整体基线（ground_truth 40 条，rewrite off）：
+**CP 0.925 / CR 0.963 / faithfulness 0.923 / relevancy 1.0**。
+
+复现：
+```bash
+python scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --out data/eval/qe_spoken_off.json
+python scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --rewrite rule --out data/eval/qe_spoken_rule.json
+python scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --rewrite llm --out data/eval/qe_spoken_llm.json
+python scripts/eval_quality.py --compare data/eval/qe_spoken_off.json data/eval/qe_spoken_llm.json
+```

@@ -239,6 +239,11 @@ def _apply_overrides(args: argparse.Namespace) -> list[str]:
     if args.max_per_doc is not None:
         settings.rag_max_per_doc = args.max_per_doc
         changed.append(f"rag_max_per_doc={args.max_per_doc}")
+    if args.rewrite is not None:
+        settings.query_rewrite_enabled = args.rewrite != "none"
+        if args.rewrite != "none":
+            settings.query_rewrite_mode = args.rewrite
+        changed.append(f"query_rewrite_mode={args.rewrite}")
     return changed
 
 
@@ -253,6 +258,8 @@ def _overrides() -> dict[str, Any]:
         "rerank_top_k": settings.rerank_top_k,
         "rag_max_per_doc": settings.rag_max_per_doc,
         "rag_max_chunk_chars": settings.rag_max_chunk_chars,
+        "query_rewrite_enabled": settings.query_rewrite_enabled,
+        "query_rewrite_mode": settings.query_rewrite_mode,
     }
 
 
@@ -338,6 +345,26 @@ def _compare(a: dict, b: dict) -> int:
             continue
         print(f"{k:<26}{va:>8.3f}{vb:>8.3f}{vb - va:+10.3f}")
 
+    # 逐 case 对齐（按 id）：faithfulness 胜/负/平 + 变化最大者（洞察瓶颈在哪些案例）
+    mb = {r.get("id"): r for r in b.get("cases", [])}
+    deltas: list[tuple[str, float, float]] = []
+    for ra in a.get("cases", []):
+        rb = mb.get(ra.get("id"))
+        if rb is None:
+            continue
+        fa, fb = ra.get("metrics.faithfulness"), rb.get("metrics.faithfulness")
+        if isinstance(fa, (int, float)) and isinstance(fb, (int, float)):
+            deltas.append((ra.get("id", ""), float(fb) - float(fa), float(fb)))
+    if deltas:
+        wins = sum(1 for _, d, _ in deltas if d > 0.01)
+        ties = sum(1 for _, d, _ in deltas if abs(d) <= 0.01)
+        losses = sum(1 for _, d, _ in deltas if d < -0.01)
+        print(f"\nfaithfulness 逐条: 胜 {wins} / 平 {ties} / 负 {losses}")
+        for label, key in (("提升最多", False), ("下降最多", True)):
+            ranked = sorted(deltas, key=lambda x: x[1], reverse=not key)
+            top = ", ".join(f"{i}:{d:+.2f}" for i, d, _ in ranked[:5] if abs(d) > 0.01)
+            if top:
+                print(f"  {label}: {top}")
     print(
         "\n结论方向：相对变化可信；绝对值受 LLM-judge 同源偏好影响，"
         "建议同时看逐 case 明细文件。"
@@ -357,6 +384,12 @@ def main() -> None:
     parser.add_argument("--no-rerank", action="store_true", help="关闭 rerank（A/B）")
     parser.add_argument("--no-hybrid", action="store_true", help="关闭混合检索（A/B）")
     parser.add_argument("--max-per-doc", type=int, default=None, help="覆盖 RAG_MAX_PER_DOC（A/B）")
+    parser.add_argument(
+        "--rewrite",
+        default=None,
+        choices=["none", "rule", "llm"],
+        help="启用并覆盖 QUERY_REWRITE_MODE（A/B）；none=关闭改写",
+    )
     parser.add_argument("--out", default=None, help="结果 JSON 输出路径")
     parser.add_argument("--report", action="store_true", help="同时生成 Markdown 报告")
     parser.add_argument("--compare", nargs=2, metavar=("A", "B"), help="对比两份结果 JSON")
