@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     rerank_top_k: int = 4
     rerank_candidate_k: int = 6  # 送入 rerank 的候选数上限（控制 CPU 推理量；越小越快）
     rerank_max_length: int = 512  # rerank 输入文本截断字符数（减少 token）
+    # 检索查询改写（Query Rewriting）：改善「口语查询 × 书面文档」的语义鸿沟。
+    # mode: none(默认,原样) / rule(规则:去框架词+泛化并列,零依赖,CI 可挂) /
+    #       llm(LLM 改写为检索 query,失败回退原句)
+    # 改写后与「原 query」双路检索兜底，防改写丢失信息（见 retriever._expand_queries）
+    query_rewrite_enabled: bool = False
+    query_rewrite_mode: str = "rule"
+    query_rewrite_cache_size: int = 512
 
     # 模型离线加载：embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查
     # 卡住（HF 网络不可达场景）。需下载新模型时临时设 False。

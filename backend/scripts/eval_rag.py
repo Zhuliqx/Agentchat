@@ -21,10 +21,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.config import settings
 from app.evaluation import metrics, setup_utf8_stdio
 from app.evaluation.dataset import load_ground_truth
 from app.evaluation.judge_llm import build_ndcg_prompt, judge
-from app.rag import hybrid
+from app.rag.query_rewrite import rewrite_query
 from app.rag.retriever import get_retriever
 
 setup_utf8_stdio()
@@ -50,8 +51,10 @@ def _hit(mode: str, expected: list[str], source: str, text: str) -> bool:
     return any(k.lower() in joined for k in expected)
 
 
-def _eval_case(query: str, expected: list[str], mode: str, top_k: int) -> dict:
-    hits = hybrid.search_hybrid(query, top_k=top_k)
+def _eval_case(
+    query: str, expected: list[str], mode: str, hits: list[dict], top_k: int
+) -> dict:
+    """单条检索评估：hits 由生产同路径 retriever 产出（含改写/rerank/去重）。"""
     rank = next(
         (
             i
@@ -62,6 +65,7 @@ def _eval_case(query: str, expected: list[str], mode: str, top_k: int) -> dict:
     )
     return {
         "query": query,
+        "rewritten": rewrite_query(query) if settings.query_rewrite_enabled else None,
         "expected": expected,
         "mode": mode,
         "hits_count": len(hits),
@@ -173,7 +177,11 @@ def _hit_at_label(r: dict) -> str:
 
 def run_eval(cases: list[dict], mode: str, top_k: int) -> dict:
     print(f"RAG retrieval eval（mode={mode}, top_k={top_k}, {len(cases)} 案例）\n")
-    results = [_eval_case(c["question"], c.get("expected", []), mode, c.get("top_k") or top_k) for c in cases]
+    hits_list = _collect_docs_retriever(cases, top_k)  # 生产同路径（含改写）
+    results = [
+        _eval_case(c["question"], c.get("expected", []), mode, hits, c.get("top_k") or top_k)
+        for c, hits in zip(cases, hits_list)
+    ]
     for r in results:
         mark = "OK" if r["rank"] is not None else "X"
         print(
@@ -210,21 +218,44 @@ def compare(path_a: Path, path_b: Path) -> int:
     b = json.loads(path_b.read_text(encoding="utf-8-sig"))
     sa, sb = a["summary"], b["summary"]
     print(f"对比 {path_a.name}  →  {path_b.name}\n")
-    print(f"{'问题':<30}{'MRR(A)':<10}{'MRR(B)':<10}变化")
     # 按 query 对齐（两份 JSON 的 case 顺序/数量可能不同，不能按位置 zip）
     mb = {r.get("query", ""): r for r in b.get("cases", [])}
+    wins = losses = ties = 0
+    print(f"{'问题':<30}{'MRR(A)':<10}{'MRR(B)':<10}变化")
     for ra in a.get("cases", []):
         rb = mb.get(ra.get("query", ""))
         if rb is None:
             continue
         mrr_a = ra.get("mrr_contrib", 0.0)
         mrr_b = rb.get("mrr_contrib", 0.0)
-        delta = "→MRR↑" if mrr_b > mrr_a else ("→MRR↓" if mrr_b < mrr_a else "—")
+        if mrr_b > mrr_a:
+            wins += 1
+            delta = "→MRR↑"
+        elif mrr_b < mrr_a:
+            losses += 1
+            delta = "→MRR↓"
+        else:
+            ties += 1
+            delta = "—"
         print(f"{ra.get('query', '')[:30]:<30}{mrr_a:<10.2f}{mrr_b:<10.2f}{delta}")
+    print(f"\n胜 {wins} / 平 {ties} / 负 {losses}")
     print(
-        f"\nMRR: {sa.get('mrr'):.3f} → {sb.get('mrr'):.3f} "
+        f"MRR: {sa.get('mrr'):.3f} → {sb.get('mrr'):.3f} "
         f"({sb.get('mrr', 0) - sa.get('mrr', 0):+.3f})"
     )
+    for k in ("hit@1", "hit@3", "hit@5"):
+        va, vb = sa.get(k), sb.get(k)
+        if va is not None and vb is not None:
+            print(f"{k}: {va:.3f} → {vb:.3f} ({vb - va:+.3f})")
+    # 改写对照（B 侧记录 rewritten，展示前若干条便于人工核验改写质量）
+    shown = 0
+    for rb in b.get("cases", []):
+        rw = rb.get("rewritten")
+        if rw and rw != rb.get("query"):
+            print(f"  改写: {rb.get('query', '')[:24]:<24} → {rw[:40]}")
+            shown += 1
+            if shown >= 8:
+                break
     return 0 if sb.get("mrr", 0) >= sa.get("mrr", 0) else 1
 
 
@@ -264,6 +295,12 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=4, help="graded 模式 LLM 并发数")
     parser.add_argument("--rerank-max-length", type=int, default=None, help="覆盖 RERANK_MAX_LENGTH（A/B）")
     parser.add_argument(
+        "--rewrite",
+        default=None,
+        choices=["none", "rule", "llm"],
+        help="启用并覆盖 QUERY_REWRITE_MODE（A/B）；none=关闭改写",
+    )
+    parser.add_argument(
         "--compare", nargs=2, metavar=("A", "B"), help="对比两次评估结果 JSON"
     )
     args = parser.parse_args()
@@ -271,10 +308,15 @@ def main() -> None:
     if args.compare:
         raise SystemExit(compare(Path(args.compare[0]), Path(args.compare[1])))
 
-    if args.rerank_max_length is not None:
+    if args.rerank_max_length is not None or args.rewrite is not None:
         from app.config import settings
 
-        settings.rerank_max_length = args.rerank_max_length
+        if args.rerank_max_length is not None:
+            settings.rerank_max_length = args.rerank_max_length
+        if args.rewrite is not None:
+            settings.query_rewrite_enabled = args.rewrite != "none"
+            if args.rewrite != "none":
+                settings.query_rewrite_mode = args.rewrite
 
     cases, mode = load_cases(args.dataset)
     if args.graded:

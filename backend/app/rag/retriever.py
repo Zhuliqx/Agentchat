@@ -28,6 +28,42 @@ def _hit_key(h: dict) -> float:
     return 0.0
 
 
+def _expand_queries(query: str) -> list[str]:
+    """改写 + 原 query 双路检索兜底：改写丢了信息时原句还能召回。
+
+    改写未启用、改写为空、或改写结果与原句相同 → 单路（行为不变）。
+    注意：精排始终用「原 query」——实测对短改写 query（如「公司成立年份」）
+    精排打分反而不稳（口语原句含完整实体，对齐更强），改写只承担扩召回。
+    """
+    if not settings.query_rewrite_enabled:
+        return [query]
+    from app.rag.query_rewrite import rewrite_query  # 延迟导入防环
+
+    rewritten = rewrite_query(query)
+    if not rewritten or rewritten == query:
+        return [query]
+    return [query, rewritten]
+
+
+def _merge_multi(hits: list[dict]) -> list[dict]:
+    """多路（原 query + 改写）检索结果合并：按 (source, chunk_index) 保最高分。
+
+    注意：多路的 rrf/向量分数各自独立量纲，不能直接跨路比较，这里"保最高分"
+    只是近似去重；真正统一量纲依赖后续 rerank（开启时）。chunk_index 缺失的
+    结果用 vector_id 兜底区分，避免不同块被误并。
+    """
+    best: dict[tuple, dict] = {}
+    for h in hits:
+        key = (
+            h.get("source") or "",
+            h.get("chunk_index"),
+            h.get("id") if h.get("chunk_index") is None else None,
+        )
+        if key not in best or _hit_key(h) > _hit_key(best[key]):
+            best[key] = h
+    return sorted(best.values(), key=_hit_key, reverse=True)
+
+
 def _dedupe_and_merge(hits: list[dict], max_per_doc: int) -> list[dict]:
     """检索结果去重 + 相邻块合并（上下文压缩的第一层）。
 
@@ -95,21 +131,32 @@ class MilvusRetriever(BaseRetriever):
         else:
             candidate_k = self.top_k
         user_filter = self._user_filter()
-        if settings.hybrid_search:
-            hits = hybrid.search_hybrid(
-                query=query,
-                top_k=candidate_k,
-                score_threshold=self.score_threshold,
-                user_id=self.user_id,
-            )
-        else:
-            hits = vector_store.search(
-                query=query,
-                top_k=candidate_k,
-                score_threshold=self.score_threshold,
-                filter_expr=user_filter,
-            )
+        # 查询改写：原 query + 改写结果双路检索（未启用时单路，行为不变）
+        queries = _expand_queries(query)
+        all_hits: list[dict] = []
+        for q in queries:
+            if settings.hybrid_search:
+                all_hits.extend(
+                    hybrid.search_hybrid(
+                        query=q,
+                        top_k=candidate_k,
+                        score_threshold=self.score_threshold,
+                        user_id=self.user_id,
+                    )
+                )
+            else:
+                all_hits.extend(
+                    vector_store.search(
+                        query=q,
+                        top_k=candidate_k,
+                        score_threshold=self.score_threshold,
+                        filter_expr=user_filter,
+                    )
+                )
+        hits = _merge_multi(all_hits)
         if settings.rerank_enabled:
+            # 精排固定用原 query：跨路/改写 query 的 rerank 分数不可比，且短改写
+            # query 精排实测不稳（见 _expand_queries 注释）；改写只扩召回。
             hits = rerank(query, hits, top_k=self.top_k)
         else:
             hits = hits[: self.top_k]
