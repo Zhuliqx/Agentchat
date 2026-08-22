@@ -2,6 +2,21 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
+## 📊 量化成果速览
+
+> 全部数字来自真实评估（GT 40 条 / LLM-judge / 压测 / 多采样），方法、条件与复现见各文档。
+
+| 领域 | 关键指标 | 结果 | 一句话结论 |
+|------|---------|------|-----------|
+| 检索质量（GT 40 条） | MRR / Hit@1 | **0.944 / 0.900** | 混合检索 + rerank，来源级命中（[评估](docs/EVALUATION.md)） |
+| 生成质量 | Faithfulness / Relevancy | **0.923 / 1.0** | LLM-judge 四指标，低幻觉（[评估](docs/EVALUATION.md)） |
+| 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益（[评估 §7.3](docs/EVALUATION.md)） |
+| Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝（[AGENT_EVAL](docs/AGENT_EVAL.md)） |
+| 性能（单 worker） | 检索 p50 / 吞吐 | 82ms / ~16 QPS | 单机满足小团队，扩展触发信号明确（[PERFORMANCE](docs/PERFORMANCE.md)） |
+| 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成（[PERFORMANCE](docs/PERFORMANCE.md)） |
+| Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
+| 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[REPORT](docs/EVALUATION_REPORT.md)） |
+| 工程质量 | 单测 / 集成 | **103 / 18** | CI 挂检索回归（Ruff + pytest） |
 ## ✨ 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
