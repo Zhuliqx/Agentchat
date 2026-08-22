@@ -396,7 +396,7 @@ _record_rag_sources(user, sources)     # 记录引用来源，供前端溯源
 |------|------|
 | 进程内 `_RAG_SOURCES` 重启即失 | 对话结束即写 `Message.sources` 持久化；内存态只负责"流式推送瞬间" |
 | 多租户共享图缓存（`build_rag_agent` 是 lru_cache） | 图/工具共用，但每轮 `user_id` 来自运行时上下文 → 天然按调用隔离 |
-| 检索文本直接喂 LLM → prompt 注入风险 | 对脚本/样式类内容可脱敏；当前为受信知识库，风险低 |
+| 检索文本直接喂 LLM → prompt 注入风险 | ✅ 已实现：外部内容按「不可信数据块」隔离（`wrap_as_data`）+ 注入指令检测剔除 + 用户 query 拒绝（`app/rag/prompt_injection.py`） |
 
 ---
 

@@ -31,6 +31,7 @@ from app.api.deps import get_current_user_id
 from app.db import postgres
 from app.db.memory_store import get_checkpointer
 from app.schemas.chat import AgentEvent, ChatRequest, ChatResponse
+from app.rag.prompt_injection import detect_injection
 
 router = APIRouter()
 
@@ -100,6 +101,13 @@ async def _prepare_context(req: ChatRequest, user_id: str) -> tuple[str, str | N
 
     返回 (session_id, 用户消息 id)；resume 场景用户消息已存在，返回 None。
     """
+    # Prompt 注入防护：新消息（非 resume）query 含注入指令 → 明确拒绝
+    if req.resume is None:
+        detected, pats = detect_injection(req.message)
+        if detected:
+            raise HTTPException(
+                400, f"检测到可疑指令（{", ".join(pats)}），请重新表述问题。"
+            )
     user_msg_id: str | None = None
     try:
         session_id = await anyio.to_thread.run_sync(
