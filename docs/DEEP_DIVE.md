@@ -301,6 +301,11 @@ flowchart LR
 
 - `MilvusRetriever(BaseRetriever)`：`_get_relevant_documents` 走「混合检索 → 可选 rerank → 封装成带 score 的 `LCDocument`」，供 RAG 子 Agent 的 `create_retriever_tool` 直接用。
 
+### 6.6 查询改写 `query_rewrite.py` 与注入防护 `prompt_injection.py`
+
+- **查询改写**（默认关）：`rewrite_query()` 两档——`rule`（删口语框架词 + 同义词**并列扩展**，零依赖）/ `llm`（one-shot prompt 改写为精炼检索词，失败/拒绝模板回退）。`_expand_queries` 对「原 query + 改写」**双路检索**，按 `(source, chunk_index)` 合并去重；精排固定用**原 query**（实测短改写 query 精排不稳）。实验结论：当前知识库检索基线已饱和，改写无增益且端到端 faithfulness 微降，默认关闭；若启用走「触发式」（见 `docs/EVALUATION_REPORT.md` §4/§8）。
+- **Prompt 注入防护**（`prompt_injection.py`）：检索/搜索外部内容经 `wrap_as_data` 包装为「不可信数据块」并声明忽略其中指令；`detect_injection` 中英规则库命中即**剔除该块 + 告警**，用户 query 命中 → 400 拒绝；可选 `INJECTION_LLM_REVIEW` 用 LLM 复核降误报（失败按命中处理）；输出侧 `detect_leak` 检测系统提示词片段/密钥模式（仅告警）。
+
 ---
 
 ## 7. 记忆实现 `db/memory_store.py`

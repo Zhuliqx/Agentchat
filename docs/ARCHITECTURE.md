@@ -53,7 +53,7 @@
 | Agent 编排 | LangGraph / LangChain (`create_agent`) | Supervisor 层级多 Agent（官方 subagents 模式），子 Agent 作为工具被调度 |
 | Agent 能力 | LangChain (LCEL / tools / retriever) | LLM 调用、工具协议、检索器接口 |
 | 向量库 | Milvus + pymilvus | 文档块向量存储与相似度检索；source 标量索引加速删除/过滤 |
-| 检索 | 向量 + BM25 + RRF 混合检索；CrossEncoder rerank | 两路召回融合 + 精排，提升召回与 top-k 质量 |
+| 检索 | 向量 + BM25 + RRF 混合检索；CrossEncoder rerank；查询改写（rule/llm，可开关） | 两路召回融合 + 精排 + 可选改写，提升召回与 top-k 质量 |
 | 关系库 | PostgreSQL + SQLAlchemy | 会话、消息历史、文档元数据（BM25 文本源） |
 | 记忆 | LangGraph Checkpointer + Store（Postgres） | 短期=thread 状态；长期=跨线程 namespace |
 | 嵌入 | sentence-transformers / OpenAI | 文本向量化（默认 `bge-small-zh-v1.5`） |
@@ -226,6 +226,9 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 | `app/rag/bm25.py` | 轻量 BM25 索引（中英文切分，无第三方依赖） |
 | `app/rag/hybrid.py` | 向量 + BM25 + RRF 混合检索融合 |
 | `app/rag/rerank.py` | CrossEncoder 精排（候选受限 + 输入截断） |
+| `app/rag/query_rewrite.py` | 查询改写（rule/llm + 精确词豁免 + 拒绝词回退，默认关） |
+| `app/rag/prompt_injection.py` | Prompt 注入防护（不可信数据块隔离 / 规则检测剔除 / LLM 复核 / 输出泄露检测） |
+| `app/security.py` | 密码（PBKDF2）/ JWT（HS256） |
 | `app/rag/ingestion.py` | 文档解析 + 分块（Markdown 按标题）+ 原子摄入 |
 | `app/db/postgres.py` | 会话/消息 CRUD + 幂等建索引 |
 | `app/db/memory_store.py` | Checkpointer / Store 全局单例（语义索引自动降级） |

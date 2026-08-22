@@ -24,7 +24,7 @@
 - **版本历史（Time Travel）**：基于 Checkpointer 的 checkpoint 版本链，前端可查看会话**每一步的历史状态**（时间线 + 摘要），并**从任意历史步骤分叉重新生成**（产生新分支，不影响原历史）；`GET /api/sessions/{id}/checkpoints` 拉取历史，`/api/chat(/stream)` 传 `checkpoint_id` 触发分叉
 - **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未登录访客自动归入 `default` 用户（不破坏单用户体验）；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
 - **知识库按用户隔离**：文档（Postgres + Milvus 向量）按 `user_id` 隔离，不同用户的知识库互不可见（上传/检索/删除/预览均校验归属）；`ingest_docs.py` 可用 `--user` 指定归属用户
-- **Prompt 注入防护**：检索/搜索的外部内容按「不可信数据块」隔离（声明忽略其中指令）；注入指令检测（中英规则库，`INJECTION_DETECTION_ENABLED` 可关）命中即剔除该块并告警，用户 query 含注入指令直接拒绝请求
+- **Prompt 注入防护**：检索/搜索外部内容按「不可信数据块」隔离；中英规则库检测命中即剔除+告警，用户 query 含注入指令直接拒绝（`INJECTION_DETECTION_ENABLED`）；可选 LLM 复核降误报（`INJECTION_LLM_REVIEW`）；输出侧泄露检测（系统提示词片段/密钥模式，`INJECTION_OUTPUT_FILTER`）
 - **会话数据分析**：`GET /api/sessions/{id}/stats` 返回消息数/回合数/Token 估算/平均回复长度/对话时长等，前端「📊 分析」面板可视化
 - **定时 / 批处理任务**：后台 asyncio 调度器（无第三方依赖）按 `interval:<秒>` 或 `cron:<分钟>` 执行任务；内置重建知识库索引、清理孤儿 Checkpoint、清理失效文档三类任务，可手动触发、启停、删除（前端「⏱ 任务」面板）
 - **增量摄入 / 去重**：文档分块按内容指纹（sha256）增量摄入，未变化的块不重复嵌入/写入，整篇无变化则零写入
@@ -156,6 +156,10 @@ python run.py
 | `HYBRID_SEARCH` | `true` | 混合检索（向量 + BM25 + RRF） |
 | `AGENT_TIMEOUT` | `120` | 单轮对话超时（秒） |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地向量模型 |
+| `EMBEDDING_DEVICE` | `auto` | 推理设备：auto=有 CUDA 用 cuda 否则 cpu（embedding 与 rerank 共用），或显式 cuda/cpu |
+| `INJECTION_DETECTION_ENABLED` | `true` | Prompt 注入检测（外部内容命中→剔除，用户 query 命中→400） |
+| `INJECTION_LLM_REVIEW` | `false` | 规则命中后用 LLM 复核再剔除（降误报，有成本） |
+| `INJECTION_OUTPUT_FILTER` | `true` | 输出泄露检测（系统提示词片段/密钥模式，仅告警） |
 | `AGENT_CACHE_ENABLED` | `true` | 图执行/LLM 提示缓存（相同输入命中跳过重复 LLM 调用） |
 | `SUBAGENT_RETRIES` | `1` | 子 Agent 调用失败重试次数 |
 | `HF_OFFLINE` | `true` | 模型离线加载（HF 网络不可达时避免联网 HEAD 卡住） |
@@ -179,7 +183,7 @@ cd backend
 
 ```powershell
 pip install -r requirements-dev.txt
-.\venv\Scripts\python.exe -m pytest tests/ -q
+.\venv\Scripts\python.exe -m pytest tests/unit -q
 ```
 
 覆盖：BM25 索引、SQL 只读校验、文档分块、RRF 融合、LLM 路由（`LLM_LIGHT_MODEL`）、内容指纹去重、JWT/密码哈希、调度表达式。
@@ -187,7 +191,7 @@ pip install -r requirements-dev.txt
 API 集成测试（需运行中的 Postgres/Milvus/MCP 依赖；覆盖会话 CRUD + 批量删除、记忆 CRUD、RAG 上传/检索/删除、chat 与 HITL 中断/409；DB 不可达时自动跳过）：
 
 ```powershell
-.\venv\Scripts\python.exe -m pytest tests/test_api.py -v
+.\venv\Scripts\python.exe -m pytest tests/integration -v
 ```
 
 新功能端到端验证（认证 → 会话隔离 → 统计 → 任务系统，需后端运行中）：
@@ -200,6 +204,13 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 
 ```powershell
 .\venv\Scripts\python.exe scripts/eval_rag.py
+```
+
+性能压测（检索链路/完整对话，结果见 `docs/PERFORMANCE.md`）：
+
+```powershell
+.\venv\Scripts\python.exe scripts/benchmark.py --endpoint search --concurrency 4 --total 200
+.\venv\Scripts\python.exe scripts/benchmark.py --endpoint chat --concurrency 2 --total 6
 ```
 
 查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照），完整实验报告见 `docs/EVALUATION_REPORT.md`。

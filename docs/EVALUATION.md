@@ -102,6 +102,7 @@ cd backend
 | | `--top-k` | 检索 top_k |
 | | `--graded` | NDCG 分级模式（LLM judge 打 0/1/2） |
 | | `--rerank-max-length` | 覆盖 RERANK_MAX_LENGTH（A/B） |
+| | `--rewrite` | 查询改写 A/B：覆盖 QUERY_REWRITE_MODE（检索侧 MRR/Hit@K） |
 | | `--compare A B` | 对比两次评估 JSON |
 | `eval_quality.py` | `--max-cases N` | 只跑前 N 条（试成本） |
 | | `--only q28,q31` | 只评估指定案例（调试） |
@@ -109,6 +110,7 @@ cd backend
 | | `--top-k / --threshold` | 覆盖检索参数 |
 | | `--no-rerank / --no-hybrid` | A/B：关闭对应环节 |
 | | `--max-per-doc N` | 覆盖 RAG_MAX_PER_DOC（A/B） |
+| | `--rewrite` | 查询改写 A/B：覆盖 QUERY_REWRITE_MODE（生成侧四指标） |
 | | `--out path / --report` | 保存结果 JSON / Markdown 报告 |
 | | `--compare A B` | 对比两份结果 JSON |
 
@@ -227,10 +229,14 @@ cd backend
 
 | 指标 | 值 |
 |------|-----|
-| context_precision | **0.904** |
-| context_recall | **0.958** |
-| faithfulness | **0.940** |
+| context_precision | **0.925** |
+| context_recall | **0.963** |
+| faithfulness | **0.923** |
 | answer_relevancy | **1.000**（40/40） |
+
+> 2026-08-22 重跑（40 条，`eval_quality.py` 默认配置）。
+> 口语集（8 条口语化变体）改写 A/B 端到端验证：rewrite rule/llm 均让 faithfulness 微降
+> （0.975 → 0.863/0.853），检索指标不变——结论见 `docs/EVALUATION_REPORT.md` §8。
 
 ### 7.3 排序优化 A/B 记录（NDCG 驱动）
 

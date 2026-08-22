@@ -70,7 +70,9 @@ Agentchat/
 │   │   │   ├── bm25.py       #   轻量 BM25（自实现，无依赖）
 │   │   │   ├── hybrid.py     #   向量 + BM25 + RRF 融合
 │   │   │   ├── rerank.py     #   CrossEncoder 精排
-│   │   │   ├── retriever.py  #   LangChain 检索器（供 Agent 用）
+│   │   │   ├── retriever.py  #   LangChain 检索器（供 Agent 用；含改写双路）
+│   │   │   ├── query_rewrite.py  #  查询改写（rule/llm，默认关）
+│   │   │   ├── prompt_injection.py  #  Prompt 注入防护（隔离+检测+泄露检测）
 │   │   │   └── ingestion.py  #   文档解析 + 分块 + 原子摄入
 │   │   ├── db/
 │   │   │   ├── models.py     #   SQLAlchemy 模型（Session/Message/Document）
@@ -217,7 +219,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     A[上传/摄入] --> B[Postgres documents + Milvus 向量]
-    Q[查询] --> C[retriever]
+    Q[查询] --> C[retriever(原 query + 改写双路)]
     C --> D[hybrid.search_hybrid]
     D --> E[向量通道 vector_store.search]
     D --> F[BM25通道 bm25.py]
@@ -225,6 +227,8 @@ flowchart LR
     F --> G
     G --> H[rerank.py 精排]
     H --> I[LLM 生成]
+
+检索块/搜索块在喂给 LLM 前经 `prompt_injection.py` 处理：不可信数据块隔离 + 注入指令检测剔除（用户 query 注入直接 400，详见 `app/rag/prompt_injection.py`）。
 ```
 
 ### 7.5 记忆机制（三层）
