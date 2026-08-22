@@ -48,7 +48,20 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     embedding_provider: str = "local"  # local | openai
     embedding_dim: int = 512
-    embedding_device: str = "cpu"
+    # 推理设备: auto=有 CUDA 用 cuda 否则 cpu（推荐，部署无 GPU 机器自动回退）; 或显式 cuda/cpu
+    embedding_device: str = "auto"
+
+    def resolved_embedding_device(self) -> str:
+        """解析实际推理设备：auto=有 CUDA 用 cuda，否则 cpu；显式指定则原样返回。"""
+        device = self.embedding_device
+        if device != "auto":
+            return device
+        try:
+            import torch
+
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            return "cpu"
 
     # ---- LLM ----
     # provider: openai | ollama | azure_openai | deepseek | dashscope
@@ -137,6 +150,11 @@ class Settings(BaseSettings):
     query_rewrite_enabled: bool = False
     query_rewrite_mode: str = "rule"
     query_rewrite_cache_size: int = 512
+
+    # ---- Prompt 注入防护 ----
+    # 检索/搜索外部内容按「不可信数据块」隔离（总是生效）；本开关控制注入指令检测：
+    # 外部内容命中→剔除该块并告警，用户 query 命中→拒绝请求（见 app/security/prompt_injection.py）
+    injection_detection_enabled: bool = True
 
     # 模型离线加载：embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查
     # 卡住（HF 网络不可达场景）。需下载新模型时临时设 False。

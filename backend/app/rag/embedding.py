@@ -59,4 +59,4 @@ def get_embedder() -> BaseEmbedder:
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
         )
-    return LocalEmbedder(settings.embedding_model, settings.embedding_device)
+    return LocalEmbedder(settings.embedding_model, settings.resolved_embedding_device())

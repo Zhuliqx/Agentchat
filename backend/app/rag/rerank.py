@@ -18,7 +18,7 @@ def _get_reranker():
     # local_files_only：仅从本地 HF 缓存加载，避免离线环境联网 HEAD 检查卡死
     return CrossEncoder(
         settings.rerank_model,
-        device=settings.embedding_device,
+        device=settings.resolved_embedding_device(),
         local_files_only=True,
     )
 
