@@ -110,7 +110,7 @@ def _build_supervisor_prompt(
     )
     if settings.code_agent_enabled:
         tool_lines.append(
-            "- code_agent：执行 Python 代码并返回结果。当需要实际计算、验证算法、数学计算、数据处理或运行脚本时使用。"
+            "- code_agent：执行 Python 代码并返回结果。**仅当需要真正运行代码**（算法验证/数学计算/数据处理脚本）时使用；数据库/统计/时间查询直接用 mcp_agent 的结果，不要用 code_agent 重复处理。"
         )
     if use_search:
         tool_lines.append(
@@ -144,11 +144,11 @@ def _build_supervisor_prompt(
             "不要编造文档/资料信息。"
         )
     rn += 1
-    rules.append(f"{rn}. 需要查数据库/统计/时间/计算 -> 调用 mcp_agent。")
+    rules.append(f"{rn}. 数据库查询/统计/时间/简单计算 -> 调用 mcp_agent，其返回结果直接可用，禁止再调 code_agent。")
     rn += 1
     if settings.code_agent_enabled:
         rules.append(
-            f"{rn}. 需要实际计算/执行代码/验证算法/数学计算/数据处理 -> 调用 code_agent。"
+            f"{rn}. 需要真正运行 Python 代码（算法验证/数学计算/数据处理脚本）-> 调用 code_agent；数据库查询/统计/时间直接用 mcp_agent 结果，无需 code_agent 再次处理。"
         )
         rn += 1
     if use_search:
