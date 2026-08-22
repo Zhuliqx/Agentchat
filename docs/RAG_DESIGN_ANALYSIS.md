@@ -461,8 +461,8 @@ GET /api/rag/ingest/{task_id}   # 前端轮询：pending/processing/done/error +
 
 | 招数 | 说明 | 本项目现状 / 接入点 |
 |------|------|---------------------|
-| **Query 改写** | 口语 query → 同义改写 / 多路改写取并集 / 拆子问题 | 未实现；改 `search_knowledge_base` 入参即可接入 |
-| **HyDE** | LLM 先写"假想答案"再向量化检索，弥合 query-doc 差距 | 适用领域文档；注意首 token 延迟、事实型查询慎用 |
+| **Query 改写** | 口语 query → 同义改写 / 多路改写取并集 / 拆子问题 | ✅ 已实现：`rule`（去口语框架词+同义并列，零依赖、CI 可挂）/ `llm`（改写为精炼检索词，失败/拒绝模板回退）；默认关闭，实验结论与 A/B 复现见 [EVALUATION_REPORT](EVALUATION_REPORT.md) |
+| **HyDE** | LLM 先写"假想答案"再向量化检索，弥合 query-doc 差距 | 未实现；适用领域文档；注意首 token 延迟、事实型查询慎用 |
 | **混合双路 + 精排** | BM25 + Dense + RRF + Cross-Encoder | ✅ 已实现（见 8 / 9） |
 
 ### 13.4 排查方法论（先度量再动手）

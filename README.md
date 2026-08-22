@@ -5,7 +5,7 @@
 ## ✨ 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
-- **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排** → LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）
+- **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）
 - **联网搜索**：Tavily 直接搜索工具（`web_search`），实时获取最新网络资讯（LangChain 官方推荐工具）
 - **代码 Agent**：受限沙箱执行 Python（子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断），需要实际计算/验证算法/数据处理时由 Supervisor 自动调度；`CODE_AGENT_ENABLED` / `CODE_EXEC_TIMEOUT` 可配置
 - **MCP**：
@@ -41,7 +41,7 @@
 | Agent | LangGraph, LangChain, DeepSeek/DashScope/OpenAI/Ollama |
 | 记忆 | LangGraph Checkpointer + Store (Postgres, 支持语义检索) |
 | 向量库 | Milvus (+ pymilvus) |
-| 检索 | 向量 + BM25 + RRF 混合检索；CrossEncoder rerank（候选数受限） |
+| 检索 | 向量 + BM25 + RRF 混合检索；CrossEncoder rerank（候选数受限）；查询改写（rule/llm，可开关） |
 | 关系库 | PostgreSQL, SQLAlchemy |
 | 联网搜索 | Tavily (`langchain-tavily`) |
 | MCP | mcp SDK (FastMCP + client) |
@@ -150,6 +150,8 @@ python run.py
 | `LLM_PROVIDER` | `deepseek` | deepseek / dashscope / openai / ollama / azure_openai |
 | `TAVILY_API_KEY` | - | 联网搜索（为空则 `web_search` 工具不可用） |
 | `RERANK_ENABLED` | `true` | 检索后 rerank 精排（首次下载约 1.1GB 模型） |
+| `QUERY_REWRITE_ENABLED` | `false` | 查询改写总开关（rule 零依赖 / llm 需 LLM；实验见 `docs/EVALUATION_REPORT.md`） |
+| `QUERY_REWRITE_MODE` | `rule` | 改写档位：`none` / `rule` / `llm` |
 | `HYBRID_SEARCH` | `true` | 混合检索（向量 + BM25 + RRF） |
 | `AGENT_TIMEOUT` | `120` | 单轮对话超时（秒） |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地向量模型 |
@@ -198,6 +200,8 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 ```powershell
 .\venv\Scripts\python.exe scripts/eval_rag.py
 ```
+
+查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照），完整实验报告见 `docs/EVALUATION_REPORT.md`。
 
 CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类型检查（非阻塞）→ 单元测试。
 
