@@ -76,7 +76,7 @@ def _ensure_indexes(client: MilvusClient, name: str) -> None:
         ip.add_index(
             field_name="embedding",
             index_type="IVF_FLAT",
-            metric_type="IP",
+            metric_type=settings.milvus_metric_type,
             params={"nlist": 128},
             index_name="embedding_idx",
         )
@@ -214,7 +214,7 @@ def search(
         settings.milvus_collection,
         data=[query_vec],
         anns_field="embedding",
-        search_params={"metric_type": "IP", "params": {"nprobe": 16}},
+        search_params={"metric_type": settings.milvus_metric_type, "params": {"nprobe": 16}},
         limit=top_k * 3,  # 先取多些，再按阈值过滤
         output_fields=["id", "doc_id", "source", "chunk_index", "text", "metadata_json"],
         filter=filter_expr,

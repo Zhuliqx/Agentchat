@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     milvus_port: int = 19530
     milvus_collection: str = "agent_documents"
     milvus_uri: str = ""  # 留空则用 host:port 拼接；也可填 zilliz 云端 uri
+    # Milvus 向量索引度量: IP(内积;向量已归一化时=余弦,最快) / COSINE(自动归一化 query,更防御) / L2
+    milvus_metric_type: str = "IP"
 
     # ---- Embedding 模型 ----
     # 本地模型: BAAI/bge-small-zh-v1.5, sentence-transformers/all-MiniLM-L6-v2

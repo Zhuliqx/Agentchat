@@ -225,6 +225,7 @@ chunk_hash = sha256(text).hexdigest() # 块指纹
 - **IVF_FLAT + nlist=128**：中小规模数据（数万~百万块）IVF_FLAT 精度高、构建简单；`nprobe=16` 是召回/延迟的常见平衡点。规模更大时可换 HNSW/IVF_PQ。
 - **先取 `top_k*3` 再按阈值过滤**：IP 阈值过滤后实际命中可能不足 `top_k`，先放大召回再过滤，避免"漏返回"。
 - **`_validate_embedding_dim` 维度校验**：换 embedding 模型后维度不匹配会在写入时静默失败/错乱，本项目启动时校验并降级。
+- **度量选择（IP vs COSINE 实证）**：embedding 已归一化（`normalize_embeddings=True`），归一化后内积==余弦，二者检索结果逐条一致（实测 MRR 0.944 / Hit@1 0.900 完全相同）；默认 `IP`（最快）；`MILVUS_METRIC_TYPE=COSINE` 可切——COSINE 内部归一化 query，对「未来漏归一化的模型」更防御，且分数恒在 [-1,1] 更可解释。**切换需重建索引**（metric 是索引参数，不能热改）。
 
 ### 6.4 潜在问题与解法
 
