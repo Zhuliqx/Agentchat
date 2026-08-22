@@ -300,6 +300,8 @@ def main() -> None:
         choices=["none", "rule", "llm"],
         help="启用并覆盖 QUERY_REWRITE_MODE（A/B）；none=关闭改写",
     )
+    parser.add_argument("--no-rerank", action="store_true", help="关闭 rerank（消融）")
+    parser.add_argument("--no-hybrid", action="store_true", help="关闭混合检索，仅向量通道（消融）")
     parser.add_argument(
         "--compare", nargs=2, metavar=("A", "B"), help="对比两次评估结果 JSON"
     )
@@ -308,7 +310,7 @@ def main() -> None:
     if args.compare:
         raise SystemExit(compare(Path(args.compare[0]), Path(args.compare[1])))
 
-    if args.rerank_max_length is not None or args.rewrite is not None:
+    if args.rerank_max_length is not None or args.rewrite is not None or args.no_rerank or args.no_hybrid:
         from app.config import settings
 
         if args.rerank_max_length is not None:
@@ -317,6 +319,10 @@ def main() -> None:
             settings.query_rewrite_enabled = args.rewrite != "none"
             if args.rewrite != "none":
                 settings.query_rewrite_mode = args.rewrite
+        if args.no_rerank:
+            settings.rerank_enabled = False
+        if args.no_hybrid:
+            settings.hybrid_search = False
 
     cases, mode = load_cases(args.dataset)
     if args.graded:
