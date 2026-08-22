@@ -32,8 +32,7 @@ def _expand_queries(query: str) -> list[str]:
     """改写 + 原 query 双路检索兜底：改写丢了信息时原句还能召回。
 
     改写未启用、改写为空、或改写结果与原句相同 → 单路（行为不变）。
-    注意：精排始终用「原 query」——实测对短改写 query（如「公司成立年份」）
-    精排打分反而不稳（口语原句含完整实体，对齐更强），改写只承担扩召回。
+    精排固定用原 query：短改写 query 精排不稳，改写只承担扩召回。
     """
     if not settings.query_rewrite_enabled:
         return [query]

@@ -234,11 +234,11 @@ cd backend
 | faithfulness | **0.923** |
 | answer_relevancy | **1.000**（40/40） |
 
-> 2026-08-22 重跑（40 条，`eval_quality.py` 默认配置）。
+> 重跑（40 条，`eval_quality.py` 默认配置）。
 > 口语集（8 条口语化变体）改写 A/B 端到端验证：rewrite rule/llm 均让 faithfulness 微降
 > （0.975 → 0.863/0.853），检索指标不变——结论见 `docs/EVALUATION_REPORT.md` §8。
 
-### 7.3 消融实验：每一层检索增强的价值（2026-08-22）
+### 7.3 消融实验：每一层检索增强的价值
 
 | 档位 | 检索通道 | MRR | Hit@1 | Hit@3 | CP | CR |
 |------|---------|-----|-------|-------|-----|-----|
@@ -255,7 +255,7 @@ cd backend
 
 > Agent 编排质量评估（路由/完成/拒绝）见 `docs/AGENT_EVAL.md`。
 
-### 7.4 Embedding 选型（对比结果，2026-08-22）
+### 7.4 Embedding 选型（对比结果）
 
 - **方法** `scripts/eval_embedding.py`：同一 GT + 相同块文本，进程内暴力检索（≈ HNSW 上界），
   来源级 Hit@1/3 + MRR；`--models` 多模型、`--pooling {cls,mean}`、统一 transformers 加载 + L2 归一化；

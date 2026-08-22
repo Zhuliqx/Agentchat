@@ -54,8 +54,8 @@ def _load_chunks(user_id: str = "default") -> list[dict]:
 def _eval_model(model_name: str, chunks: list[dict], queries: list[str], expected: list[list[str]], pooling: str = "cls") -> dict:
     """统一用 transformers 加载 + CLS pooling + L2 归一化（bge 系列）。
 
-    不用 sentence-transformers：旧版 bge 模型（如 bge-base-zh-v1.5）在 ST 4.x 下
-    因缺 1_Pooling/config.json 加载异常（输出无区分度）；transformers 直接加载正常。
+    不用 sentence-transformers：旧版 bge 模型在 ST 4.x 下加载不稳定（缺 pooling 配置），
+    transformers 直接加载正常。
     """
     import torch
     import torch.nn.functional as F
