@@ -31,24 +31,29 @@
 
 ## 1. 子系统总览
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          写入链路（ingest）                            │
-│  上传文件 → 原始文件持久化(uploads/<uuid>/) → 后台线程摄入               │
-│    → 解析(编码检测/HTML/PDF/DOCX) → 分块(Markdown标题+递归)             │
-│    → sha256 指纹增量对比 → 仅嵌入新增块 → 写 Milvus + Postgres          │
-└──────────────────────────────────┬───────────────────────────────────┘
-                                   │ 失效签名缓存
-┌──────────────────────────────────▼───────────────────────────────────┐
-│                           查询链路（retrieve）                         │
-│  search_knowledge_base 工具(按 user_id 隔离)                            │
-│    → retriever.invoke(query)                                          │
-│        ├─ 通道1: Milvus 向量检索（IP 相似度 + user 过滤）                 │
-│        ├─ 通道2: Postgres 文本 BM25（jieba/单字分词）                   │
-│        └─ RRF 融合 → CrossEncoder rerank 精排                          │
-│    → 同文档去重 + 相邻块合并 + 超长块截断（上下文压缩）                     │
-│    → LangChain Document[] → RAG Agent 生成 → 引用溯源(sources)          │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph ingest[写入链路 ingest]
+        A[上传文件] --> B[原始文件持久化 uploads/uuid]
+        B --> C[后台线程摄入]
+        C --> D[解析 编码检测/HTML/PDF/DOCX]
+        D --> E[分块 Markdown标题+递归]
+        E --> F[sha256 指纹增量对比]
+        F --> G[仅嵌入新增块]
+        G --> H[写 Milvus + Postgres]
+    end
+    H -->|失效签名缓存| I
+    subgraph retrieve[查询链路 retrieve]
+        I[search_knowledge_base 按 user_id 隔离] --> J[retriever.invoke]
+        J --> K[通道1 Milvus 向量检索]
+        J --> L[通道2 Postgres 文本 BM25]
+        K --> M[RRF 融合]
+        L --> M
+        M --> N[CrossEncoder rerank 精排]
+        N --> O[同文档去重 + 相邻块合并 + 超长块截断]
+        O --> P[LangChain Document]
+        P --> Q[RAG Agent 生成 引用溯源 sources]
+    end
 ```
 
 - **存储双写**：`Milvus` 存向量（`id` 与 Postgres `documents.id` 一一对应），`Postgres` 存文本与元数据（同时是 BM25 通道的数据源）。

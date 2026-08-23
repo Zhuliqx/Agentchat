@@ -1,5 +1,7 @@
 # 部署与扩展性指南
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 > 目的：说明本项目当前的**单机部署模型**、为什么这么选（取舍）、以及在何时、如何演进到
 > 多 worker / 多副本。这是架构决策文档，面向面试沟通与运维排障。
 
@@ -7,14 +9,14 @@
 
 ## 1. 当前部署模型（单机单 worker）
 
-```
-┌─────────────────────────────────────────────┐
-│              Docker Compose 全家桶            │
-│  FastAPI (uvicorn 单 worker, :8000)          │
-│  Postgres (pgvector)  ← 会话/消息/文档/记忆    │
-│  Milvus (etcd+minio)  ← 文档块向量            │
-│  Langfuse (可选)      ← 可观测性 trace         │
-└─────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph DC[Docker Compose 全家桶]
+        A[FastAPI uvicorn 单 worker :8000]
+        B[Postgres pgvector<br>会话 / 消息 / 文档 / 记忆]
+        C[Milvus etcd+minio<br>文档块向量]
+        D[Langfuse 可选<br>可观测性 trace]
+    end
 ```
 
 - **单进程**：`run.py` 启动一个 uvicorn worker；

@@ -13,46 +13,32 @@
 
 ## 总览
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│       前端 frontend-v2（Vue 3 + Vite + TS + Tailwind 4）    │
-│   开发：Vite dev server (:5173，/api 代理到 :8000)          │
-│   生产：npm run build → dist 由 FastAPI 托管 (:8000)       │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ REST / JSON + SSE
-┌──────────────────────────▼──────────────────────────────────┐
-│                       FastAPI 后端                           │
-│   /api/chat(/stream) · /api/sessions · /api/rag ·            │
-│   /api/memory · /api/health                                  │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│              LangGraph 多 Agent 编排 (Supervisor)            │
-│                                                              │
-│       +----------------+     调用子 Agent 作为工具            │
-│       |   supervisor   |◄──────────────────────────┐         │
-│       +--------+-------+                           │         │
-│                │ 路由                                │         │
-│      ┌─────────┴─────────┐                ┌─────────┴──────┐  │
-│      │                  │                │               │  │
-│ +────▼─────+      +─────▼──────+         │  直接回答      │  │
-│ │ rag_agent│      │  mcp_agent │         │               │  │
-│ │ 检索+生成 │      │  MCP 工具   │         │               │  │
-│ +────┬─────+      +─────┬──────+         └───────────────┘  │
-│      │                  │                                    │
-│ ┌────▼──────┐     ┌─────▼──────┐                            │
-│ │  Milvus   │     │  自建 MCP  │◄─── stdio ────┐            │
-│ │ 向量检索   │     │  (db/time) │                 │           │
-│ └───────────┘     │  外部 MCP  │◄─── http ──────┤            │
-│                   └────────────┘                │            │
-└──────────────────────────────────────────────────┼───────────┘
-                                                   │
-┌──────────────────────────────────────────────────▼───────────┐
-│                      数据存储 (Docker Desktop)                │
-│   Postgres : 会话 / 消息 / 文档元数据                          │
-│   Milvus   : 文档块向量 (embedding)                           │
-│   (etcd / minio : Milvus 依赖)                                │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph FE["前端 frontend-v2<br>Vue3 + Vite + TS + Tailwind 4"]
+        F1["开发 Vite :5173<br>生产 FastAPI 托管 :8000"]
+    end
+    subgraph API["FastAPI 后端"]
+        A1["api/chat(/stream) · sessions · rag · memory · health"]
+    end
+    subgraph AGENT["LangGraph 多 Agent 编排 Supervisor"]
+        S["supervisor"]
+        RA["rag_agent 检索+生成"]
+        MC["mcp_agent MCP 工具"]
+        DR["直接回答"]
+        S --> RA
+        S --> MC
+        S --> DR
+    end
+    subgraph STORE["数据存储 Docker Desktop"]
+        PG["Postgres 会话/消息/文档元数据"]
+        MV["Milvus 文档块向量<br>(etcd/minio Milvus 依赖)"]
+        SB["自建 MCP db/time stdio"]
+        EX["外部 MCP http"]
+    end
+    FE -->|"REST/JSON + SSE"| API
+    API --> AGENT
+    AGENT --> STORE
 ```
 
 ## 组件说明
@@ -88,14 +74,16 @@ Supervisor 根据用户意图自主决定调用哪个工具、调用几次，或
 `web_search` 则退化为直接工具：单次 Tavily 调用即返回结果，由 Supervisor 自行总结，
 搜索环节从 ~20s+（子 Agent 实测触发 4 次 Tavily + 3 次 LLM）降到 ~2s。
 
-```
-supervisor(LLM + [rag_agent, web_search, mcp_agent] 作为工具)
-    ├─► rag_agent(子 Agent: LLM + [search_knowledge_base] 工具)
-    │       └─► MilvusRetriever ─► Milvus
-    ├─► web_search(直接 Tavily 工具: TavilySearch ─► Tavily API ─► 网络)
-    └─► mcp_agent(子 Agent: LLM + [db_query_postgres, get_current_time, ...] MCP 工具)
-            ├─► 自建 MCP（stdio）
-            └─► 外部 MCP（streamable http）
+```mermaid
+flowchart LR
+    S[supervisor<br>LLM + rag_agent / web_search / mcp_agent 作为工具]
+    S --> RA[rag_agent<br>子Agent: LLM + search_knowledge_base]
+    RA --> MR[MilvusRetriever] --> MV[Milvus]
+    S --> WS[web_search<br>直接 Tavily 工具]
+    WS --> TA[TavilySearch] --> TB[Tavily API 网络]
+    S --> MC[mcp_agent<br>子Agent: LLM + db_query_postgres / get_current_time 等]
+    MC --> SB[自建 MCP stdio]
+    MC --> XM[外部 MCP streamable http]
 ```
 
 > **提示词动态化**：supervisor 的 system prompt 由 `_build_supervisor_prompt(use_rag, use_search, use_memory)`
@@ -104,18 +92,13 @@ supervisor(LLM + [rag_agent, web_search, mcp_agent] 作为工具)
 
 ## RAG 流程
 
-```
-文档 ──► 加载(txt/pdf/docx/md) ──► 分块(Markdown按标题 / 递归分块)
-      │
-      │ 网页上传：原始文件持久保存到 data/uploads/<uuid>/
-      │
-      └─► 嵌入(bge-small-zh-v1.5) ──► 写入 Milvus + Postgres 元数据
-                                                     │
-查询 ──► 混合检索 ───────────────────────────┬────────┤
-      │    ├─ 向量通道 (Milvus 语义)         │        │
-      │    └─ BM25 通道 (Postgres 关键词)    │        │
-      │    └─ RRF 融合 + CrossEncoder rerank │        │
-      └──────────────────────────────► 上下文 ──► LLM 生成
+```mermaid
+flowchart LR
+    D[文档] --> L[加载 txt/pdf/docx/md] --> C[分块 Markdown按标题/递归]
+    C --> E[嵌入 bge-small-zh-v1.5] --> W[写入 Milvus + Postgres 元数据]
+    C --> U[网页上传: 原始文件持久保存 data/uploads/uuid]
+    Q[查询] --> H[混合检索<br>向量通道 Milvus + BM25 通道 Postgres<br>RRF 融合 + CrossEncoder rerank]
+    H --> CTX[上下文] --> GEN[LLM 生成]
 ```
 
 - **原始文件存储**：网页上传的文档持久保存到 `data/uploads/<uuid>/<文件名>`（不再用临时目录），
@@ -144,23 +127,12 @@ supervisor(LLM + [rag_agent, web_search, mcp_agent] 作为工具)
 
 ## 记忆架构（三层，LangGraph 官方机制）
 
-```
-┌───────────────────────────────────────────────────────────┐
-│ 长期记忆（跨会话）   LangGraph Store (AsyncPostgresStore)  │
-│   namespace=(user_id, "memories")，跨线程持久              │
-│   Supervisor 工具: remember_memory / recall_memory        │
-│   API: /api/memory?query= 语义检索；remember 写入去重     │
-│   （语义索引需 pgvector；缺失时自动降级为关键词检索）       │
-└───────────────────────────────────────────────────────────┘
-┌───────────────────────────────────────────────────────────┐
-│ 运行时上下文（仅当次调用）   context_schema=UserContext    │
-│   调用时 context=UserContext(user_id=...)，不持久化         │
-│   节点/工具通过 Runtime 访问 runtime.context              │
-└───────────────────────────────────────────────────────────┘
-┌───────────────────────────────────────────────────────────┐
-│ 短期记忆（会话内）   Checkpointer (AsyncPostgresSaver)     │
-│   thread_id=session_id 持久化图状态，多轮连续、可恢复       │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    LT[长期记忆 跨会话<br>LangGraph Store AsyncPostgresStore<br>namespace=(user_id,memories) 跨线程持久]
+    RT[运行时上下文 仅当次调用<br>context_schema=UserContext 不持久化]
+    ST[短期记忆 会话内<br>Checkpointer AsyncPostgresSaver thread_id=session_id]
+    LT --- RT --- ST
 ```
 
 - **短期记忆**：`create_agent(..., checkpointer=AsyncPostgresSaver)` 编译，

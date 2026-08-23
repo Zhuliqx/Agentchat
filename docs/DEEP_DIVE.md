@@ -1,5 +1,7 @@
 # 🔬 实现详解（DEEP DIVE）
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 > 本文档面向**想读懂每一行代码怎么跑起来**的读者，按「配置 → LLM → Agent 编排 → 子 Agent → RAG → 记忆 → FastAPI → MCP → 前端 → Windows 兼容」逐层拆解真实实现。
 > 与 `EXPLAIN.md`（整体理解，14 章）互补：这里更偏**函数级**调用链与设计取舍。
 >

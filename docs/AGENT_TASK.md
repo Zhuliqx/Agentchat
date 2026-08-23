@@ -1,4 +1,6 @@
 # 自主任务 Agent（task_agent/）
+
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
 > 区别于主项目（Agentchat 的知识库问答/单轮路由）。这是一个**自主任务执行器**：
 > 接收模糊目标 → LLM 分解/每步重规划 → 循环执行（复用现有子 Agent）→ 结构化交付。
 

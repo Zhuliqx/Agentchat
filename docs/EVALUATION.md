@@ -1,5 +1,7 @@
 # RAG 质量评估指南
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 > 目标：把 RAG 质量从"拍脑袋"变成**可量化、可复现、可回归**。
 >
 > 评估体系三层互补：**命中（MRR/Hit@K）→ 排序（NDCG@K）→ 内容（四指标）**。

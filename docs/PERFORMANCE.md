@@ -1,5 +1,7 @@
 # 性能压测报告（benchmark.py）
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 > 目的：量化检索链路与完整对话的真实性能，为扩展决策（单 worker 何时不够、rerank 是否值得、GPU 必要性）提供数据依据。
 
 ## 1. 环境
@@ -75,8 +77,8 @@ python scripts/benchmark.py --endpoint search --label c1 --concurrency 1 --total
 python scripts/benchmark.py --endpoint search --label c4 --concurrency 4 --total 200
 python scripts/benchmark.py --endpoint search --label c8 --concurrency 8 --total 200
 
-# rerank off：重启服务（进程内设 env）
-python _start_srv.py   # os.environ["RERANK_ENABLED"]="false"
+# rerank off：先在 backend/.env 设 RERANK_ENABLED=false，再重启服务（进程内读 config）
+python run.py
 python scripts/benchmark.py --endpoint search --label off-c8 --concurrency 8 --total 200
 
 # 完整对话（需 LLM key）

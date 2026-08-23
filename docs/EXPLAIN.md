@@ -1,5 +1,7 @@
 # 📖 Multi-Agent Platform 项目详解
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 > 从零理解本项目：是什么、怎么组织、怎么跑、核心机制、设计决策。
 > 查看方法：打开本文件后按 `Ctrl+Shift+V`（或右上角 ⧉ 图标）进入 Markdown 预览，mermaid 图即可渲染。
 >
@@ -218,18 +220,18 @@ sequenceDiagram
 ### 7.4 RAG 链路 `rag/`
 ```mermaid
 flowchart LR
-    A[上传/摄入] --> B[Postgres documents + Milvus 向量]
-    Q[查询] --> C[retriever(原 query + 改写双路)]
-    C --> D[hybrid.search_hybrid]
-    D --> E[向量通道 vector_store.search]
-    D --> F[BM25通道 bm25.py]
-    E --> G[RRF融合]
+    A["上传/摄入"] --> B["Postgres documents + Milvus 向量"]
+    Q["查询"] --> C["retriever(原 query + 改写双路)"]
+    C --> D["hybrid.search_hybrid"]
+    D --> E["向量通道 vector_store.search"]
+    D --> F["BM25 通道 bm25.py"]
+    E --> G["RRF 融合"]
     F --> G
-    G --> H[rerank.py 精排]
-    H --> I[LLM 生成]
-
-检索块/搜索块在喂给 LLM 前经 `prompt_injection.py` 处理：不可信数据块隔离 + 注入指令检测剔除（用户 query 注入直接 400，详见 `app/rag/prompt_injection.py`）。
+    G --> H["rerank.py 精排"]
+    H --> I["LLM 生成"]
 ```
+
+> 检索块/搜索块在喂给 LLM 前经 `prompt_injection.py` 处理：不可信数据块隔离 + 注入指令检测剔除（用户 query 注入直接 400，详见 `app/rag/prompt_injection.py`）。
 
 ### 7.5 记忆机制（三层）
 | 层 | 机制 | 作用域 | 实现 |
@@ -313,111 +315,14 @@ python -m pytest tests/integration -v
 
 ---
 
-## 11. 进阶：手写 StateGraph（add_node / add_edge）
+## 11. MCP 深入
 
-### 什么时候需要手写图
-
-项目用的是 `create_agent()` **高层封装**——它在内部自动构建标准 ReAct 图
-（`__start__ → model ⇄ tools → __end__`），你不需要写 `add_node` / `add_edge`。
-
-当你需要**标准 ReAct 之外的复杂编排**时，才需要手写 `StateGraph`：
-
-- 自定义"审核 / 拦截 / 人工确认"节点（答案出来前过一道自定义逻辑）
-- 条件路由（按问题类型分流到不同分支）
-- 多步骤流水线（先检索 → 再总结 → 再生成）
-- 循环 / 重试策略等自定义控制流
-
-### 完整示例（已实测可运行）
-
-```python
-from typing import Annotated, TypedDict
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-
-
-class State(TypedDict):
-    """图的状态：messages 累计消息；final_answer 最终回答。"""
-    messages: Annotated[list, add_messages]
-    final_answer: str
-
-
-def model_node(state: State) -> dict:
-    """模拟"模型"节点（实际可换成 get_llm()）。"""
-    question = state["messages"][-1].content
-    if "知识库" in question:
-        answer = "根据知识库，退款政策是 7 天内可申请。"
-    else:
-        answer = "你好，有什么可以帮你？"
-    return {"messages": [("assistant", answer)], "final_answer": answer}
-
-
-def review_node(state: State) -> dict:
-    """自定义"审核"节点：改写答案。"""
-    return {"final_answer": f"[已审核✓] {state['final_answer']}"}
-
-
-def route(state: State) -> str:
-    """条件路由：知识库相关 → 走 review，否则直接结束。"""
-    return "review" if "知识库" in state["final_answer"] else "end"
-
-
-# 1. 创建图 + 声明状态类型
-graph = StateGraph(State)
-
-# 2. add_node：注册节点（每个节点 = 函数: state -> 新的 state 片段）
-graph.add_node("model", model_node)
-graph.add_node("review", review_node)
-
-# 3. add_edge / add_conditional_edges：连边
-graph.add_edge(START, "model")                       # 固定边
-graph.add_conditional_edges("model", route, {        # 条件边
-    "review": "review",
-    "end": END,
-})
-graph.add_edge("review", END)
-
-# 4. compile()：编译成可执行图（create_agent 内部也是做这一步）
-compiled = graph.compile()
-
-# 5. 运行
-from langchain_core.messages import HumanMessage
-
-r1 = compiled.invoke({"messages": [HumanMessage("知识库退款政策是什么？")]})
-print(r1["final_answer"])  # [已审核✓] 根据知识库，退款政策是 7 天内可申请。
-```
-
-### 生成的图结构（mermaid）
-
-```mermaid
-graph LR
-    START[__start__] --> MODEL[model]
-    MODEL -->|route: 知识库相关| REVIEW[review 审核节点]
-    MODEL -->|route: 其他| END[__end__]
-    REVIEW --> END
-```
-
-> 图中 `model` 节点后是 `route()` **条件路由**：知识库相关的问题走 `review` 审核节点，
-> 否则直接结束。这就是手写 `StateGraph` 相比 `create_agent` 多出来的控制能力。
-
-### 与项目现状对比
-
-| | 项目现状（`create_agent`）| 手写 `StateGraph` |
-|---|---|---|
-| 构建 | 框架自动 `add_node`/`add_edge` | 自己写 |
-| 自定义节点 | 只能加"工具" | 可加任意逻辑节点（审核/汇总/分支）|
-| 条件路由 | 内置（模型自主决定）| 自己写 `route()` |
-| 适用 | 标准 Agent / RAG / 工具 | 复杂流水线 / 人工确认 / 分支 |
-
----
-
-## 12. MCP 深入
-
-### 12.1 MCP 是什么
+### 11.1 MCP 是什么
 
 **MCP（Model Context Protocol，模型上下文协议）**：一种让 LLM 应用接入外部工具/数据的标准协议。
 本项目把它当作"Agent 的工具总线"——通过 MCP 服务器暴露数据库查询、时间计算、外部 API 等能力。
 
-### 12.2 架构
+### 11.2 架构
 
 ```mermaid
 graph TD
@@ -436,7 +341,7 @@ graph TD
 | 自建 | **stdio** | 子进程拉起（FastMCP 实现）| `db_query_server.py` / `time_server.py` |
 | 外部 | **streamable http** | `EXTERNAL_MCP_SERVERS` 配置（name=url）| 可选 |
 
-### 12.3 工具转换链路
+### 11.3 工具转换链路
 
 ```
 MCP 服务器 → 工具列表(tool.name/description/inputSchema)
@@ -461,14 +366,14 @@ args_schema = json_schema_to_pydantic(mcp_tool.inputSchema)
 return StructuredTool(name=name, description=..., args_schema=args_schema, coroutine=_arun)
 ```
 
-### 12.4 自建服务器与安全加固
+### 11.4 自建服务器与安全加固
 
 | 服务器 | 能力 | 安全设计 |
 |--------|------|---------|
 | `db_query_server.py` | 只读 SQL 查询 / 列表 / 统计 | 连接层 `default_transaction_read_only=on` + `statement_timeout=30s`（终极防护）+ sqlparse 校验（禁分号/DML/pg_ 系统目录）|
 | `time_server.py` | 时间 / 计算 | `calculate` 用 **AST 白名单**替代 eval（防任意代码执行）|
 
-### 12.5 如何新增一个 MCP 服务器
+### 11.5 如何新增一个 MCP 服务器
 
 **自建**（简单场景）：在 `app/mcp_integration/servers/` 新建脚本，用 FastMCP 暴露工具，
 然后到 `client.py` 的 `_builtin_servers()` 注册命令即可。
@@ -482,9 +387,9 @@ EXTERNAL_MCP_SERVERS=github=http://localhost:8080/mcp,weather=http://localhost:8
 
 ---
 
-## 13. 记忆机制原理
+## 12. 记忆机制原理
 
-### 13.1 三层记忆总览
+### 12.1 三层记忆总览
 
 ```mermaid
 graph TB
@@ -505,7 +410,7 @@ graph TB
 | 运行时 | `context_schema=UserContext` | 单次调用 | ❌ 仅当次 |
 | 长期 | `AsyncPostgresStore`（Store）| 跨会话 | ✅ namespace 隔离 |
 
-### 13.2 短期记忆（Checkpointer）原理
+### 12.2 短期记忆（Checkpointer）原理
 
 - 图编译时传 `checkpointer=AsyncPostgresSaver`
 - 每次调用带 `config={"configurable": {"thread_id": session_id}}`
@@ -518,7 +423,7 @@ await graph.ainvoke({"messages": [...]},
                     config={"configurable": {"thread_id": session_id}})
 ```
 
-### 13.3 长期记忆（Store）原理
+### 12.3 长期记忆（Store）原理
 
 - 图编译时传 `store=AsyncPostgresStore`
 - 工具通过 `runtime.store` 读写，namespace 形如 `(user_id, "memories")`
@@ -537,7 +442,7 @@ async def _arun(content: str) -> str:
 **写入去重**：`remember_memory` 先 `asearch(query=content)` 找相似记忆，
 余弦相似度 ≥ `memory_dedup_threshold`（0.86）时**更新该条**而非新增，避免重复。
 
-### 13.4 与 LangGraph 官方机制对齐
+### 12.4 与 LangGraph 官方机制对齐
 
 项目使用的三层记忆均为 LangGraph **官方机制**（`create_agent` 的参数）：
 
@@ -548,7 +453,7 @@ async def _arun(content: str) -> str:
 > 工具的 `get_runtime()` 是 LangGraph 官方公开 API；官方更推荐声明式 `InjectedStore` 参数注入，
 > 两者功能等价，本项目用 `get_runtime()` 已实测可用。
 
-### 13.5 完整记忆读写链路
+### 12.5 完整记忆读写链路
 
 ```mermaid
 sequenceDiagram
@@ -563,7 +468,7 @@ sequenceDiagram
     S-->>U: "已保存到长期记忆"
 ```
 
-### 13.6 Time Travel（版本历史 / 分叉）
+### 12.6 Time Travel（版本历史 / 分叉）
 
 Checkpointer 每执行一步都会落一个 checkpoint，`parent_checkpoint_id` 串成**版本链**。基于它可实现 **Time Travel**：查看会话每一步的历史状态，并**从任意历史点分叉重新生成**。
 
@@ -573,17 +478,17 @@ Checkpointer 每执行一步都会落一个 checkpoint，`parent_checkpoint_id` 
 - **前端**：会话头部「⏪ 版本历史」→ modal 时间线（#1 最新），每条可「🔄 从这步重跑」→ 输入新消息程序化发送。
 - **验证**：多轮对话产生多个 checkpoint；从历史点 fork 后 checkpoint 数量增加（新分支）；无 LLM 时的空历史/冲突校验也有单测覆盖。
 
-## 14. 人工确认（HITL，Human-in-the-Loop）
+## 13. 人工确认（HITL，Human-in-the-Loop）
 
 让 Agent 在执行**有副作用/外部影响**的操作（联网搜索、数据库写入、外部工具）前，暂停等待用户在界面上确认——本质是 LangGraph 官方的 `interrupt` / `Command(resume)` 机制。
 
-### 14.1 机制原理
+### 13.1 机制原理
 
 - **`interrupt(...)`**：在工具内部调用会**暂停图的执行**，返回 `__interrupt__`；当前状态（含未完成的 tool_calls）由 Checkpointer 持久化到 Postgres。
 - **`Command(resume=...)`**：带上用户的选择（`confirmed` / `cancelled`）从**同一 `thread_id`** 恢复执行，`interrupt()` 的返回值即 resume 传入的值。
 - **状态不丢失**：恢复时 Checkpointer 把整个图状态（历史消息、中断点）装回来，Agent 无缝继续。
 
-### 14.2 一次确认的完整时序
+### 13.2 一次确认的完整时序
 
 > 注：下图描述的是**强制确认模式**（`HITL_ACTIONS` 非空，工具设 `confirm_before`）。默认 **LLM 自主判定**（`HITL_ACTIONS=[]`）时，supervisor 改为主动调用 `request_confirmation` 工具请求授权，机制（`interrupt` + `Command(resume)`）相同。
 
@@ -608,7 +513,7 @@ sequenceDiagram
     API-->>U: SSE: token 流 → message 帧(最终答案)
 ```
 
-### 14.3 代码实现（三个层面）
+### 13.3 代码实现（三个层面）
 
 **1) 强制确认（`app/agents/tools.py`）**
 ```python
@@ -639,19 +544,19 @@ async def _arun(query: str) -> str:
 - `run_agent`/`stream_agent` 检测 `__interrupt__` → `hitl_pending`，SSE 推 `interrupt` 事件（`chat.py` 补充 `session_id` 供前端 resume 复用同一线程）。
 - HITL 等待确认时**不保存空 assistant 消息、不推 `message` 帧**，避免污染会话历史。
 
-### 14.4 前端（`frontend-v2/`）
+### 13.4 前端（`frontend-v2/`）
 
 - `stores/chat.ts::_handleEvent` 统一处理 `token`/`message`/`interrupt`/`start`/`tool`/`end`/`error`；收到 `interrupt` 记录 `hitlMsgId`，气泡内渲染确认卡片（问题 + 确认/取消）。
 - 点击后 `resume(choice, sessionId)` 复用**同一消息**（`hitlMsgId`）以 `resume=confirmed|cancelled` + 原 `session_id` 重发 `/api/chat/stream`，轨道在同一气泡内继续（不新建气泡）。
 
-### 14.5 配置（`backend/.env`）
+### 13.5 配置（`backend/.env`）
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `HITL_ENABLED` | `true` | 总开关 |
 | `HITL_ACTIONS` | `[]` | 空=LLM 自主判定（默认）；非空（如 `mcp`）=强制确认（逗号分隔：`search`/`rag`/`mcp`/`remember`；有开关的动作开关打开时自动豁免） |
 
-### 14.6 常见坑
+### 13.6 常见坑
 
 - **中断会话勿直接续发新问题**：中断点含"未完成的 tool_calls"消息，若在同一会话直接发新消息（不先确认/取消），把该历史发给 LLM 会触发 400（tool_calls 无对应 tool 消息）。**防护**：`chat.py` 的 `_check_pending_interrupt` 在复用会话发普通新消息前用 `graph.aget_state` 检查是否有 pending interrupt，有则返回 **409 明确提示**（"请先点击上一条的【确认执行/取消】按钮，或新建会话继续"）。应先点确认/取消，或另开新会话。
 - **双重确认**：`HITL_ACTIONS` 非空时不要同时期望 supervisor 主动 request_confirmation（本实现已避免注册）。

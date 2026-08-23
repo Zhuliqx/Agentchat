@@ -1,5 +1,7 @@
 # 可观测性指南（Langfuse 可视 trace）
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 > 目标：让每次对话在 Langfuse 上形成**完整可视化调用链**——
 > `supervisor → 子 Agent → 工具 → LLM`，含 token 用量、延迟、检索细节。
 
@@ -7,18 +9,13 @@
 
 ## 1. 架构
 
-```
-前端 SSE 流式渲染
-   │ POST /api/chat/stream
-   ▼
-FastAPI chat_stream
-   ▼
-run_agent / stream_agent          ← config["callbacks"] = [Langfuse CallbackHandler]
-   ▼  LangGraph 自动传播
-supervisor(LLM) → rag_agent → search_knowledge_base(工具) → LLM
-   └── 每个节点/LLM/tool 都被捕获为 trace span
-   ▼
-Langfuse(自托管 docker) http://localhost:3000
+```mermaid
+flowchart TB
+    A[前端 SSE 流式渲染] -->|POST /api/chat/stream| B[FastAPI chat_stream]
+    B --> C[run_agent / stream_agent<br>config callbacks 挂 Langfuse CallbackHandler]
+    C -->|LangGraph 自动传播| D[supervisor / rag_agent / search_knowledge_base / LLM]
+    D --> D2[每个节点 / LLM / tool 捕获为 trace span]
+    D2 --> E[Langfuse 自托管 http://localhost:3000]
 ```
 
 ## 2. 部署（自托管）

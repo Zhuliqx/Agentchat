@@ -1,5 +1,7 @@
 # 环境搭建（Setup）
 
+> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+
 本文档说明如何在 Windows（Docker Desktop 运行数据库）上把项目跑起来。
 
 ## 1. 启动数据库（Docker Desktop）

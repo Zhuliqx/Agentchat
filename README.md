@@ -17,9 +17,9 @@
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[REPORT](docs/EVALUATION_REPORT.md)） |
 | 工程质量 | 单测 / 集成 | **103 / 18** | CI 挂检索回归（Ruff + pytest） |
-## 🧑‍💻 简历速览（两个项目）
+## 🧑‍💻 简历速览
 
-> 面向简历/面试的精选版。本仓库包含**两个独立项目**：Agentchat（多 Agent RAG 平台）与 task_agent（长任务自主执行器），共享底层 LLM 工厂/工具/子 Agent/Checkpointer/评估/Langfuse。
+> 面向简历/面试的精选版。本文档对应**项目 1 · Agentchat**；另一个独立项目**· 自主任务 Agent（`backend/app/task_agent/`）详见 [其独立 README](backend/app/task_agent/README.md)**。
 
 ### 项目 1 · Agentchat —— 企业级多 Agent 知识问答平台
 - **定位**：FastAPI + LangGraph + LangChain 的多 Agent 平台，融合 **RAG + MCP + 三层记忆 + HITL + Time Travel**，前端 Vue3 深色主题。
@@ -94,6 +94,7 @@
 | 嵌入 | sentence-transformers / OpenAI Embeddings |
 | 前端 | Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia + marked/highlight.js（frontend-v2） |
 | 认证 | 自实现 JWT（HS256）+ PBKDF2 密码哈希（stdlib，零依赖） |
+| 可观测 | Langfuse 自托管（trace `supervisor→子Agent→工具→LLM`，三配置齐全即启用，fail-open） |
 
 ## 📁 目录结构
 
@@ -101,33 +102,46 @@
 Agentchat/
 ├── docker-compose.yml        # Docker Desktop 一键启动 Postgres + Milvus
 ├── backend/
+│   ├── run.py               # 启动入口（Windows 用，保证 Checkpointer 正常）
+│   ├── requirements.txt / requirements-dev.txt / Dockerfile
 │   ├── app/
 │   │   ├── main.py           # FastAPI 入口（托管前端 + API + 模型预热）
 │   │   ├── config.py         # 配置中心（pydantic-settings）
-│   │   ├── api/routes/       # chat(含SSE) / sessions / rag / memory / health / auth / tasks
+│   │   ├── api/routes/       # chat(含SSE) / sessions / rag / memory / health / auth / tasks / task_agent
 │   │   ├── agents/           # LangGraph 多 Agent（context / llm / tools / graph）
+│   │   ├── task_agent/       # 项目2·自主任务Agent（graph / nodes / state / prompts）
 │   │   ├── rag/              # 嵌入 / 向量库 / BM25 / 混合检索 / rerank / 摄入
 │   │   ├── db/               # Postgres 模型、会话管理、Checkpointer/Store
 │   │   ├── mcp_integration/  # MCP 服务器 + 客户端管理器
+│   │   ├── evaluation/       # 评估（LLM-judge / 四指标聚合 / 指纹去重）
 │   │   ├── security.py       # 密码哈希 + JWT（用户认证）
+│   │   ├── observability.py  # Langfuse 可观测（handler 工厂 + fail-open）
 │   │   ├── scheduler.py      # 定时/批处理任务调度器（asyncio，零依赖）
+│   │   ├── event_loop.py     # Windows ProactorEventLoop 兼容修复
 │   │   └── schemas/          # Pydantic 请求/响应模型
+│   ├── data/                 # 应用运行时数据（model_choice.json + eval/ 评估产物）
 │   ├── tests/                # pytest 测试（unit/ 单元 + integration/ 集成）
 │   │   ├── unit/             # 纯逻辑单元测试（BM25 / 分块 / 评估 / RRF / 流式去重…）
 │   │   └── integration/      # 需 Postgres+Milvus 的集成测试（test_api / 检索回归）
 │   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / verify_auth_tasks / MCP 服务器入口
-│   ├── requirements.txt
 │   └── .env.example
 ├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
 ├── data/                     # 用户内容（知识库文档 / 上传文件）
 │   ├── kb/                   # 示例知识库文档
 │   └── uploads/              # 网页上传的原始文件（自动生成，可下载/预览）
-├── backend/data/             # 应用运行时数据（model_choice.json + eval/ 评估产物）
 └── docs/
-    ├── ARCHITECTURE.md       # 架构与设计说明
+    ├── ARCHITECTURE.md       # 架构与两项目文档地图
     ├── SETUP.md              # 环境搭建指南
-    ├── EXPLAIN.md            # 项目详解（14 章，含架构/数据流/记忆/StateGraph/MCP）
-    └── DEEP_DIVE.md          # 实现详解（Agent 编排/记忆/FastAPI/RAG/MCP 函数级剖析）
+    ├── DEPLOYMENT.md         # 部署与扩展（单机取舍 / 演进）
+    ├── OBSERVABILITY.md      # Langfuse 可观测性
+    ├── PERFORMANCE.md        # 性能压测报告
+    ├── EXPLAIN.md            # 项目详解（14 章）
+    ├── DEEP_DIVE.md          # 实现详解（Agent 编排 / 记忆 / FastAPI / RAG / MCP）
+    ├── RAG_DESIGN_ANALYSIS.md # RAG 设计分析
+    ├── EVALUATION.md         # 评估方法与指标
+    ├── EVALUATION_REPORT.md  # 查询改写实验报告
+    ├── AGENT_EVAL.md         # Agent 编排质量评估
+    └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```
 
 ## 🚀 快速开始
@@ -265,7 +279,7 @@ CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类
 ## 🧩 其他建议（后续可扩展）
 
 - **更多 Agent**：注册新工具即可扩展（现有 rag / mcp / code / web_search / 记忆工具，见 `backend/app/agents/tools.py`）
-- **可观测性**：接入 LangSmith / Langfuse 追踪 Agent 调用链
+- **可观测性（已实现）**：已接入自托管 **Langfuse**，trace `supervisor→子Agent→工具→LLM`（见 [OBSERVABILITY](docs/OBSERVABILITY.md)）；LangSmith 可作未来云端选项
 - **记忆语义检索**：`docker-compose.yml` 已用 pgvector 镜像；若你仍在使用旧的 `postgres:16` 容器，重建（`docker compose down && up -d`，数据卷保留）即可启用长期记忆语义检索（当前自动降级为关键词检索）
 - **认证加固**：接入 OAuth / 企业 SSO；为 `default` 访客用户设置密码；给 API 加速率限制
 
