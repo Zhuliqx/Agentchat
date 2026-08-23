@@ -186,7 +186,7 @@ npm run dev          # http://localhost:5173，/api 自动代理到 :8000
 ```powershell
 cd backend
 pip install -r requirements-dev.txt
-.\venv\Scripts\python.exe -m pytest tests/ -q
+.\venv\Scripts\python.exe -m pytest tests/unit -q
 ```
 
 覆盖：BM25 索引、SQL 只读校验、文档分块、RRF 融合。
@@ -194,7 +194,7 @@ pip install -r requirements-dev.txt
 **API 集成测试**（需运行中的 Postgres/Milvus/MCP 依赖，即 Docker 服务已启动）：
 
 ```powershell
-.\venv\Scripts\python.exe -m pytest tests/test_api.py -v
+.\venv\Scripts\python.exe -m pytest tests/integration -v
 ```
 
 覆盖：健康检查、会话 CRUD + 批量删除（含 checkpoint 清理）、记忆 CRUD、RAG 上传/检索/删除、chat 与 HITL（中断 → 409 → 清理）。DB 不可达时自动跳过；对话/HITL 用例在未配置 LLM key 时单独跳过。

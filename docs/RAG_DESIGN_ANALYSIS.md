@@ -508,7 +508,7 @@ GET /api/rag/ingest/{task_id}   # 前端轮询：pending/processing/done/error +
 ### 15.2 本项目已有的评估与测试
 
 - **纯逻辑单测**：`test_rrf.py` / `test_bm25.py` / `test_chunking.py` / `test_sql_validation.py`。
-- **集成测试**：`tests/test_api.py` 覆盖 RAG 上传 / 检索 / 删除（DB 不可达自动跳过）。
+- **集成测试**：`tests/integration/test_api.py` 覆盖 RAG 上传 / 检索 / 删除（DB 不可达自动跳过）。
 - **检索评估脚本**：`scripts/eval_rag.py` 固定问题集 top-k 命中率。
 
 **差距**：尚无 RAGAS 四指标端到端自动化闭环——是后续提升质量性价比最高的投资方向。

@@ -305,10 +305,10 @@ python scripts/smoke_test.py
 
 # 单元测试（纯逻辑，不依赖外部服务）
 pip install -r requirements-dev.txt
-python -m pytest tests/ -q
+python -m pytest tests/unit -q
 
 # API 集成测试（需 Docker 依赖运行中；覆盖会话/记忆/RAG/chat/HITL，DB 不可达自动跳过）
-python -m pytest tests/test_api.py -v
+python -m pytest tests/integration -v
 ```
 
 ---

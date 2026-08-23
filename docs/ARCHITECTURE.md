@@ -1,5 +1,16 @@
 # 系统架构
 
+## 文档地图（本仓库两个项目）
+
+> 本仓库含**两个独立项目**，共享底层 LLM 工厂 / 工具 / 子 Agent / Checkpointer / 评估 / Langfuse。
+
+| 项目 | 定位 | 文档 |
+|------|------|------|
+| **项目 1 · Agentchat**（本文档主线） | FastAPI + LangGraph + LangChain 的多 Agent 平台（RAG+MCP+三层记忆+HITL+Time Travel） | [README](../README.md)·[架构](ARCHITECTURE.md)·[EXPLAIN](EXPLAIN.md)·[DEEP_DIVE](DEEP_DIVE.md)·[RAG_DESIGN_ANALYSIS](RAG_DESIGN_ANALYSIS.md)·[评估](EVALUATION.md)·[评估报告](EVALUATION_REPORT.md)·[性能](PERFORMANCE.md)·[Agent评估](AGENT_EVAL.md)·[可观测](OBSERVABILITY.md)·[部署](DEPLOYMENT.md)·[安装](SETUP.md) |
+| **项目 2 · 自主任务 Agent**（`backend/app/task_agent/`） | 接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；复用项目 1 子 Agent | [AGENT_TASK](AGENT_TASK.md) |
+
+- **代码结构**：`backend/app/`（项目 1 主体）+ `backend/app/task_agent/`（项目 2）；前端 `frontend-v2/`。
+
 ## 总览
 
 ```
