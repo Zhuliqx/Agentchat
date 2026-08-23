@@ -37,6 +37,8 @@ START → [plan] → [execute] ⇄(未完成)→ [final] → END
 
 ## 5. 分期
 
-- ✅ **一期（已完成）**：Plan → Execute → Final 最小闭环 + API `POST /api/agent-tasks/run`；
-- ⬜ 二期：`verify`（子任务自反思重试/降级）+ 子任务 DAG 依赖 + HITL 计划确认；
-- ⬜ 三期：前端展示 plan/findings/final 过程 + 流式 + Time Travel 断点续跑。
+- ✅ **一期（已完成）**：`fixed` 模式 Plan → Execute → Final + API；
+- ✅ **二期（已完成）**：`replan` 模式——每步**动态重规划**(`replan_node`) + **独立 `check_node`** 判完成 + `MAX_STEPS` 防循环；
+  `TASK_AGENT_MODE=fixed|replan` 可切（默认 replan）；
+- ✅ **信息源感知（L1+L2）**：replan 输出 `expected_source`(kb/db/web/code)，execute 按 source 收紧开关 + 前缀引导（设计 A）——公司/产品信息优先知识库，不再联网查真实企业；
+- ⬜ 三期：前端展示过程 + 流式 + verify 精化/HITL 计划确认。

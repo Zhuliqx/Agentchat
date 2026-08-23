@@ -162,6 +162,10 @@ class Settings(BaseSettings):
     # 输出侧泄露检测（系统提示词片段/密钥模式；零成本正则，常开，仅告警不改回答）
     injection_output_filter: bool = True
 
+    # ---- 自主任务 Agent（第二项目）----
+    # 规划模式: fixed=一次性计划(一期) / replan=每步动态重规划(二期,默认)
+    task_agent_mode: str = "replan"
+
     # 模型离线加载：embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查
     # 卡住（HF 网络不可达场景）。需下载新模型时临时设 False。
     hf_offline: bool = True

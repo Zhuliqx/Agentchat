@@ -5,7 +5,7 @@ import asyncio
 from types import SimpleNamespace
 
 from app.task_agent import nodes as nodes_mod
-from app.task_agent.graph import _route
+from app.task_agent.graph import _route_after_replan, _route_fixed, _route_replan
 
 
 class _LLM:
@@ -66,8 +66,62 @@ def test_plan_node_fallback_on_empty(monkeypatch):
 # ---------------- 图路由 ----------------
 
 def test_route_continue():
-    assert _route({"current_idx": 0, "plan": [{}]}) == "continue"
+    assert _route_fixed({"current_idx": 0, "plan": [{}]}) == "continue"
 
 
 def test_route_final():
-    assert _route({"current_idx": 1, "plan": [{}]}) == "final"
+    assert _route_fixed({"current_idx": 1, "plan": [{}]}) == "final"
+# ---------------- 二期 replan/check ----------------
+
+def test_parse_next_action():
+    action, source = nodes_mod._parse_next_action('{"next_action": "查公司成立年份"}')
+    assert action == "查公司成立年份" and source == "default"
+
+
+def test_parse_next_action_with_source():
+    action, source = nodes_mod._parse_next_action('{"next_action": "查X", "expected_source": "kb"}')
+    assert source == "kb"
+
+
+def test_parse_next_action_unknown_source_default():
+    _, source = nodes_mod._parse_next_action('{"next_action": "查X", "expected_source": "nonsense"}')
+    assert source == "default"
+
+
+def test_parse_next_action_empty():
+    action, source = nodes_mod._parse_next_action('{"next_action": ""}')
+    assert action == "" and source == "default"
+
+
+def test_route_replan_done():
+    assert _route_replan({"done": True}) == "final"
+
+
+def test_route_replan_continue():
+    assert _route_replan({"done": False}) == "replan"
+
+
+def test_route_after_replan_empty_final():
+    assert _route_after_replan({"current_action": ""}) == "final"
+
+
+def test_route_after_replan_action_execute():
+    assert _route_after_replan({"current_action": "查成立"}) == "execute"
+
+
+async def _check(state):
+    return await nodes_mod.check_node(state)
+
+
+def test_check_force_done_on_max(monkeypatch):
+    # step>=MAX_STEPS 规则兜底：不调用 LLM，直接 done
+    monkeypatch.setattr(nodes_mod, "get_llm", lambda kind: None)
+    s = asyncio.run(_check({"goal": "g", "findings": [], "step": nodes_mod.MAX_STEPS}))
+    assert s["done"] is True
+
+
+def test_check_calls_llm(monkeypatch):
+    fake = _LLM('{"done": false}')
+    monkeypatch.setattr(nodes_mod, "get_llm", lambda kind: fake)
+    s = asyncio.run(_check({"goal": "g", "findings": ["f"], "step": 1}))
+    assert s["done"] is False
