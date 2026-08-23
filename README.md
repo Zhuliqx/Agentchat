@@ -17,6 +17,36 @@
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[REPORT](docs/EVALUATION_REPORT.md)） |
 | 工程质量 | 单测 / 集成 | **103 / 18** | CI 挂检索回归（Ruff + pytest） |
+## 🧑‍💻 简历速览（两个项目）
+
+> 面向简历/面试的精选版。本仓库包含**两个独立项目**：Agentchat（多 Agent RAG 平台）与 task_agent（长任务自主执行器），共享底层 LLM 工厂/工具/子 Agent/Checkpointer/评估/Langfuse。
+
+### 项目 1 · Agentchat —— 企业级多 Agent 知识问答平台
+- **定位**：FastAPI + LangGraph + LangChain 的多 Agent 平台，融合 **RAG + MCP + 三层记忆 + HITL + Time Travel**，前端 Vue3 深色主题。
+- **技术栈**：FastAPI / LangGraph（Supervisor·Checkpointer·Store·interrupt）/ Milvus（向量）/ Postgres+pgvector（关系·长期记忆语义检索）/ DeepSeek 多模型 / Vue3+TS+Tailwind4。
+- **核心亮点**：
+  - **检索链路**：混合检索（向量+BM25+RRF）+ rerank 精排 + 中文 embedding 选型 —— Hit@1 **0.975**、检索 MRR **0.944**、Faithfulness **0.923**（LLM-judge 四指标、GT 40 条）；
+  - **消融实证**：纯向量→混合→+rerank = 0.894→0.931→**0.963**，每层都有量化收益；
+  - **Agent**：Supervisor 层级路由（rag/web_search/mcp/code），危险操作全 HITL/拒绝（route@1、拒绝率 **1.0**）；代码 Agent 受限沙箱；
+  - **记忆**：短期 Checkpointer / 长期 Store+语义检索+写入去重（LangGraph 原生三层记忆）；
+  - **安全**：Prompt 注入防护（不可信数据隔离+规则+可选 LLM 复核）、SQL 只读沙箱、输出泄露检测；
+  - **体验**：SSE token 级流式（首 token ~19ms）、会话/记忆/知识库按用户隔离、JWT 认证、会话统计；
+  - **工程**：单测 **103** + 集成 **18**、CI（Ruff+Pyright+检索回归）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
+- **一句话**：检索质量、Agent 安全、可观测全闭环，用**真实评估数据**驱动每一个取舍（非拍脑袋）。
+
+### 项目 2 · 自主任务 Agent（`backend/app/task_agent/`）—— 长任务自主执行器
+- **定位**：接收**模糊复杂目标** → LLM 分解/每步重规划 → 循环执行 → 结构化交付；复用项目 1 全部子 Agent 能力。详见 [`docs/AGENT_TASK.md`](docs/AGENT_TASK.md)。
+- **技术栈**：FastAPI + LangGraph（StateGraph·interrupt·Command·retry_policy·timeout·error_handler·time-travel）/ DeepSeek / 复用 rag·mcp·web_search·code 子 Agent。
+- **核心亮点**：
+  - **每步动态重规划**（`replan`）+ 独立 **`check`** 判完成 + **`MAX_STEPS`** 防循环；`TASK_AGENT_MODE=fixed|replan` 可切；
+  - **信息源感知（L1+L2）**：replan 标注 `expected_source`(kb/db/web/code)，执行按源收紧开关+前缀引导——公司/产品**优先知识库**，不再误联网查真实企业；
+  - **节点级 HITL**：`interrupt`/`Command(resume)`，proceed/edit/skip；无 Postgres 自动降级全自主；
+  - **verify 自检重试**：子任务失败 → LLM 判是否值得重试（不计步数，`MAX_RETRIES` 上限）；
+  - **节点级 fault tolerance**：`retry_policy` + `timeout` + `error_handler`（返回 `Command`）+ 自定义 `retry_on`（网络/超时/5xx 重试、确定性错误不重试）；
+  - **Time Travel 长任务恢复**：`list_task_history` + `run` 支持 `checkpoint_id`（分叉 / 重放）；
+  - **验证**：单测贯穿（`tests/unit/test_task_agent.py`）；真实 LLM 跑通（目标→信息源感知→结构化交付），HITL/verify/分叉真实链路均验证。
+- **一句话**：把 LangGraph 的 **交互式 HITL / 容错 / 时间旅行 / 状态管理**组合成一整套面向"模糊长目标"的 Agentic 引擎。
+
 ## ✨ 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
