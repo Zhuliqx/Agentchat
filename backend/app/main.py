@@ -59,6 +59,7 @@ from app.api.routes import (
     search,
     sessions,
     tasks,
+    task_agent,
 )
 from app.db.memory_store import (
     cleanup_stale_checkpoints,
@@ -215,6 +216,7 @@ app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(task_agent.router, prefix="/api", tags=["agent-tasks"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(search.router, prefix="/api/search", tags=["search"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
