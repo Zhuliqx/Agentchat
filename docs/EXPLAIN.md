@@ -100,20 +100,28 @@ Agentchat/
 ## 4. 架构总览
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 graph TD
-    U[浏览器用户] --> F[前端 frontend-v2（Vue 3 + Vite + TS）]
-    F -->|REST / SSE| API[FastAPI 后端 :8000]
-    API --> CHAT[chat 路由]
-    CHAT --> G[LangGraph Supervisor 图]
-    G -->|工具| RAG[RAG Agent]
-    G -->|工具| MCP[MCP Agent]
-    G -->|工具| SEARCH[web_search]
-    G -->|工具| CODE[code_agent]
-    RAG --> MV[Milvus 向量库]
-    MCP --> MCS[自建/外部 MCP 服务器]
-    SEARCH --> TAV[Tavily 联网搜索]
-    API --> PG[PostgreSQL]
-    G --> MEM[Checkpointer + Store 记忆]
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef data fill:#efebe9,stroke:#6d4c41
+    classDef fe fill:#e3f2fd,stroke:#1976d2
+    classDef mcp fill:#e0f7fa,stroke:#00838f
+    classDef mem fill:#fce4ec,stroke:#c2185b
+    classDef tool fill:#eceff1,stroke:#455a64
+    U[浏览器用户]:::fe --> F[前端 frontend-v2（Vue 3 + Vite + TS）]:::fe
+    F -->|REST / SSE| API[FastAPI 后端 :8000]:::api
+    API --> CHAT[chat 路由]:::api
+    CHAT --> G[LangGraph Supervisor 图]:::agent
+    G -->|工具| RAG[RAG Agent]:::agent
+    G -->|工具| MCP[MCP Agent]:::agent
+    G -->|工具| SEARCH[web_search]:::tool
+    G -->|工具| CODE[code_agent]:::agent
+    RAG --> MV[Milvus 向量库]:::data
+    MCP --> MCS[自建/外部 MCP 服务器]:::mcp
+    SEARCH --> TAV[Tavily 联网搜索]:::tool
+    API --> PG[PostgreSQL]:::mem
+    G --> MEM[Checkpointer + Store 记忆]:::mem
     subgraph 数据层
         MV
         PG
@@ -125,6 +133,7 @@ graph TD
 ## 5. 启动流程
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 sequenceDiagram
     participant U as run.py
     participant L as lifespan(main.py)
@@ -153,6 +162,7 @@ sequenceDiagram
 场景：前端发送"帮我统计数据库有多少个会话"（假设知识库开关关闭）。
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 sequenceDiagram
     participant FE as 前端 (frontend-v2 Vue 3)
     participant C as chat.py (SSE)
@@ -219,16 +229,21 @@ sequenceDiagram
 
 ### 7.4 RAG 链路 `rag/`
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart LR
-    A["上传/摄入"] --> B["Postgres documents + Milvus 向量"]
-    Q["查询"] --> C["retriever(原 query + 改写双路)"]
-    C --> D["hybrid.search_hybrid"]
-    D --> E["向量通道 vector_store.search"]
-    D --> F["BM25 通道 bm25.py"]
-    E --> G["RRF 融合"]
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef mem fill:#fce4ec,stroke:#c2185b
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
+    A["上传/摄入"]:::rag --> B["Postgres documents + Milvus 向量"]:::mem
+    Q["查询"]:::rag --> C["retriever(原 query + 改写双路)"]:::rag
+    C --> D["hybrid.search_hybrid"]:::rag
+    D --> E["向量通道 vector_store.search"]:::rag
+    D --> F["BM25 通道 bm25.py"]:::rag
+    E --> G["RRF 融合"]:::tool
     F --> G
-    G --> H["rerank.py 精排"]
-    H --> I["LLM 生成"]
+    G --> H["rerank.py 精排"]:::rag
+    H --> I["LLM 生成"]:::agent
 ```
 
 > 检索块/搜索块在喂给 LLM 前经 `prompt_injection.py` 处理：不可信数据块隔离 + 注入指令检测剔除（用户 query 注入直接 400，详见 `app/rag/prompt_injection.py`）。
@@ -325,12 +340,15 @@ python -m pytest tests/integration -v
 ### 11.2 架构
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 graph TD
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef mcp fill:#e0f7fa,stroke:#00838f
     subgraph 主进程 backend
-        AGENT[MCP Agent 子Agent] --> CLIENT[McpClientManager client.py]
-        CLIENT -->|stdio 子进程| DB[自建 db_query_server]
-        CLIENT -->|stdio 子进程| TIME[自建 time_server]
-        CLIENT -->|streamable http| EXT[外部 MCP 服务器 可选]
+        AGENT[MCP Agent 子Agent]:::agent --> CLIENT[McpClientManager client.py]:::mcp
+        CLIENT -->|stdio 子进程| DB[自建 db_query_server]:::mcp
+        CLIENT -->|stdio 子进程| TIME[自建 time_server]:::mcp
+        CLIENT -->|streamable http| EXT[外部 MCP 服务器 可选]:::mcp
     end
 ```
 
@@ -392,15 +410,19 @@ EXTERNAL_MCP_SERVERS=github=http://localhost:8080/mcp,weather=http://localhost:8
 ### 12.1 三层记忆总览
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 graph TB
+    classDef mcp fill:#e0f7fa,stroke:#00838f
+    classDef mem fill:#fce4ec,stroke:#c2185b
+    classDef tool fill:#eceff1,stroke:#455a64
     subgraph 短期[短期记忆 Checkpointer]
-        A[AsyncPostgresSaver] -->|thread_id=session_id| B[checkpoints 表]
+        A[AsyncPostgresSaver]:::mem -->|thread_id=session_id| B[checkpoints 表]:::tool
     end
     subgraph 运行时[运行时上下文 context_schema]
-        C[UserContext user_id] -->|context= 传入| D[工具经 get_runtime 访问]
+        C[UserContext user_id]:::tool -->|context= 传入| D[工具经 get_runtime 访问]:::mcp
     end
     subgraph 长期[长期记忆 Store]
-        E[AsyncPostgresStore] -->|namespace user_id,memories| F[store 表]
+        E[AsyncPostgresStore]:::mem -->|namespace user_id,memories| F[store 表]:::mem
     end
 ```
 
@@ -456,6 +478,7 @@ async def _arun(content: str) -> str:
 ### 12.5 完整记忆读写链路
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 sequenceDiagram
     participant U as 用户
     participant S as Supervisor
@@ -493,6 +516,7 @@ Checkpointer 每执行一步都会落一个 checkpoint，`parent_checkpoint_id` 
 > 注：下图描述的是**强制确认模式**（`HITL_ACTIONS` 非空，工具设 `confirm_before`）。默认 **LLM 自主判定**（`HITL_ACTIONS=[]`）时，supervisor 改为主动调用 `request_confirmation` 工具请求授权，机制（`interrupt` + `Command(resume)`）相同。
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 sequenceDiagram
     participant U as 前端
     participant API as FastAPI

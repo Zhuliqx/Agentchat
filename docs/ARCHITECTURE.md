@@ -1,6 +1,6 @@
 # 系统架构
 
-## 文档地图（本仓库两个项目）
+## 1. 文档地图（本仓库两个项目）
 
 > 本仓库含**两个独立项目**，共享底层 LLM 工厂 / 工具 / 子 Agent / Checkpointer / 评估 / Langfuse。
 
@@ -11,37 +11,43 @@
 
 - **代码结构**：`backend/app/`（项目 1 主体）+ `backend/app/task_agent/`（项目 2）；前端 `frontend-v2/`。
 
-## 总览
+## 2. 总览
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart TB
-    subgraph FE["前端 frontend-v2<br>Vue3 + Vite + TS + Tailwind 4"]
-        F1["开发 Vite :5173<br>生产 FastAPI 托管 :8000"]
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef data fill:#efebe9,stroke:#6d4c41
+    classDef fe fill:#e3f2fd,stroke:#1976d2
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
+    subgraph FE["前端 frontend-v2"]
+        F["Vue 3 + Vite + TS"]:::fe
     end
     subgraph API["FastAPI 后端"]
-        A1["api/chat(/stream) · sessions · rag · memory · health"]
+        A["api/chat(/stream) · sessions · rag"]:::api
     end
-    subgraph AGENT["LangGraph 多 Agent 编排 Supervisor"]
-        S["supervisor"]
-        RA["rag_agent 检索+生成"]
-        MC["mcp_agent MCP 工具"]
-        DR["直接回答"]
-        S --> RA
-        S --> MC
-        S --> DR
+    subgraph AGENT["LangGraph 多 Agent 编排"]
+        S["Supervisor"]:::agent
+        RA["rag_agent 检索"]:::agent
+        MC["mcp_agent 工具"]:::agent
+        DR["直接回答"]:::tool
     end
-    subgraph STORE["数据存储 Docker Desktop"]
-        PG["Postgres 会话/消息/文档元数据"]
-        MV["Milvus 文档块向量<br>(etcd/minio Milvus 依赖)"]
-        SB["自建 MCP db/time stdio"]
-        EX["外部 MCP http"]
+    subgraph D["数据存储 Docker Desktop"]
+        PG["Postgres 会话/消息/文档"]:::rag
+        MV["Milvus 文档块向量"]:::rag
     end
-    FE -->|"REST/JSON + SSE"| API
-    API --> AGENT
-    AGENT --> STORE
+    F -->|"REST / SSE"| A
+    A --> S
+    S --> RA
+    S --> MC
+    S --> DR
+    RA --> MV
+    A --> PG
 ```
 
-## 组件说明
+## 3. 组件说明
 
 | 组件 | 技术 | 职责 |
 |------|------|------|
@@ -58,7 +64,9 @@ flowchart TB
 | MCP | `mcp` SDK (FastMCP + stdio/http client) | 自建工具服务器 + 外部 MCP 接入 |
 | LLM | DeepSeek / DashScope / OpenAI / Ollama | 默认 DeepSeek，可切换 |
 
-## 多 Agent 设计（Supervisor 模式）
+## 4. 多 Agent 设计（Supervisor 模式）
+
+### 4.1 Supervisor 层级模式
 
 采用**层级式（Hierarchical）**架构，`supervisor` 本身是一个 ReAct Agent，
 它持有多个"子 Agent 工具"——这正是 LangGraph 官方文档的
@@ -75,30 +83,45 @@ Supervisor 根据用户意图自主决定调用哪个工具、调用几次，或
 搜索环节从 ~20s+（子 Agent 实测触发 4 次 Tavily + 3 次 LLM）降到 ~2s。
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart LR
-    S[supervisor<br>LLM + rag_agent / web_search / mcp_agent 作为工具]
-    S --> RA[rag_agent<br>子Agent: LLM + search_knowledge_base]
-    RA --> MR[MilvusRetriever] --> MV[Milvus]
-    S --> WS[web_search<br>直接 Tavily 工具]
-    WS --> TA[TavilySearch] --> TB[Tavily API 网络]
-    S --> MC[mcp_agent<br>子Agent: LLM + db_query_postgres / get_current_time 等]
-    MC --> SB[自建 MCP stdio]
-    MC --> XM[外部 MCP streamable http]
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef data fill:#efebe9,stroke:#6d4c41
+    classDef mcp fill:#e0f7fa,stroke:#00838f
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
+    S[supervisor<br>LLM + rag_agent / web_search / mcp_agent 作为工具]:::agent
+    S --> RA[rag_agent<br>子Agent: LLM + search_knowledge_base]:::agent
+    RA --> MR[MilvusRetriever]:::rag --> MV[Milvus]:::data
+    S --> WS[web_search<br>直接 Tavily 工具]:::mcp
+    WS --> TA[TavilySearch]:::tool --> TB[Tavily API 网络]:::api
+    S --> MC[mcp_agent<br>子Agent: LLM + db_query_postgres / get_current_time 等]:::agent
+    MC --> SB[自建 MCP stdio]:::mcp
+    MC --> XM[外部 MCP streamable http]:::mcp
 ```
+
+### 4.2 动态提示词与开关联动
 
 > **提示词动态化**：supervisor 的 system prompt 由 `_build_supervisor_prompt(use_rag, use_search, use_memory)`
 > **按开关动态生成**——关闭知识库/搜索/记忆时，提示词同步移除对应工具描述并明确禁止调用，
 > 避免 LLM 幻觉调用不存在的工具（曾导致"关闭开关仍显示调用 rag_agent"的假象）。
 
-## RAG 流程
+## 5. RAG 流程
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart LR
-    D[文档] --> L[加载 txt/pdf/docx/md] --> C[分块 Markdown按标题/递归]
-    C --> E[嵌入 bge-small-zh-v1.5] --> W[写入 Milvus + Postgres 元数据]
-    C --> U[网页上传: 原始文件持久保存 data/uploads/uuid]
-    Q[查询] --> H[混合检索<br>向量通道 Milvus + BM25 通道 Postgres<br>RRF 融合 + CrossEncoder rerank]
-    H --> CTX[上下文] --> GEN[LLM 生成]
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef mem fill:#fce4ec,stroke:#c2185b
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
+    D[文档]:::rag --> L[加载 txt/pdf/docx/md]:::rag --> C[分块 Markdown按标题/递归]:::rag
+    C --> E[嵌入 bge-small-zh-v1.5]:::rag --> W[写入 Milvus + Postgres 元数据]:::mem
+    C --> U[网页上传: 原始文件持久保存 data/uploads/uuid]:::tool
+    Q[查询]:::rag --> H[混合检索<br>向量通道 Milvus + BM25 通道 Postgres<br>RRF 融合 + CrossEncoder rerank]:::api
+    H --> CTX[上下文]:::rag --> GEN[LLM 生成]:::agent
 ```
 
 - **原始文件存储**：网页上传的文档持久保存到 `data/uploads/<uuid>/<文件名>`（不再用临时目录），
@@ -109,7 +132,7 @@ flowchart LR
 - **混合检索**：向量通道（Milvus 语义相似度）+ 关键词通道（Postgres 全文文本上的轻量 BM25，中文字符+英文单词切分），用 RRF（Reciprocal Rank Fusion）融合——交集项获得双路加分，兼顾语义相近与术语精确命中。
 - **rerank**：融合后的 Top-N 候选经 `bge-reranker-base`（CrossEncoder）交叉编码精排，输出最终 top-k。
 
-## MCP 架构
+## 6. MCP 架构
 
 ```
                  backend/app/mcp_integration/
@@ -125,21 +148,34 @@ flowchart LR
 - 外部 MCP 通过 `EXTERNAL_MCP_SERVERS` 环境变量配置（name=url），用 **streamable http** 连接。
 - 所有 MCP 工具会被转换为 LangChain `StructuredTool`（工具名加服务器前缀，避免冲突），供 MCP Agent 使用。
 
-## 记忆架构（三层，LangGraph 官方机制）
+## 7. 记忆架构（三层，LangGraph 官方机制）
+
+### 7.1 三层总览
 
 ```mermaid
-flowchart TB
-    LT[长期记忆 跨会话<br>LangGraph Store AsyncPostgresStore<br>namespace=(user_id,memories) 跨线程持久]
-    RT[运行时上下文 仅当次调用<br>context_schema=UserContext 不持久化]
-    ST[短期记忆 会话内<br>Checkpointer AsyncPostgresSaver thread_id=session_id]
-    LT --- RT --- ST
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
+flowchart LR
+    classDef store fill:#e3f2fd,stroke:#1976d2
+    classDef ctx fill:#fff3e0,stroke:#f57c00
+    classDef cp fill:#e8f5e9,stroke:#388e3c
+    LT["长期记忆 · 跨会话<br>LangGraph Store<br>namespace=(user_id,memories)"]:::store
+    RT["运行时上下文 · 仅当次<br>context_schema=UserContext"]:::ctx
+    ST["短期记忆 · 会话内<br>Checkpointer<br>thread_id=session_id"]:::cp
+    LT ~~~ RT
+    RT ~~~ ST
 ```
+
+### 7.2 短期记忆（Checkpointer）
 
 - **短期记忆**：`create_agent(..., checkpointer=AsyncPostgresSaver)` 编译，
   调用时 `config={"configurable": {"thread_id": session_id}}`，图状态（含历史 messages）跨请求持久化。
+### 7.3 运行时上下文
+
 - **运行时上下文**：`create_agent(..., context_schema=UserContext)` 定义上下文类型，
   调用时 `context=UserContext(user_id=...)` 传入；**仅当次调用有效、不持久化**。
   节点/工具通过 `Runtime` 对象（工具内 `get_runtime()`）访问 `runtime.context`。
+### 7.4 长期记忆（Store，含语义检索与去重）
+
 - **长期记忆**：`create_agent(..., store=AsyncPostgresStore)`，工具通过
   `runtime.store`（`aput`/`asearch`）按 namespace `(user_id, "memories")` 读写，
   跨线程、跨进程持久；`/api/memory` 与前端记忆面板由 Store 支撑。
@@ -147,7 +183,7 @@ flowchart TB
     `asearch(..., query=...)` 按语义相似度召回；需 Postgres 启用 pgvector，缺失时自动降级关键词检索。
   - **写入去重**：`remember_memory` 先按语义检索已有记忆，余弦相似度 ≥ 阈值（默认 0.86）则更新该条而非新增，避免重复。
 
-## 流式输出（SSE）
+## 8. 流式输出（SSE）
 
 聊天接口提供两个端点：
 
@@ -164,7 +200,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 同步 DB 调用（会话/消息/历史）通过 `anyio.to_thread` 放入线程池，避免阻塞事件循环——
 这是"不改 ORM 为异步"的轻量方案（SQLAlchemy 保持同步，热点路由不卡 IO）。
 
-## 健壮性（超时 / 重试）
+## 9. 健壮性（超时 / 重试）
 
 - **请求超时**：`run_agent`/`stream_agent` 外层 `asyncio.timeout(agent_timeout=120s)`，LLM/MCP 卡死时返回 504，不无限挂起。
 - **多轮历史**：每次请求只传当前消息，历史由 Checkpointer 按 `thread_id` 自动恢复（不再手动拼接/裁剪；长对话可新建会话归档）。
@@ -173,7 +209,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 - **rerank 候选受限**：仅对 `rerank_candidate_k`（默认 8）条候选精排，输入按 `rerank_max_length` 截断，控制 CPU 推理量。
 - **数据库索引**：`sessions.updated_at` / `documents.created_at` 建 DESC 索引，`init_db()` 幂等补建，加速会话/文档列表排序。
 
-## 数据流（一次对话，SSE token 级流式）
+## 10. 数据流（一次对话，SSE token 级流式）
 
 1. 前端 `POST /api/chat/stream`（SSE），携带 `session_id` 与消息。
 2. 后端（线程池）保存用户消息到 Postgres，随后调用 `stream_agent()`（历史由 Checkpointer 从 `thread_id` 自动恢复，无需手动组装）。
@@ -185,7 +221,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 6. 后端保存 assistant 消息，SSE 推送 `message` 帧（最终一致快照，含 `session_id` / `used_agents`）。
 7. 会话 `updated_at` 同步刷新，活跃会话自动排到列表最前（`sessions.updated_at` 已建索引）。
 
-## 人工确认（HITL，Human-in-the-Loop）
+## 11. 人工确认（HITL，Human-in-the-Loop）
 
 基于 LangGraph `interrupt` / `Command(resume)` 官方机制，让用户在关键操作（联网搜索、外部工具、写入等）前拍板：
 
@@ -196,7 +232,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 3. **中断后恢复**：`run_agent`/`stream_agent` 支持 `resume` 参数，非空时用 `Command(resume=resume)` 从上次 `interrupt` 断点继续（同一 `thread_id`），不再重复传入问题、不重复保存用户消息。
 4. **前端交互**（`frontend-v2`）：`stores/chat.ts::_handleEvent` 收到 `interrupt` 事件在气泡内渲染确认卡片（问题 + 确认/取消按钮）→ 点击后 `resume(choice, sessionId)` 复用同一消息以 `resume=confirmed|cancelled` 重发 `/api/chat/stream` → 同一气泡继续渲染后续 token/答案。
 
-## 核心文件映射
+## 12. 核心文件映射
 
 | 文件 | 职责 |
 |------|------|

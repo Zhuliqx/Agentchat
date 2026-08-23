@@ -10,12 +10,17 @@
 ## 1. 架构
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart TB
-    A[前端 SSE 流式渲染] -->|POST /api/chat/stream| B[FastAPI chat_stream]
-    B --> C[run_agent / stream_agent<br>config callbacks 挂 Langfuse CallbackHandler]
-    C -->|LangGraph 自动传播| D[supervisor / rag_agent / search_knowledge_base / LLM]
-    D --> D2[每个节点 / LLM / tool 捕获为 trace span]
-    D2 --> E[Langfuse 自托管 http://localhost:3000]
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef fe fill:#e3f2fd,stroke:#1976d2
+    classDef mcp fill:#e0f7fa,stroke:#00838f
+    A[前端 SSE 流式渲染]:::fe -->|POST /api/chat/stream| B[FastAPI chat_stream]:::api
+    B --> C[run_agent / stream_agent<br>config callbacks 挂 Langfuse CallbackHandler]:::agent
+    C -->|LangGraph 自动传播| D[supervisor / rag_agent / search_knowledge_base / LLM]:::agent
+    D --> D2[每个节点 / LLM / tool 捕获为 trace span]:::agent
+    D2 --> E[Langfuse 自托管 http://localhost:3000]:::mcp
 ```
 
 ## 2. 部署（自托管）

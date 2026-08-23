@@ -10,12 +10,17 @@
 ## 1. 当前部署模型（单机单 worker）
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart TB
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef data fill:#efebe9,stroke:#6d4c41
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
     subgraph DC[Docker Compose 全家桶]
-        A[FastAPI uvicorn 单 worker :8000]
-        B[Postgres pgvector<br>会话 / 消息 / 文档 / 记忆]
-        C[Milvus etcd+minio<br>文档块向量]
-        D[Langfuse 可选<br>可观测性 trace]
+        A[FastAPI uvicorn 单 worker :8000]:::api
+        B[Postgres pgvector<br>会话 / 消息 / 文档 / 记忆]:::rag
+        C[Milvus etcd+minio<br>文档块向量]:::rag
+        D[Langfuse 可选<br>可观测性 trace]:::tool
     end
 ```
 

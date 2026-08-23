@@ -32,27 +32,33 @@
 ## 1. 子系统总览
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart TB
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef mem fill:#fce4ec,stroke:#c2185b
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
     subgraph ingest[写入链路 ingest]
-        A[上传文件] --> B[原始文件持久化 uploads/uuid]
-        B --> C[后台线程摄入]
-        C --> D[解析 编码检测/HTML/PDF/DOCX]
-        D --> E[分块 Markdown标题+递归]
-        E --> F[sha256 指纹增量对比]
-        F --> G[仅嵌入新增块]
-        G --> H[写 Milvus + Postgres]
+        A[上传文件]:::tool --> B[原始文件持久化 uploads/uuid]:::tool
+        B --> C[后台线程摄入]:::rag
+        C --> D[解析 编码检测/HTML/PDF/DOCX]:::tool
+        D --> E[分块 Markdown标题+递归]:::rag
+        E --> F[sha256 指纹增量对比]:::tool
+        F --> G[仅嵌入新增块]:::rag
+        G --> H[写 Milvus + Postgres]:::mem
     end
     H -->|失效签名缓存| I
     subgraph retrieve[查询链路 retrieve]
-        I[search_knowledge_base 按 user_id 隔离] --> J[retriever.invoke]
-        J --> K[通道1 Milvus 向量检索]
-        J --> L[通道2 Postgres 文本 BM25]
-        K --> M[RRF 融合]
+        I[search_knowledge_base 按 user_id 隔离]:::tool --> J[retriever.invoke]:::rag
+        J --> K[通道1 Milvus 向量检索]:::rag
+        J --> L[通道2 Postgres 文本 BM25]:::rag
+        K --> M[RRF 融合]:::tool
         L --> M
-        M --> N[CrossEncoder rerank 精排]
-        N --> O[同文档去重 + 相邻块合并 + 超长块截断]
-        O --> P[LangChain Document]
-        P --> Q[RAG Agent 生成 引用溯源 sources]
+        M --> N[CrossEncoder rerank 精排]:::api
+        N --> O[同文档去重 + 相邻块合并 + 超长块截断]:::rag
+        O --> P[LangChain Document]:::tool
+        P --> Q[RAG Agent 生成 引用溯源 sources]:::agent
     end
 ```
 

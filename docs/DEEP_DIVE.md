@@ -28,42 +28,42 @@
 ## 1. 分层架构总览
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart TB
-    subgraph FE[前端 frontend-v2]
-        appJS[Vue 3: SSE 解析 / 确认卡片 / 会话管理]
-    end
-    subgraph API[FastAPI app/api]
-        R[路由: chat/rag/sessions/memory/health]
-        SSE[chat_stream: SSE token 流式]
-    end
-    subgraph AGENT[Agent 层 app/agents]
-        G[graph.py: Supervisor 图 + run/stream_agent]
-        T[tools.py: 子 Agent + 工具 + HITL]
-        L[llm.py: LLM 工厂]
-    end
-    subgraph RAG[rag/]
-        RT[retriever.py]
-        HY[hybrid.py + bm25.py]
-        VS[vector_store.py: Milvus]
-        RR[rerank.py: bge-reranker]
-    end
-    subgraph MEM[db/]
-        PG[postgres.py: 会话/消息/文档]
-        MS[memory_store.py: Checkpointer + Store]
-    end
-    subgraph MCP[mcp_integration/]
-        CL[client.py: MCP 管理器]
-    end
+    classDef fe fill:#e3f2fd,stroke:#1976d2
+    classDef api fill:#ede7f6,stroke:#5e35b1
+    classDef agent fill:#e8f5e9,stroke:#388e3c
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef mem fill:#fce4ec,stroke:#c2185b
+    classDef mcp fill:#e0f7fa,stroke:#00838f
 
-    FE -->|HTTP/SSE| API
+    appJS["前端 frontend-v2<br>Vue 3<br>SSE 解析 / 确认卡片 / 会话管理"]:::fe
+    subgraph API["FastAPI app/api"]
+        R["chat / rag / sessions / memory / health"]:::api
+        SSE["chat_stream SSE token 流式"]:::api
+    end
+    subgraph AGENT["Agent 层 app/agents"]
+        G["graph.py Supervisor 图<br>run / stream_agent"]:::agent
+        T["tools.py 子 Agent + 工具 + HITL"]:::agent
+        L["llm.py LLM 工厂"]:::agent
+    end
+    subgraph RAG["rag/"]
+        RT["retriever.py"]:::rag
+        HY["hybrid.py + bm25.py"]:::rag
+        VS["vector_store.py Milvus"]:::rag
+        RR["rerank.py bge-reranker"]:::rag
+    end
+    subgraph MEM["db/"]
+        PG["postgres.py 会话/消息/文档"]:::mem
+        MS["memory_store.py Checkpointer + Store"]:::mem
+    end
+    CL["mcp_integration/<br>client.py MCP 管理器"]:::mcp
+
+    appJS -->|"HTTP / SSE"| API
     API --> AGENT
     AGENT --> RAG
     AGENT --> MEM
-    AGENT --> MCP
-    RAG -->|Milvus| VS
-    MEM -->|Postgres| PG
-    MEM -->|Postgres| MS
-    MCP -->|stdio/http| CL
+    AGENT --> CL
 ```
 
 - **请求入口**：FastAPI 路由 → `chat.py` 调 `graph.py` 的 `run_agent` / `stream_agent`。
@@ -280,13 +280,17 @@ async def _arun(query: str) -> str:
 ### 6.3 混合检索 `hybrid.py` + `bm25.py`
 
 ```mermaid
+%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 flowchart LR
-    Q[query] --> D[向量通道 Milvus]
-    Q --> B[关键词通道 BM25/Postgres]
-    D --> RRF[RRF 融合 rank]
+    classDef data fill:#efebe9,stroke:#6d4c41
+    classDef rag fill:#fff3e0,stroke:#f57c00
+    classDef tool fill:#eceff1,stroke:#455a64
+    Q[query]:::tool --> D[向量通道 Milvus]:::data
+    Q --> B[关键词通道 BM25/Postgres]:::rag
+    D --> RRF[RRF 融合 rank]:::tool
     B --> RRF
-    RRF --> RR[rerank 精排]
-    RR --> OUT[Top-k Document]
+    RRF --> RR[rerank 精排]:::rag
+    RR --> OUT[Top-k Document]:::tool
 ```
 
 - **BM25 是纯 Python 实现**（`bm25.py`：中文按字切 + 英文单词，停用词过滤，Okapi 公式）——因为 pymilvus 3.0 没有 `BM25EmbeddingFunction`，所以用 **Python 侧 BM25 + Postgres 文本**做关键词通道。
