@@ -67,7 +67,7 @@ async def _run_once(task: dict) -> dict:
         result = await run_agent(
             question=task["task"],
             use_rag=True,
-            use_search=False,
+            use_search=task.get("use_search", False),
             use_memory=False,
             session_id=thread_id,
             user_id="default",
@@ -128,6 +128,35 @@ def _judge_once(rec: dict, sample: dict) -> dict:
             "completed": completed, "refuse_ok": None}
 
 
+async def _judge_quality(task: dict, rec: dict) -> float | None:
+    """可选：LLM judge 评 answer 型任务答案的 answer_relevancy（0~1）。"""
+    from app.evaluation.judge_llm import build_relevancy_prompt, judge
+    from app.evaluation.metrics import answer_relevancy
+
+    if task.get("type") == "refuse":
+        return None
+    scores = []
+    for s in rec["samples"]:
+        if s.get("error") or not s.get("answer"):
+            continue
+        r = await judge(build_relevancy_prompt(task["task"], s["answer"]))
+        scores.append(answer_relevancy(r.get("score")))
+    return round(sum(scores) / len(scores), 4) if scores else None
+
+
+async def _attach_quality(records: list[dict], cases: list[dict]) -> list[dict]:
+    """并发对每个任务做答案质量 judge，把 answer_relevancy 附到记录。"""
+    by_id = {c["id"]: c for c in cases}
+
+    async def one(rec: dict) -> None:
+        task = by_id.get(rec["id"])
+        if task:
+            rec["answer_relevancy"] = await _judge_quality(task, rec)
+
+    await asyncio.gather(*(one(r) for r in records))
+    return records
+
+
 def _summarize(records: list[dict]) -> dict:
     route_hit = setok_hit = route_n = setok_n = 0
     refuse_hit = refuse_n = 0
@@ -149,7 +178,7 @@ def _summarize(records: list[dict]) -> dict:
                 refuse_hit += int(j["refuse_ok"])
             compl_n += 1
             compl_hit += int(j["completed"])
-    return {
+    summary = {
         "cases_total": len(records),
         "runs": samples_n // max(1, len(records)),
         "route@1": round(route_hit / route_n, 4) if route_n else None,
@@ -159,6 +188,11 @@ def _summarize(records: list[dict]) -> dict:
         "avg_tool_calls": round(total_tools / samples_n, 2) if samples_n else None,
     }
 
+    rel_vals = [r["answer_relevancy"] for r in records if r.get("answer_relevancy") is not None]
+    if rel_vals:
+        summary["answer_relevancy"] = round(sum(rel_vals) / len(rel_vals), 4)
+    return summary
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Agent 编排质量评估（真实 LLM，多采样）")
     parser.add_argument("--tasks", default=None, help="任务集 json（默认 data/eval/agent_tasks.json）")
@@ -166,6 +200,7 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=1, help="每个任务采样次数（推荐 >=3）")
     parser.add_argument("--concurrency", type=int, default=CONCURRENCY)
     parser.add_argument("--out", default=None, help="结果 JSON 输出路径")
+    parser.add_argument("--judge", action="store_true", help="LLM judge 评答案 answer_relevancy（有成本）")
     args = parser.parse_args()
 
     tasks_path = Path(args.tasks or DEFAULT_TASKS)
@@ -176,6 +211,8 @@ def main() -> None:
     print(f"Agent 编排评估：{len(cases)} 条 × {args.runs} 次采样（数据源: {tasks_path.name}）\n")
 
     records = asyncio.run(_run_all(cases, args.runs, args.concurrency))
+    if args.judge:
+        records = asyncio.run(_attach_quality(records, cases))
     summary = _summarize(records)
 
     for r in records:
