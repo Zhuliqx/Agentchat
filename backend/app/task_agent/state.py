@@ -4,7 +4,13 @@
 """
 from __future__ import annotations
 
-from typing import Optional, TypedDict
+from typing import Annotated, Optional, TypedDict
+
+
+def _append_findings(a: Optional[list[str]], b: Optional[list[str]]) -> list[str]:
+    """findings 的 reducer：以增量方式合并状态（节点返回新增片段，而非每次回写全量）。
+    首轮前值可能为 None，归一后拼接。"""
+    return (a or []) + (b or [])
 
 
 class TaskState(TypedDict):
@@ -19,6 +25,10 @@ class TaskState(TypedDict):
     step: Optional[int]                    # 已完成步数(replan 用)
     done: Optional[bool]                   # check/replan 判定是否完成
     expected_source: Optional[str]         # replan 标注的信息来源(kb/db/web/code/default)
+    # [verify 容错] 当前子任务失败后的重试次数(成功即归零,上限 MAX_RETRIES)
+    retries: Optional[int]
+    # [HITL 内部] 计划确认结果: proceed / edit / skip(仅节点内路由用,不下发)
+    _confirm_verb: Optional[str]
     # 共有
-    findings: Optional[list[str]]          # 已完成结果(累加截断)
+    findings: Annotated[list[str], _append_findings]  # 已完成结果(节点只回增量,reducer 拼接)
     final_answer: Optional[str]            # 最终交付

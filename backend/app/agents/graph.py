@@ -10,7 +10,7 @@
     rag_agent      mcp_agent    web_search
    (检索+生成)   (MCP 工具)   (Tavily 联网搜索)
 
-记忆能力（LangGraph 官方机制）：
+记忆能力（LangGraph 原生机制）：
 - 短期记忆：Checkpointer（thread_id=session_id）持久化图状态
 - 运行时上下文：context_schema=UserContext + context= 传入，工具经 Runtime 访问
 - 长期记忆：Store（AsyncPostgresStore）+ remember/recall 工具（namespace 隔离）

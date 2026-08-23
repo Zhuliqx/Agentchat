@@ -165,6 +165,13 @@ class Settings(BaseSettings):
     # ---- 自主任务 Agent（第二项目）----
     # 规划模式: fixed=一次性计划(一期) / replan=每步动态重规划(二期,默认)
     task_agent_mode: str = "replan"
+    # 节点级 HITL: replan 产出下一步后交由人工确认(proceed/edit/skip)再执行。
+    # 开启后 agent-tasks/run 会在首次操作前暂停并返回 awaiting_confirm,需再调
+    # agent-tasks/confirm 带上决策恢复;设为 false 则全自主(与一期行为一致)。
+    # 依赖 Postgres checkpointer(interrupt/resume 需要) —— 未连库时自动降级为全自主。
+    task_agent_hitl: bool = True
+    # verify 容错: 单个子任务失败后,自检(LLM 判是否重试)的最大重试次数
+    task_agent_max_retries: int = 2
 
     # 模型离线加载：embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查
     # 卡住（HF 网络不可达场景）。需下载新模型时临时设 False。
