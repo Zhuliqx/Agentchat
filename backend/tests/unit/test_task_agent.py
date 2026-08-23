@@ -258,6 +258,15 @@ def test_err_verify_returns_command():
     assert c.update["should_retry"] is False and c.update["retries"] == 3
 
 
+def test_is_transient():
+    # 网络/连接/超时 → 值得重试
+    assert graph_mod._is_transient(ConnectionError("network")) is True
+    assert graph_mod._is_transient(TimeoutError("timeout")) is True
+    # 确定性错误 → 不重试
+    assert graph_mod._is_transient(ValueError("bad input")) is False
+    assert graph_mod._is_transient(KeyError("key")) is False
+
+
 # ---------------- Time Travel(长任务恢复)----------------
 
 def test_list_task_history_no_db(monkeypatch):

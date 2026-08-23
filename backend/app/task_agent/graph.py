@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
-from langgraph.errors import NodeError
+from langgraph.errors import NodeError, NodeTimeoutError
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy
 
@@ -65,8 +65,27 @@ def _route_after_verify(state: dict) -> str:
 # LLM 节点失败 → retry_policy 重试(瞬时错误) → 耗尽后 error_handler 降级(返回 Command 才能续跑)。
 # execute/execute_action 是"业务子任务"(失败标记 finding)，保留节点内 try/except，不参与重试。
 
-_LLM_RETRY = RetryPolicy(max_attempts=2)  # 瞬时错误重试(默认 retry_on；网络重试由 get_llm 客户端已兜底)
-_LLM_TIMEOUT = settings.llm_timeout  # 单节点 LLM 调用超时(秒)
+def _is_transient(exc: BaseException) -> bool:
+    """判断 LLM 节点失败是否为"瞬时错误"(值得重试)。
+
+    官方默认 retry_on 对 OSError 子类、HTTP 库非 5xx 错误不重试，而 LLM 网络/连接/超时
+    异常多属此类，故这里显式匹配：节点超时、网络/连接、限流、5xx。确定性错误(ValueError 等)不重试。
+    """
+    if isinstance(exc, NodeTimeoutError):
+        return True
+    code = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    if code and 500 <= int(code) < 600:
+        return True
+    name = type(exc).__name__
+    if name in {"ValueError", "TypeError", "ArithmeticError", "KeyError", "StopIteration"}:
+        return False
+    s = f"{name} {exc}".lower()
+    return any(k in s for k in ("timeout", "connection", "network", "unavailable", "temporary", "rate limit", "too many"))
+
+
+# 瞬时错误重试；节点超时留足客户端重试空间(llm_max_retries 次)后仍有限
+_LLM_RETRY = RetryPolicy(max_attempts=2, retry_on=_is_transient)
+_LLM_TIMEOUT = settings.llm_timeout * (settings.llm_max_retries + 1)
 
 
 def _err_plan(state: dict, error: NodeError) -> Command:
