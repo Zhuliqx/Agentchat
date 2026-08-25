@@ -18,10 +18,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import uvicorn  # noqa: E402
 
+from app.config import settings  # noqa: E402
+
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
-        host="localhost",
-        port=8000,
+        host=settings.host,
+        port=settings.port,
         loop="app.event_loop:selector_loop_factory",  # Windows 下强制 SelectorEventLoop
     )

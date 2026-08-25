@@ -221,8 +221,6 @@ class Settings(BaseSettings):
     # 生产环境务必在 .env 中设置强随机 auth_secret（≥32 字节）；默认值仅用于本地开发，
     # 使 token 在后端重启后仍有效（临时密钥会导致每次重启全部登出）。
     auth_secret: str = "dev-secret-change-me-in-env-0123456789abcdef"
-    # 预留：token 有效期（分钟）。注意 create_token 当前未签发 exp，此配置暂未生效
-    token_expire_minutes: int = 60 * 24 * 7
     # 未登录访客使用的默认用户 id（保持现有单用户体验不破坏）
     guest_user_id: str = "default"
     # 管理员用户名（逗号分隔，如 "admin,zhangsan"）；命中者可在管理后台查看/删除用户
