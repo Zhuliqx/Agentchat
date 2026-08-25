@@ -62,6 +62,19 @@ def init_db() -> None:
                 "tag VARCHAR(50)"
             )
         )
+        # 迁移：旧版 documents 表无 content_hash 列 → 补列（A2 文档级去重）
+        conn.execute(
+            _text(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
+                "content_hash VARCHAR(64)"
+            )
+        )
+        conn.execute(
+            _text(
+                "CREATE INDEX IF NOT EXISTS ix_documents_content_hash "
+                "ON documents (content_hash)"
+            )
+        )
         # 迁移：旧版 messages 表无 sources 列 → 补列（引用溯源，JSON 数组）
         conn.execute(
             _text(

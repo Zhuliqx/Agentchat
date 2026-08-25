@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.db.models import Document
+from app.db.models import Document, gen_uuid
 from app.db.postgres import SessionLocal
 from app.rag import image_parser, table_parser, vector_store
 from app.rag.hybrid import invalidate_docs_signature
@@ -71,32 +71,86 @@ def _read_text_auto(path: Path) -> str:
 
 
 class _HtmlTextExtractor(HTMLParser):
-    """用 stdlib html.parser 提取 HTML 可见文本，丢弃 script/style 内容。
+    """用 stdlib html.parser 提取 HTML 可见文本。
 
-    相比直接 read_text，避免把 <script>/<style> 里的脚本/样式文本混入知识库。
+    - 丢弃 <script>/<style> 内容；
+    - 内联标签（b/i/span/a 等）文本拼接，不随意换行；
+    - 块级/换行标签（p/div/li/h1-6/table/tr/br）处换行；
+    - 表格单元格用 " | " 分隔（与 docx 表一致），行末换行；
+    - 列表项加 "- " 前缀。
     """
 
     _SKIP_TAGS = {"script", "style"}
+    _BLOCK_TAGS = {
+        "p", "div", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
+        "section", "article", "header", "footer", "ul", "ol", "dl", "li",
+    }
+    _CELL_TAGS = {"td", "th"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self._parts: list[str] = []
+        self._lines: list[str] = []  # 普通文本行
+        self._buf: list[str] = []    # 当前普通行缓冲
+        self._row_parts: list[str] = []  # 当前表格行的单元格
+        self._cell_buf: list[str] = []   # 当前单元格缓冲
         self._skip_depth = 0
+        self._in_cell = False
+
+    def _flush(self) -> None:
+        line = "".join(self._buf).strip()
+        self._buf = []
+        if line:
+            self._lines.append(line)
+
+    def _flush_row(self) -> None:
+        parts = [p.strip() for p in self._row_parts if p.strip()]
+        if parts:
+            self._lines.append(" | ".join(parts))
+        self._row_parts = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in self._SKIP_TAGS:
             self._skip_depth += 1
+        elif tag == "br":
+            self._flush()
+        elif tag == "li":
+            self._flush()
+            self._buf.append("- ")
+        elif tag in self._CELL_TAGS:
+            self._in_cell = True
+            self._cell_buf = []
+        elif tag == "tr":
+            self._flush_row()
+        elif tag in self._BLOCK_TAGS:
+            self._flush()
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self._SKIP_TAGS and self._skip_depth:
             self._skip_depth -= 1
+            return
+        if tag in self._CELL_TAGS and self._in_cell:
+            self._in_cell = False
+            self._row_parts.append("".join(self._cell_buf))
+            self._cell_buf = []
+        elif tag == "tr":
+            self._flush_row()
+        elif tag == "li":
+            self._flush()
+        elif tag in self._BLOCK_TAGS:
+            self._flush()
 
     def handle_data(self, data: str) -> None:
-        if not self._skip_depth and data.strip():
-            self._parts.append(data.strip())
+        if self._skip_depth:
+            return
+        if self._in_cell:
+            self._cell_buf.append(data)
+        else:
+            self._buf.append(data)
 
     def text(self) -> str:
-        return "\n".join(self._parts)
+        self._flush()
+        self._flush_row()
+        return "\n".join(self._lines)
 
 
 def _html_to_text(raw: str) -> str:
@@ -297,6 +351,27 @@ def ingest_file(
     new_hashes = [_chunk_hash(c["text"]) for c in chunks]
     _progress(25, "分块完成")
 
+    # 2a. 文档级内容去重（A2，可选）：整篇内容已在库 → 跳过（跨文件同内容）
+    content_hash = hashlib.sha256(
+        "\n".join(c["text"] for c in chunks).encode("utf-8")
+    ).hexdigest()
+    if settings.doc_level_dedup:
+        with SessionLocal() as db:
+            dup = (
+                db.query(Document.id)
+                .filter(Document.user_id == user_id, Document.content_hash == content_hash)
+                .first()
+            )
+            if dup:
+                _progress(100, "内容已存在，跳过")
+                return {
+                    "filename": filename,
+                    "chunks": len(chunks),
+                    "source": source,
+                    "unchanged": True,
+                    "deduped": True,
+                }
+
     # 2. 读取该用户已有同 source 块：hash -> id，用于增量对比
     existing: dict[str, str] = {}  # hash -> doc_id
     with SessionLocal() as db:
@@ -317,46 +392,57 @@ def ingest_file(
         _progress(100, "内容无变化，跳过")
         return {"filename": filename, "chunks": len(chunks), "source": source, "unchanged": True}
 
-    # 4. 删除已消失的块（Postgres + Milvus，仅该用户）
+    # 4. 删除已消失的块（先删 Milvus 派生库，再删 Postgres 元数据，避免半库）
     if stale_ids:
         _progress(35, "清理过期分块")
+        vector_store.delete_by_ids(stale_ids)
         with SessionLocal() as db:
             db.query(Document).filter(Document.id.in_(stale_ids)).delete(
                 synchronize_session=False
             )
             db.commit()
-        vector_store.delete_by_ids(stale_ids)
 
-    # 5. 增量：仅嵌入 + 写入新增/变化块（chunk_index 用原始块索引）
+    # 5. 增量：分批嵌入 + 先写 Milvus 再写 Postgres（跨库一致性 A3/B1）
     if to_write:
         from app.rag.embedding import get_embedder
 
+        embedder = get_embedder()
         _progress(40, "生成向量嵌入")
         new_chunks = [c for _, c in to_write]
-        vectors = get_embedder().embed_texts([c["text"] for c in new_chunks])
+        texts = [c["text"] for c in new_chunks]
+        batch = max(1, int(settings.embed_batch_size or 32))
+        n = len(texts)
+        vectors: list = []
+        for i in range(0, n, batch):
+            vectors.extend(embedder.embed_texts(texts[i : i + batch]))
+            _progress(40 + int(40 * min(1, (i + batch) / max(1, n))),
+                      f"嵌入 {min(i + batch, n)}/{n}")
         _progress(80, "写入向量库")
-        with SessionLocal() as db:
-            docs = []
-            for orig_i, (_, chunk) in enumerate(to_write):
-                doc = Document(
-                    user_id=user_id,
-                    filename=filename,
-                    source=source,
-                    chunk_index=orig_i,
-                    text=chunk["text"],
-                    metadata_json=json.dumps(chunk["metadata"], ensure_ascii=False),
-                )
-                db.add(doc)
-                docs.append(doc)
-            db.commit()
-            doc_ids = [d.id for d in docs]
+        # 先占位 doc_id，先写 Milvus（派生库），成功后再写 Postgres；PG 失败则删 Milvus 补偿
+        doc_ids = [gen_uuid() for _ in new_chunks]
         vector_store.add_chunks(
-            new_chunks,
-            doc_ids=doc_ids,
-            source=source,
-            user_id=user_id,
-            vectors=vectors,
+            new_chunks, doc_ids=doc_ids, source=source, user_id=user_id, vectors=vectors
         )
+        try:
+            with SessionLocal() as db:
+                for orig_i, (_, chunk) in enumerate(to_write):
+                    db.add(
+                        Document(
+                            id=doc_ids[orig_i],
+                            user_id=user_id,
+                            filename=filename,
+                            source=source,
+                            chunk_index=orig_i,
+                            text=chunk["text"],
+                            metadata_json=json.dumps(chunk["metadata"], ensure_ascii=False),
+                            content_hash=content_hash,
+                        )
+                    )
+                db.commit()
+        except Exception:
+            # Postgres 失败 → 补偿删 Milvus 刚插的 id（避免派生库残留）
+            vector_store.delete_by_ids(doc_ids)
+            raise
 
     # 6. 失效文档集签名缓存（使 BM25 关键词通道立即包含新文档）
     invalidate_docs_signature()

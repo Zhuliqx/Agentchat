@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # 对 PDF 内嵌/扫描图做 OCR，把图中文字抽出入库（VLM 语义描述为后续扩展）
     image_ocr_enabled: bool = False
     image_ocr_engine: str = "rapidocr"      # rapidocr(推荐,免系统依赖) | paddle | tesseract
+    # 分批嵌入批次大小（大文档防超时/显存峰值）
+    embed_batch_size: int = 32
+    # 文档级去重：整篇内容(全部块)与已有文档相同 → 跳过（默认关）
+    doc_level_dedup: bool = False
 
     # ---- 检索参数 ----
     rag_top_k: int = 4

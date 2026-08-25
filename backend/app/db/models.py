@@ -114,6 +114,8 @@ class Document(Base):
     chunk_index: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 整篇内容指纹（A2 文档级去重，可选）
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
