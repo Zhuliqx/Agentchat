@@ -52,21 +52,18 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     embedding_provider: str = "local"  # local | openai
     embedding_dim: int = 512
-    # 推理设备: auto=有 CUDA 用 cuda 否则 cpu（推荐，部署无 GPU 机器自动回退）; 或显式 cuda/cpu
+    # 推理设备: auto=有 CUDA 用 cuda 否则 cpu; 或显式 cuda/cpu
     embedding_device: str = "auto"
 
     # ---- LLM ----
     # provider: openai | ollama | deepseek | dashscope
-    # 默认 deepseek 与 .env.example 一致；漏配时不会静默连到 ollama
     llm_provider: str = "deepseek"
     llm_model: str = ""  # 仅 ollama 使用；deepseek/dashscope/openai 走各自 *_model 字段
-    # 可选轻量模型（如 deepseek-chat 的轻量档）：配置后 Supervisor 用主模型、
     # 子 Agent（rag/mcp/search）用本模型；留空则子 Agent 与主模型相同
     llm_light_model: str = ""
     llm_timeout: float = 60.0  # 单次 LLM 请求超时（秒），网络抖动防挂起
     llm_max_retries: int = 2  # LLM 请求失败重试次数（客户端级）
-    # 图执行/LLM 提示缓存（create_agent cache）：相同输入命中，跳过重复 LLM 调用。
-    # 注意：工具类问题（搜索/RAG）在数据变化后可能返回缓存旧答案；命中率低，风险可控。
+    # 图执行/LLM 提示缓存
     agent_cache_enabled: bool = True
     # agent_to_tool 包装的子 Agent 调用失败重试次数
     subagent_retries: int = 1
@@ -104,6 +101,15 @@ class Settings(BaseSettings):
     # 上传文件大小上限（MB），超限返回 413
     max_upload_mb: int = 50
 
+    # ---- 文档解析增强（表格 / 图片 OCR；默认关=行为不变）----
+    # 提取 PDF/DOCX/HTML 表格为结构化块（解决表格乱序/截断/列语义丢失）
+    table_extract: bool = False
+    table_to_text_mode: str = "nl"          # nl(推荐,embedding 更佳) | markdown
+    table_max_rows_per_chunk: int = 10      # 表格分块：每块含表头 + 最多 N 行
+    # 对 PDF 内嵌/扫描图做 OCR，把图中文字抽出入库（VLM 语义描述为后续扩展）
+    image_ocr_enabled: bool = False
+    image_ocr_engine: str = "rapidocr"      # rapidocr(推荐,免系统依赖) | paddle | tesseract
+
     # ---- 检索参数 ----
     rag_top_k: int = 4
     rag_score_threshold: float = 0.35
@@ -121,74 +127,64 @@ class Settings(BaseSettings):
     bm25_use_jieba: bool = False
     rrf_k: int = 60
     hybrid_candidate_k: int = 20  # BM25 关键词通道候选数
-    bm25_max_docs: int = 5000  # 文档块数超过此值时跳过 BM25 通道（防内存/CPU 爆炸）
-    # ---- Rerank 精排（检索后 Cross-Encoder）----
+    bm25_max_docs: int = 5000  # 文档块数超过此值时跳过 BM25 通道
+    # ---- Rerank 精排 ----
     rerank_enabled: bool = True
     rerank_model: str = "BAAI/bge-reranker-base"
-    rerank_candidate_k: int = 6  # 送入 rerank 的候选数上限（控制 CPU 推理量；越小越快）
-    rerank_max_length: int = 512  # rerank 输入文本截断字符数（减少 token）
+    rerank_candidate_k: int = 6  # 送入 rerank 的候选数上限
+    rerank_max_length: int = 512  # rerank 输入文本截断字符数
     # ---- 查询改写（Query Rewriting）----
     # 改善「口语查询 × 书面文档」的语义鸿沟。
     # mode: none(默认,原样) / rule(规则:去框架词+泛化并列,零依赖,CI 可挂) /
     #       llm(LLM 改写为检索 query,失败回退原句)
-    # 改写后与「原 query」双路检索兜底，防改写丢失信息（见 retriever._expand_queries）
     query_rewrite_enabled: bool = False
     query_rewrite_mode: str = "rule"
     query_rewrite_cache_size: int = 512
 
     # ---- 自适应检索（RAG 优化）----
-    # 低置信 query 才触发"改写双路 + 放宽候选"，正式/高置信 query 走原路、零额外成本。
+    # 低置信 query 才触发"改写双路 + 放宽候选"，正式/高置信 query 走原路。
     # 置信信号 = 初检索最高分（rrf/向量 score），低于阈值 → 判为"可能召不全"。
     adaptive_retrieval: bool = False
-    conf_trigger_threshold: float = 0.45  # 低于此分触发自适应（放宽候选 / 触发改写）
-    adaptive_candidate_k: int = 9  # 自适应时放宽 rerank 候选（默认=6×1.5）
+    conf_trigger_threshold: float = 0.45  # 低于此分触发自适应
+    adaptive_candidate_k: int = 9  # 自适应时放宽 rerank 候选
     # 检索级意图路由：按 query 类型调整策略（compare/list/chat/fact）
-    intent_routing: bool = False   # 关闭时忽略 intent，行为与现在一致
-    # 跨块/跨源语义与指纹去重 + 总 token 预算（减少喂给 LLM 的冗余）
+    intent_routing: bool = False
+    # 跨块/跨源语义与指纹去重 + 总 token 预算
     dedup_near_duplicate: bool = False  # 语义近似去重（embedding 相似≥阈值仅留最高分）
     dedup_sim_threshold: float = 0.90
     rag_max_total_chars: int = 0  # 0=不限制；>0 按分数降序累计截断，防超长 context
 
     # ---- Prompt 注入防护 ----
     # 检索/搜索外部内容按「不可信数据块」隔离（总是生效）；本开关控制注入指令检测：
-    # 外部内容命中→剔除该块并告警，用户 query 命中→拒绝请求（见 app/rag/prompt_injection.py）
+    # 外部内容命中→剔除该块并告警，用户 query 命中→拒绝请求
     injection_detection_enabled: bool = True
-    # 规则命中后用 LLM 复核再剔除（进一步降误报；有 LLM 调用成本，默认关）
+    # 规则命中后用 LLM 复核再剔除
     injection_llm_review: bool = False
-    # 输出侧泄露检测（系统提示词片段/密钥模式；零成本正则，常开，仅告警不改回答）
+    # 输出侧泄露检测
     injection_output_filter: bool = True
 
     # ---- 自主任务 Agent（第二项目）----
-    # 规划模式: fixed=一次性计划(一期) / replan=每步动态重规划(二期,默认)
+    # 规划模式: fixed=一次性计划 / replan=每步动态重规划
     task_agent_mode: str = "replan"
-    # 节点级 HITL: replan 产出下一步后交由人工确认(proceed/edit/skip)再执行。
-    # 开启后 agent-tasks/run 会在首次操作前暂停并返回 awaiting_confirm,需再调
-    # agent-tasks/confirm 带上决策恢复;设为 false 则全自主(与一期行为一致)。
-    # 依赖 Postgres checkpointer(interrupt/resume 需要) —— 未连库时自动降级为全自主。
     task_agent_hitl: bool = True
     # verify 容错: 单个子任务失败后,自检(LLM 判是否重试)的最大重试次数
     task_agent_max_retries: int = 2
 
     # ---- 模型离线加载（HuggingFace）----
-    # embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查卡住（HF 网络
-    # 不可达场景）。需下载新模型时临时设 False。
+    # embedding/rerank 已本地缓存时置 True，需下载新模型时临时设 False。
     hf_offline: bool = True
 
     # ---- 长期记忆（Store）----
-    # 语义检索需要 Postgres 启用 pgvector 扩展（docker-compose 已用 pgvector 镜像）
+    # 语义检索需要 Postgres 启用 pgvector 扩展
     memory_semantic_search: bool = True
     # remember_memory 语义去重阈值（余弦相似度高于此值视为重复，更新而非新增）
     memory_dedup_threshold: float = 0.86
 
     # ---- Human-in-the-Loop（人工确认）----
-    # 基于 LangGraph interrupt/Command(resume) 实现；需 Checkpointer 支持。
-    # 机制保留（默认启用）；但有前端开关控制的动作（联网/知识库/记忆）在对应
-    # 开关打开时自动豁免——开关即用户授权，不再逐次确认。HITL 实际只作用于
-    # 无开关的外部操作（如 mcp），由 HITL_ACTIONS 指定。
     hitl_enabled: bool = True  # 总开关
     # HITL 模式：
     #   默认 []（空）= LLM 自主判定：注册 request_confirmation 工具，由模型根据操作
-    #                   影响自主决定是否请求用户确认（类似 Claude Code / Codex 的授权设计）。
+    #                   影响自主决定是否请求用户确认
     #   非空（如 ["mcp"]）= 强制确认：对应动作调用前无条件 interrupt（confirm_before）；
     #                   有前端开关的动作（search/rag/remember）开关打开时自动豁免。
     #   注：search=联网搜索 | rag=知识库检索 | mcp=MCP工具 | remember=保存长期记忆

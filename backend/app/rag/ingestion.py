@@ -13,7 +13,7 @@ from typing import Any
 from app.config import settings
 from app.db.models import Document
 from app.db.postgres import SessionLocal
-from app.rag import vector_store
+from app.rag import image_parser, table_parser, vector_store
 from app.rag.hybrid import invalidate_docs_signature
 
 _MARKDOWN_SUFFIX = {".md", ".markdown"}
@@ -192,6 +192,62 @@ def _chunk_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def load_document(path: Path) -> dict:
+    """读取文档：返回 {"text", "tables", "images"}。
+
+    表格与图片按开关可选解析（默认关=仅文本，行为不变）。图片 = PIL.Image 列表。
+    解析失败安全降级：返回空列表，不影响文本通道。
+    """
+    text = load_text(path)
+    suffix = path.suffix.lower()
+    tables: list[dict] = []
+    if settings.table_extract and suffix in (".pdf", ".docx", ".html", ".htm"):
+        tables = table_parser.parse_tables(path, suffix)
+    images: list = []
+    if settings.image_ocr_enabled and suffix == ".pdf":
+        images = image_parser.extract_pdf_images(path)
+    return {"text": text, "tables": tables, "images": images}
+
+
+def _build_table_chunks(tables: list[dict], source: str) -> list[dict]:
+    """把每个表格按行列感知分块为结构化文本块（kind=table）。"""
+    chunks: list[dict] = []
+    mode = settings.table_to_text_mode
+    max_rows = settings.table_max_rows_per_chunk
+    for tbl in tables or []:
+        for part in table_parser.split_table(tbl, max_rows):
+            text = table_parser.table_to_text(part["headers"], part["rows"], mode)
+            if not text.strip():
+                continue
+            chunks.append(
+                {
+                    "text": text,
+                    "metadata": {
+                        "source": source,
+                        "kind": "table",
+                        "columns": [str(c) for c in part["headers"]],
+                    },
+                }
+            )
+    return chunks
+
+
+def _build_image_chunks(images: list, source: str) -> list[dict]:
+    """对抽取的图片逐张 OCR，生成文本块（kind=ocr）；OCR 失败/无字则跳过。"""
+    chunks: list[dict] = []
+    for idx, img in enumerate(images or []):
+        ocr = image_parser.ocr_text(img)
+        if not ocr.strip():
+            continue
+        chunks.append(
+            {
+                "text": ocr,
+                "metadata": {"source": source, "kind": "ocr", "image_index": idx},
+            }
+        )
+    return chunks
+
+
 def ingest_file(
     path: Path,
     filename: str | None = None,
@@ -220,13 +276,24 @@ def ingest_file(
 
     # 1. 解析 + 分块（失败则不触碰旧数据）
     _progress(5, "读取文件")
-    text = load_text(path)
+    doc = load_document(path)
+    text = doc["text"]
     _progress(15, "分块中")
     is_markdown = path.suffix.lower() in _MARKDOWN_SUFFIX
     chunks = split_text(text, source, is_markdown=is_markdown)
+    # 文档解析增强：表格结构化块 + 图片 OCR 块（默认关时为空，行为不变）
+    table_chunks = _build_table_chunks(doc["tables"], source)
+    image_chunks = _build_image_chunks(doc["images"], source)
+    if table_chunks or image_chunks:
+        _progress(22, "结构化解析")
+    chunks = chunks + table_chunks + image_chunks
     if not chunks:
         _progress(100, "无内容可摄入")
         return {"filename": filename, "chunks": 0, "source": source}
+    # 统一块序号，保证 doc_id:chunk_index 融合键唯一
+    for idx, c in enumerate(chunks):
+        if isinstance(c.get("metadata"), dict):
+            c["metadata"]["chunk"] = idx
     new_hashes = [_chunk_hash(c["text"]) for c in chunks]
     _progress(25, "分块完成")
 
