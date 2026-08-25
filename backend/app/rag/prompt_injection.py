@@ -98,7 +98,9 @@ def llm_confirm_injection(text: str) -> bool:
                 HumanMessage(content="请判断:"),
             ]
         )
-        out = resp.content.strip() if hasattr(resp, "content") else str(resp).strip()
+        content = resp.content if hasattr(resp, "content") else str(resp)
+        # content 类型实为 str | list[str | dict]，需判型后再 strip，避免类型/运行时错误
+        out = content.strip() if isinstance(content, str) else str(content).strip()
         return out.upper().startswith("YES")
     except Exception as exc:
         logger.warning("注入复核 LLM 调用失败，保守按命中处理: %s", exc)

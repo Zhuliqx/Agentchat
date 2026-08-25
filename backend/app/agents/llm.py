@@ -5,7 +5,6 @@
 - openai      : OpenAI 或任何 OpenAI 兼容 API
 - deepseek    : DeepSeek 官方 API（OpenAI 兼容）
 - dashscope   : 阿里通义千问（OpenAI 兼容）
-- azure_openai: Azure OpenAI
 
 运行时模型切换：`available_models()` 列出可用模型，`set_current_model()` 持久化
 选择并清空 LLM/图缓存，此后 `get_llm()` 按所选模型创建（重启后仍生效）。
@@ -62,18 +61,6 @@ def create_llm(provider: str, model: str) -> "BaseChatModel":
             model=model,
             temperature=settings.temperature,
             base_url="http://localhost:11434",
-        )
-
-    if p == "azure_openai":
-        from langchain_openai import AzureChatOpenAI
-
-        return AzureChatOpenAI(
-            deployment_name=settings.azure_deployment or model,
-            azure_endpoint=settings.azure_endpoint,
-            api_version=settings.azure_api_version,
-            api_key=settings.openai_api_key,
-            temperature=settings.temperature,
-            **_openai_kwargs(),
         )
 
     if p == "deepseek":

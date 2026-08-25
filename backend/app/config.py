@@ -66,7 +66,7 @@ class Settings(BaseSettings):
             return "cpu"
 
     # ---- LLM ----
-    # provider: openai | ollama | azure_openai | deepseek | dashscope
+    # provider: openai | ollama | deepseek | dashscope
     # 默认 deepseek 与 .env.example 一致；漏配时不会静默连到 ollama
     llm_provider: str = "deepseek"
     llm_model: str = ""  # 仅 ollama 使用；deepseek/dashscope/openai 走各自 *_model 字段
@@ -84,11 +84,6 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"
     temperature: float = 0.3
-
-    # ---- Azure OpenAI ----
-    azure_endpoint: str = ""
-    azure_api_version: str = "2024-02-15-preview"
-    azure_deployment: str = ""  # 模型部署名
 
     # ---- DeepSeek ----
     deepseek_api_key: str = ""
@@ -152,6 +147,19 @@ class Settings(BaseSettings):
     query_rewrite_enabled: bool = False
     query_rewrite_mode: str = "rule"
     query_rewrite_cache_size: int = 512
+
+    # ---- 自适应检索（RAG 优化）----
+    # 低置信 query 才触发"改写双路 + 放宽候选"，正式/高置信 query 走原路、零额外成本。
+    # 置信信号 = 初检索最高分（rrf/向量 score），低于阈值 → 判为"可能召不全"。
+    adaptive_retrieval: bool = False
+    conf_trigger_threshold: float = 0.45  # 低于此分触发自适应（放宽候选 / 触发改写）
+    adaptive_candidate_k: int = 9  # 自适应时放宽 rerank 候选（默认=6×1.5）
+    # 检索级意图路由：按 query 类型调整策略（compare/list/chat/fact）
+    intent_routing: bool = False   # 关闭时忽略 intent，行为与现在一致
+    # 跨块/跨源语义与指纹去重 + 总 token 预算（减少喂给 LLM 的冗余）
+    dedup_near_duplicate: bool = False  # 语义近似去重（embedding 相似≥阈值仅留最高分）
+    dedup_sim_threshold: float = 0.90
+    rag_max_total_chars: int = 0  # 0=不限制；>0 按分数降序累计截断，防超长 context
 
     # ---- Prompt 注入防护 ----
     # 检索/搜索外部内容按「不可信数据块」隔离（总是生效）；本开关控制注入指令检测：

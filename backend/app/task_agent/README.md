@@ -25,9 +25,23 @@
 | 状态治理 | `findings: Annotated[list, reducer]` 增量合并 |
 
 ## 架构
-```
-START → [replan] → [confirm?] → [execute] → {失败→verify} → [check] ⇄(未完成)→ [replan]
-                                      ↑ 重试         ↓ 完成 → [final] → END
+```mermaid
+flowchart TB
+    classDef c fill:#ede7f6,stroke:#5e35b1
+    classDef e fill:#e8f5e9,stroke:#388e3c
+    classDef dec fill:#fff3e0,stroke:#f57c00
+    START[开始]:::e --> R[replan]:::c
+    R --> D1{"next?"}:::dec
+    D1 -->|"无"| F[final]:::e
+    D1 -->|"有"| C{"confirm?"}:::dec
+    C -->|"proceed/edit"| E[execute]:::e
+    C -->|"skip"| CH[check]:::c
+    E --> D2{"失败?"}:::dec
+    D2 -->|"重试"| E
+    D2 -->|"不重试"| CH
+    CH -->|"完成"| F
+    CH -->|"未完成"| R
+    F --> END[结束]:::e
 ```
 
 ## API

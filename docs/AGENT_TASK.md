@@ -18,8 +18,16 @@
 两种模式共用 `TaskState`：`findings` 用 `Annotated[list, _append_findings]` **reducer 增量合并**（节点只回新增片段）。
 
 ### fixed（一期：Plan → Execute → Final）
-```
-START → [plan] → [execute] ⇄(未完成)→ [final] → END
+```mermaid
+flowchart LR
+    classDef e fill:#e8f5e9,stroke:#388e3c
+    classDef dec fill:#fff3e0,stroke:#f57c00
+    START[开始]:::e --> PL[plan]:::e
+    PL --> EX[execute]:::e
+    EX --> D{"还有子任务?"}:::dec
+    D -->|"是"| EX
+    D -->|"否"| F[final]:::e
+    F --> END[结束]:::e
 ```
 - **plan_node**：LLM 拆成 2~8 个子任务（JSON），解析失败回退“单子任务=直接回答”；
 - **execute_node**：对当前子任务调用一次现有 supervisor（复用 rag/mcp/web_search/code），结果追加进 findings；
@@ -27,9 +35,23 @@ START → [plan] → [execute] ⇄(未完成)→ [final] → END
 - **final_node**：整合所有 findings 输出交付。
 
 ### replan（二期：每步重规划）+ 三期节点机制（默认）
-```
-START → [replan] → [confirm?] → [execute] → {失败→verify} → [check] ⇄(未完成)→ [replan]
-                                      ↑ 重试         ↓ 完成 → [final] → END
+```mermaid
+flowchart TB
+    classDef c fill:#ede7f6,stroke:#5e35b1
+    classDef e fill:#e8f5e9,stroke:#388e3c
+    classDef dec fill:#fff3e0,stroke:#f57c00
+    START[开始]:::e --> R[replan]:::c
+    R --> D1{"next?"}:::dec
+    D1 -->|"无"| F[final]:::e
+    D1 -->|"有"| C{"confirm?"}:::dec
+    C -->|"proceed/edit"| E[execute]:::e
+    C -->|"skip"| CH[check]:::c
+    E --> D2{"失败?"}:::dec
+    D2 -->|"重试"| E
+    D2 -->|"不重试"| CH
+    CH -->|"完成"| F
+    CH -->|"未完成"| R
+    F --> END[结束]:::e
 ```
 - **replan_node**：基于 goal + findings 每步动态决定下一步动作 + 标注 `expected_source`(kb/db/web/code)；新动作时重试计数归零；
 - **confirm_node（节点级 HITL）**：replan 产出下一步后 `interrupt` 让用户确认（proceed/edit/skip）；依赖 Postgres checkpointer，未连库自动降级全自主；`TASK_AGENT_HITL=false` 也可关；

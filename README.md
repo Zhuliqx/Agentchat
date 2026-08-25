@@ -207,7 +207,7 @@ python run.py
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `LLM_PROVIDER` | `deepseek` | deepseek / dashscope / openai / ollama / azure_openai |
+| `LLM_PROVIDER` | `deepseek` | deepseek / dashscope / openai / ollama |
 | `TAVILY_API_KEY` | - | 联网搜索（为空则 `web_search` 工具不可用） |
 | `RERANK_ENABLED` | `true` | 检索后 rerank 精排（首次下载约 1.1GB 模型） |
 | `QUERY_REWRITE_ENABLED` | `false` | 查询改写总开关（rule 零依赖 / llm 需 LLM；实验见 `docs/EVALUATION_REPORT.md`） |

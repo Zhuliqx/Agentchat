@@ -353,7 +353,9 @@ def _prepare_run(
         use_rag=use_rag, use_search=use_search, use_memory=use_memory
     )
     cp = get_checkpointer()
-    config = {"configurable": {"thread_id": session_id}} if (cp and session_id) else None
+    config: dict[str, Any] | None = (
+        {"configurable": {"thread_id": session_id}} if (cp and session_id) else None
+    )
     if config and checkpoint_id:
         config["configurable"]["checkpoint_id"] = checkpoint_id
     # 可观测性：挂 Langfuse handler（未配置则 None，fail-open）。

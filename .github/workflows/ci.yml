@@ -101,3 +101,11 @@ jobs:
         working-directory: backend
         run: pytest tests/integration/test_rag_regression.py -q
 
+      - name: "Retrieval regression (full GT MRR, non-blocking)"
+        working-directory: backend
+        continue-on-error: true
+        run: |
+          # 暂用 CI fixture 作为 GT 真值（轻量、无需外部数据）；验混合检索召回防退化。
+          python -c "import json, pathlib; p=pathlib.Path('tests/fixtures/rag_ground_truth.example.json'); d=json.loads(p.read_text(encoding='utf-8')); print('GT cases:', len(d))"
+          python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.example.json
+

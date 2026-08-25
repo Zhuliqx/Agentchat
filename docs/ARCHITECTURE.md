@@ -204,7 +204,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 
 - **请求超时**：`run_agent`/`stream_agent` 外层 `asyncio.timeout(agent_timeout=120s)`，LLM/MCP 卡死时返回 504，不无限挂起。
 - **多轮历史**：每次请求只传当前消息，历史由 Checkpointer 按 `thread_id` 自动恢复（不再手动拼接/裁剪；长对话可新建会话归档）。
-- **LLM 重试/超时**：所有 OpenAI 兼容 provider（DeepSeek/DashScope/OpenAI/Azure）统一 `timeout`（60s）+ `max_retries`（2），网络抖动自动重试。
+- **LLM 重试/超时**：所有 OpenAI 兼容 provider（DeepSeek/DashScope/OpenAI）统一 `timeout`（60s）+ `max_retries`（2），网络抖动自动重试。
 - **模型预热**：rerank 模型在应用启动后后台线程预热，避免首个 RAG 请求卡顿（首次需下载约 1.1GB）。
 - **rerank 候选受限**：仅对 `rerank_candidate_k`（默认 8）条候选精排，输入按 `rerank_max_length` 截断，控制 CPU 推理量。
 - **数据库索引**：`sessions.updated_at` / `documents.created_at` 建 DESC 索引，`init_db()` 幂等补建，加速会话/文档列表排序。

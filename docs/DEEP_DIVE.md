@@ -123,7 +123,6 @@ def milvus_connection_uri(self):
 | `deepseek` | `ChatOpenAI` + deepseek 配置 | 默认（OpenAI 兼容） |
 | `dashscope` | `ChatOpenAI` + dashscope 配置 | 阿里通义 |
 | `openai` | `ChatOpenAI` | 任意 OpenAI 兼容端点 |
-| `azure_openai` | `AzureChatOpenAI` | Azure 部署名 |
 | `ollama` | `ChatOllama` | 本地，无超时/重试 |
 
 所有 OpenAI 兼容系统一注入 `_openai_kwargs()`：`timeout=60` + `max_retries=2`，网络抖动自动重试、防挂起。**lru_cache 保证全项目共享同一个 LLM 实例**（避免每次请求重建连接）。
