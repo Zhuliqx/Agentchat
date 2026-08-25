@@ -21,13 +21,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ---- 应用 ----
+    # ---- 应用 / Web ----
     app_name: str = "Multi-Agent Platform"
     log_level: str = "INFO"  # 日志级别：DEBUG / INFO / WARNING / ERROR
-    host: str = "0.0.0.0"
-    port: int = 8000
+    host: str = "0.0.0.0"  # 服务监听地址（run.py 读取）
+    port: int = 8000  # 服务监听端口（run.py 读取）
     # 单轮对话超时（秒）：LLM/MCP 卡死时避免请求无限挂起
     agent_timeout: float = 120.0
+    # CORS 显式白名单；避免 "*"+credentials 回显任意 Origin
+    cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
 
     # ---- Postgres（对话历史 / 会话 / 文档元数据）----
     postgres_host: str = "localhost"
@@ -52,18 +54,6 @@ class Settings(BaseSettings):
     embedding_dim: int = 512
     # 推理设备: auto=有 CUDA 用 cuda 否则 cpu（推荐，部署无 GPU 机器自动回退）; 或显式 cuda/cpu
     embedding_device: str = "auto"
-
-    def resolved_embedding_device(self) -> str:
-        """解析实际推理设备：auto=有 CUDA 用 cuda，否则 cpu；显式指定则原样返回。"""
-        device = self.embedding_device
-        if device != "auto":
-            return device
-        try:
-            import torch
-
-            return "cuda" if torch.cuda.is_available() else "cpu"
-        except Exception:
-            return "cpu"
 
     # ---- LLM ----
     # provider: openai | ollama | deepseek | dashscope
@@ -99,15 +89,13 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     tavily_max_results: int = 5
 
-    # ---- 自建 MCP 服务器 ----
-    # stdio 方式运行，脚本在 backend/scripts/ 下
+    # ---- MCP 服务器 ----
+    # 自建 stdio 服务器（脚本在 backend/scripts/ 下）
     mcp_db_server_cmd: str = "python"
     mcp_db_server_args: str = "scripts/db_query_server.py"
     mcp_time_server_cmd: str = "python"
     mcp_time_server_args: str = "scripts/time_server.py"
-
-    # ---- 外部 MCP 服务器（HTTP/SSE，可选）----
-    # 逗号分隔的 "name=url" 列表，如 "github=http://localhost:8080/mcp"
+    # 外部 HTTP/SSE 服务器（可选）：逗号分隔的 "name=url"，如 "github=http://localhost:8080/mcp"
     external_mcp_servers: str = ""
 
     # ---- 原始文件存储 ----
@@ -125,7 +113,7 @@ class Settings(BaseSettings):
     rag_max_chunk_chars: int = 1500
     chunk_size: int = 800
     chunk_overlap: int = 100
-    # 混合检索（向量 + BM25 + RRF）
+    # ---- 混合检索（向量 + BM25 + RRF）----
     hybrid_search: bool = True
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
@@ -134,12 +122,13 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     hybrid_candidate_k: int = 20  # BM25 关键词通道候选数
     bm25_max_docs: int = 5000  # 文档块数超过此值时跳过 BM25 通道（防内存/CPU 爆炸）
-    # rerank（检索后精排）
+    # ---- Rerank 精排（检索后 Cross-Encoder）----
     rerank_enabled: bool = True
     rerank_model: str = "BAAI/bge-reranker-base"
     rerank_candidate_k: int = 6  # 送入 rerank 的候选数上限（控制 CPU 推理量；越小越快）
     rerank_max_length: int = 512  # rerank 输入文本截断字符数（减少 token）
-    # 检索查询改写（Query Rewriting）：改善「口语查询 × 书面文档」的语义鸿沟。
+    # ---- 查询改写（Query Rewriting）----
+    # 改善「口语查询 × 书面文档」的语义鸿沟。
     # mode: none(默认,原样) / rule(规则:去框架词+泛化并列,零依赖,CI 可挂) /
     #       llm(LLM 改写为检索 query,失败回退原句)
     # 改写后与「原 query」双路检索兜底，防改写丢失信息（见 retriever._expand_queries）
@@ -180,8 +169,9 @@ class Settings(BaseSettings):
     # verify 容错: 单个子任务失败后,自检(LLM 判是否重试)的最大重试次数
     task_agent_max_retries: int = 2
 
-    # 模型离线加载：embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查
-    # 卡住（HF 网络不可达场景）。需下载新模型时临时设 False。
+    # ---- 模型离线加载（HuggingFace）----
+    # embedding/rerank 已本地缓存时置 True，避免启动时联网 HEAD 检查卡住（HF 网络
+    # 不可达场景）。需下载新模型时临时设 False。
     hf_offline: bool = True
 
     # ---- 长期记忆（Store）----
@@ -214,9 +204,6 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
 
-    # ---- CORS（显式白名单；避免 "*"+credentials 回显任意 Origin）----
-    cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
-
     # ---- 用户 / 认证（JWT）----
     # 生产环境务必在 .env 中设置强随机 auth_secret（≥32 字节）；默认值仅用于本地开发，
     # 使 token 在后端重启后仍有效（临时密钥会导致每次重启全部登出）。
@@ -225,6 +212,19 @@ class Settings(BaseSettings):
     guest_user_id: str = "default"
     # 管理员用户名（逗号分隔，如 "admin,zhangsan"）；命中者可在管理后台查看/删除用户
     admin_usernames: str = ""
+
+    # ---- 派生属性 / 工具方法（读取上方字段，不参与 env 映射）----
+    def resolved_embedding_device(self) -> str:
+        """解析实际推理设备：auto=有 CUDA 用 cuda，否则 cpu；显式指定则原样返回。"""
+        device = self.embedding_device
+        if device != "auto":
+            return device
+        try:
+            import torch
+
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            return "cpu"
 
     @property
     def milvus_connection_uri(self) -> str:
