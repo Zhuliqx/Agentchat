@@ -32,7 +32,7 @@ def rerank(query: str, hits: list[dict[str, Any]], top_k: int | None = None) -> 
     """
     if not hits:
         return []
-    top_k = top_k or settings.rerank_top_k
+    top_k = top_k or settings.rag_top_k
     candidates = hits[: settings.rerank_candidate_k]
     try:
         model = _get_reranker()

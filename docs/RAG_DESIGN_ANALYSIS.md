@@ -315,7 +315,7 @@ fused = RRF(ranked_lists, k=60)[:top_k]
 candidates = hits[:rerank_candidate_k]      # 仅精排前 6 条候选（控制 CPU 推理量）
 pairs = [(query[:512], text[:512]) ...]     # 输入截断，减少 token
 scores = CrossEncoder.predict(pairs)        # (query, doc) 联合编码打分
-ranked = sorted(zip(candidates, scores), desc)[:rerank_top_k]
+ranked = sorted(zip(candidates, scores), desc)[:top_k]
 失败时 → 原样返回 hits[:top_k]（优雅降级）
 ```
 

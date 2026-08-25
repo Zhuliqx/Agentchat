@@ -255,7 +255,6 @@ def _overrides() -> dict[str, Any]:
         "hybrid_search": settings.hybrid_search,
         "rerank_enabled": settings.rerank_enabled,
         "rerank_candidate_k": settings.rerank_candidate_k,
-        "rerank_top_k": settings.rerank_top_k,
         "rag_max_per_doc": settings.rag_max_per_doc,
         "rag_max_chunk_chars": settings.rag_max_chunk_chars,
         "query_rewrite_enabled": settings.query_rewrite_enabled,

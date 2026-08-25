@@ -137,7 +137,6 @@ class Settings(BaseSettings):
     # rerank（检索后精排）
     rerank_enabled: bool = True
     rerank_model: str = "BAAI/bge-reranker-base"
-    rerank_top_k: int = 4
     rerank_candidate_k: int = 6  # 送入 rerank 的候选数上限（控制 CPU 推理量；越小越快）
     rerank_max_length: int = 512  # rerank 输入文本截断字符数（减少 token）
     # 检索查询改写（Query Rewriting）：改善「口语查询 × 书面文档」的语义鸿沟。
