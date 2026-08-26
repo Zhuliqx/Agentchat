@@ -11,6 +11,7 @@ from typing import Optional
 
 from langchain_core.documents import Document as LCDocument
 from langchain_core.retrievers import BaseRetriever
+from pydantic import PrivateAttr
 
 from app.config import settings
 from app.rag import hybrid, vector_store
@@ -215,6 +216,8 @@ class MilvusRetriever(BaseRetriever):
     score_threshold: float = 0.35
     user_id: str = "default"  # 知识库归属用户（隔离）
     filter_expr: Optional[str] = None
+    # 本查询的图像通道候选（③，用于结果保底，避免被 rerank 用弱 caption 降权剔除）
+    _img_hits: list[dict] = PrivateAttr(default_factory=list)
 
     def _user_filter(self) -> str:
         """按用户隔离的向量过滤表达式。"""
@@ -328,10 +331,15 @@ class MilvusRetriever(BaseRetriever):
 
     def _finalize(self, query: str, hits: list[dict], top_k: int) -> list[LCDocument]:
         """公共收尾：精排 / 去重 / 预算 / 截断 → Document 列表。"""
+        # 图文双通道（③）：并入图像通道候选（默认关=行为不变）
+        img_on = settings.image_dual_channel
+        if img_on:
+            hits = self._add_image_channel(query, hits)
         if settings.rerank_enabled:
             # 精排固定用原 query：跨路/改写 query 的 rerank 分数不可比，且短改写
             # query 精排实测不稳（见 _expand_queries 注释）；改写只扩召回。
-            hits = rerank(query, hits, top_k=top_k)
+            cand = settings.rerank_candidate_k + (settings.image_channel_top_k if img_on else 0)
+            hits = rerank(query, hits, top_k=top_k, candidate_k=cand)
         else:
             hits = hits[:top_k]
         # 上下文压缩：同文档去重 + 相邻块合并（释放名额、补全上下文）
@@ -346,6 +354,17 @@ class MilvusRetriever(BaseRetriever):
                 {**h, "text": h["text"][:max_chars]} if len(h["text"]) > max_chars else h
                 for h in hits
             ]
+        # ③ 图像通道保底：相关图（分数≥阈值）强制进入最终结果，避免被弱 caption rerank 剔除
+        if img_on and self._img_hits:
+            guard = [
+                dict(h) for h in self._img_hits
+                if float(h.get("score") or 0) >= 0.30
+            ][:2]
+            if guard:
+                seen = {(h.get("source"), h.get("image_index")) for h in hits}
+                guard = [g for g in guard if (g.get("source"), g.get("image_index")) not in seen]
+                hits = guard + hits
+        hits = hits[:top_k]
         return [
             LCDocument(
                 page_content=h["text"],
@@ -361,6 +380,32 @@ class MilvusRetriever(BaseRetriever):
             )
             for h in hits
         ]
+
+    def _search_image_channel(self, query: str, top_k: int, user_id: str) -> list[dict]:
+        """图像通道检索：用多模态文本编码器编码 query → 查图片 collection。失败/无模型 → []。"""
+        try:
+            from app.rag.embedding import get_image_embedder
+
+            qvec = get_image_embedder().encode_text(query)
+        except Exception:
+            return []
+        return vector_store.search_image(qvec, top_k=top_k, user_id=user_id)
+
+    def _add_image_channel(self, query: str, hits: list[dict]) -> list[dict]:
+        """并入图像通道候选：图片候选赋 rrf_score（可与文本 rrf 融合），前置到候选集。"""
+        img_hits = self._search_image_channel(query, settings.image_channel_top_k, self.user_id)
+        self._img_hits = img_hits
+        if not img_hits:
+            return hits
+        weight = max(0.0, float(settings.image_channel_weight))
+        merged: list[dict] = []
+        for i, ih in enumerate(img_hits):
+            ih = dict(ih)
+            ih["chunk_index"] = None                    # 避免与文本块的 chunk_index 误并
+            ih["id"] = f"img:{ih.get('source')}:{ih.get('image_index')}"
+            ih["rrf_score"] = round((1.0 / (settings.rrf_k + (i + 1))) * weight, 6)
+            merged.append(ih)
+        return _merge_multi(merged + hits)
 
     async def _aget_relevant_documents(self, query: str) -> list[LCDocument]:
         # 检索链路（Milvus 网络 + BM25 CPU + rerank 推理）同步且耗时，

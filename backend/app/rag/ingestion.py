@@ -181,6 +181,42 @@ def _docx_to_text(path: Path) -> str:
     return "\n".join(lines)
 
 
+def _via_pdfplumber(path: Path) -> str:
+    import pdfplumber
+
+    with pdfplumber.open(str(path)) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+
+def _via_pymupdf(path: Path) -> str:
+    import pymupdf  # PyMuPDF 新名（fitz 已弃用）
+
+    with pymupdf.open(str(path)) as doc:
+        return "\n".join(page.get_text("text") for page in doc)
+
+
+def _via_pypdf(path: Path) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _pdf_to_text(path: Path) -> str:
+    """PDF → 纯文本：pdfplumber→pymupdf→pypdf 逐级回退。
+
+    相较 pypdf，pdfplumber/pymupdf 对中文/多栏/表格保留更好、控制字符更少（C1）。
+    """
+    for fn in (_via_pdfplumber, _via_pymupdf, _via_pypdf):
+        try:
+            text = fn(path)
+            if text and text.strip():
+                return text
+        except Exception:
+            continue
+    return ""
+
+
 def load_text(path: Path) -> str:
     """按扩展名读取文档为纯文本。"""
     suffix = path.suffix.lower()
@@ -189,10 +225,7 @@ def load_text(path: Path) -> str:
     if suffix in (".html", ".htm"):
         return _html_to_text(_read_text_auto(path))
     if suffix == ".pdf":
-        from pypdf import PdfReader
-
-        reader = PdfReader(str(path))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        return _pdf_to_text(path)
     if suffix in (".docx",):
         return _docx_to_text(path)
     raise ValueError(f"不支持的文件类型: {suffix}")
@@ -210,7 +243,7 @@ def split_text(
         from langchain_text_splitters import MarkdownHeaderTextSplitter
 
         md_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=_MD_HEADERS, strip_headers=False
+            headers_to_split_on=_MD_HEADERS, strip_headers=settings.markdown_strip_headers
         )
         sections = md_splitter.split_text(text)
         base = _base_splitter()
@@ -258,7 +291,7 @@ def load_document(path: Path) -> dict:
     if settings.table_extract and suffix in (".pdf", ".docx", ".html", ".htm"):
         tables = table_parser.parse_tables(path, suffix)
     images: list = []
-    if settings.image_ocr_enabled and suffix == ".pdf":
+    if (settings.image_ocr_enabled or settings.image_vlm_enabled or settings.image_dual_channel) and suffix == ".pdf":
         images = image_parser.extract_pdf_images(path)
     return {"text": text, "tables": tables, "images": images}
 
@@ -287,7 +320,9 @@ def _build_table_chunks(tables: list[dict], source: str) -> list[dict]:
 
 
 def _build_image_chunks(images: list, source: str) -> list[dict]:
-    """对抽取的图片逐张 OCR，生成文本块（kind=ocr）；OCR 失败/无字则跳过。"""
+    """对抽取的图片逐张 OCR，生成文本块（kind=ocr）；仅 OCR 开启时生效。OCR 失败/无字则跳过。"""
+    if not settings.image_ocr_enabled:
+        return []
     chunks: list[dict] = []
     for idx, img in enumerate(images or []):
         ocr = image_parser.ocr_text(img)
@@ -302,11 +337,79 @@ def _build_image_chunks(images: list, source: str) -> list[dict]:
     return chunks
 
 
+def _build_vlm_chunks(images: list, source: str) -> list[dict]:
+    """对图片逐张用 VLM 生成语义描述，生成文本块（kind=image_vlm）；失败/空则跳过。"""
+    if not settings.image_vlm_enabled:
+        return []
+    from app.rag import vlm  # 延迟导入，避免加载时触发 openai 依赖
+
+    chunks: list[dict] = []
+    for idx, img in enumerate(images or []):
+        caption = vlm.describe_image(img)
+        if not caption.strip():
+            continue
+        chunks.append(
+            {
+                "text": f"[图片描述]\n{caption}",
+                "metadata": {"source": source, "kind": "image_vlm", "image_index": idx},
+            }
+        )
+    return chunks
+
+
+def _write_image_vectors(images: list, source: str, user_id: str) -> int:
+    """③ 图文双通道：用多模态编码器对每张图编码 → 写 image_vectors collection。
+
+    先删该 source 旧图片向量再写（幂等覆盖，避免 ghost）。编码 / 模型失败 → 降级为 0（不影响文本摄入）。
+    """
+    if not settings.image_dual_channel:
+        return 0
+    try:
+        from app.rag.embedding import get_image_embedder
+
+        embedder = get_image_embedder()
+    except Exception:
+        return 0
+    try:
+        vector_store.delete_image_by_source(source, user_id)
+    except Exception:
+        pass
+    records = []
+    for idx, img in enumerate(images or []):
+        try:
+            vec = embedder.encode_image(img)
+        except Exception:
+            continue
+        cap = ""
+        if settings.image_vlm_enabled:
+            try:
+                from app.rag import vlm
+
+                cap = vlm.describe_image(img)
+            except Exception:
+                cap = ""
+        records.append(
+            {
+                "user_id": user_id,
+                "source": source,
+                "page": 0,
+                "image_index": idx,
+                "caption": cap or f"[图片] {Path(source).name} 第{idx}张",
+                "metadata": {"source": source, "image_index": idx, "type": "image"},
+                "embedding": vec,
+            }
+        )
+    if records:
+        vector_store.add_image_vectors(records)
+    return len(records)
+
+
 def ingest_file(
     path: Path,
     filename: str | None = None,
     user_id: str = "default",
     progress_cb=None,
+    force_reingest: bool = False,
 ) -> dict[str, Any]:
     """摄入单个文件到向量库（按用户隔离），返回统计信息。
 
@@ -316,6 +419,10 @@ def ingest_file(
     - 旧文档中已消失的块 → 从 Postgres 与 Milvus 删除；
     - 整篇无变化 → 直接返回 unchanged=True（不触碰任何数据）。
     原子性：先解析成功再删旧增新，失败时旧数据不受影响。
+
+    force_reingest：True 时跳过增量，先删除该 source 的旧块再全量重建。
+    用于分块配置变化（chunk_size / strip_headers 等）的重新摄入——此时位置索引
+    体系改变，增量会因 chunk_index 与保留块冲突而报 UniqueViolation。
 
     progress_cb(percent: int, stage: str)：摄入阶段回调（供前端展示进度）。
     """
@@ -335,13 +442,19 @@ def ingest_file(
     _progress(15, "分块中")
     is_markdown = path.suffix.lower() in _MARKDOWN_SUFFIX
     chunks = split_text(text, source, is_markdown=is_markdown)
-    # 文档解析增强：表格结构化块 + 图片 OCR 块（默认关时为空，行为不变）
+    # 文档解析增强：表格结构化块 + 图片 OCR 块 + 图片 VLM 语义描述块（默认关时为空，行为不变）
     table_chunks = _build_table_chunks(doc["tables"], source)
     image_chunks = _build_image_chunks(doc["images"], source)
-    if table_chunks or image_chunks:
+    vlm_chunks = _build_vlm_chunks(doc["images"], source)
+    if table_chunks or image_chunks or vlm_chunks:
         _progress(22, "结构化解析")
-    chunks = chunks + table_chunks + image_chunks
+    chunks = chunks + table_chunks + image_chunks + vlm_chunks
     if not chunks:
+        # 无文本块时：③ 仍需删旧图向量（force/换配置）或写新图向量（双通道开启）
+        if force_reingest:
+            vector_store.delete_image_by_source(source, user_id)
+        if settings.image_dual_channel and doc["images"]:
+            _write_image_vectors(doc["images"], source, user_id)
         _progress(100, "无内容可摄入")
         return {"filename": filename, "chunks": 0, "source": source}
     # 统一块序号，保证 doc_id:chunk_index 融合键唯一
@@ -350,6 +463,9 @@ def ingest_file(
             c["metadata"]["chunk"] = idx
     new_hashes = [_chunk_hash(c["text"]) for c in chunks]
     _progress(25, "分块完成")
+    # ③ 图文双通道：图片向量写入独立 collection（默认关；放在增量判断前，保证文本 unchanged 也写）
+    if settings.image_dual_channel and doc["images"]:
+        _write_image_vectors(doc["images"], source, user_id)
 
     # 2a. 文档级内容去重（A2，可选）：整篇内容已在库 → 跳过（跨文件同内容）
     content_hash = hashlib.sha256(
@@ -372,20 +488,33 @@ def ingest_file(
                     "deduped": True,
                 }
 
-    # 2. 读取该用户已有同 source 块：hash -> id，用于增量对比
-    existing: dict[str, str] = {}  # hash -> doc_id
-    with SessionLocal() as db:
-        rows = (
-            db.query(Document.id, Document.text)
-            .filter(Document.source == source, Document.user_id == user_id)
-            .all()
-        )
-        for rid, rtext in rows:
-            existing.setdefault(_chunk_hash(rtext), rid)
+    if force_reingest:
+        # 全量重建：先删该 source 旧块，避免分块配置变化导致的 chunk_index 冲突
+        _progress(30, "全量重建")
+        vector_store.delete_by_source(source, user_id)
+        vector_store.delete_image_by_source(source, user_id)
+        with SessionLocal() as db:
+            db.query(Document).filter(
+                Document.source == source, Document.user_id == user_id
+            ).delete(synchronize_session=False)
+            db.commit()
+        stale_ids = []
+        to_write = [(i, c) for i, c in enumerate(chunks)]
+    else:
+        # 2. 读取该用户已有同 source 块：hash -> id，用于增量对比
+        existing: dict[str, str] = {}  # hash -> doc_id
+        with SessionLocal() as db:
+            rows = (
+                db.query(Document.id, Document.text)
+                .filter(Document.source == source, Document.user_id == user_id)
+                .all()
+            )
+            for rid, rtext in rows:
+                existing.setdefault(_chunk_hash(rtext), rid)
 
-    stale_ids = [v for k, v in existing.items() if k not in set(new_hashes)]
-    kept_hashes = set(existing.keys())
-    to_write = [(i, c) for i, c in enumerate(chunks) if new_hashes[i] not in kept_hashes]
+        stale_ids = [v for k, v in existing.items() if k not in set(new_hashes)]
+        kept_hashes = set(existing.keys())
+        to_write = [(i, c) for i, c in enumerate(chunks) if new_hashes[i] not in kept_hashes]
 
     # 3. 整篇无变化：直接返回，不触碰任何数据
     if not stale_ids and not to_write:

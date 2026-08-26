@@ -14,7 +14,7 @@ import json
 import logging
 import uuid
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
 
@@ -102,7 +102,7 @@ def _ensure_indexes(client: MilvusClient, name: str) -> None:
 def _validate_embedding_dim(client: MilvusClient, name: str) -> None:
     """校验已有 collection 的 embedding 维度与配置一致（防静默错配）。"""
     try:
-        schema = client.describe_collection(name)
+        schema = cast(dict, client.describe_collection(name))
         for f in schema.get("fields", []):
             if f.get("name") != "embedding":
                 continue
@@ -217,7 +217,7 @@ def search(
         search_params={"metric_type": settings.milvus_metric_type, "params": {"nprobe": 16}},
         limit=top_k * 3,  # 先取多些，再按阈值过滤
         output_fields=["id", "doc_id", "source", "chunk_index", "text", "metadata_json"],
-        filter=filter_expr,
+        filter=filter_expr or "",
     )
 
     hits: list[dict[str, Any]] = []
@@ -258,3 +258,139 @@ def stats() -> dict[str, Any]:
         }
     except Exception as exc:
         return {"connected": False, "error": str(exc)}
+
+
+# ───────────────────────── 图文双通道（③）─────────────────────────
+# 图片用独立 collection（agent_images）存多模态向量（维度=image_embedding_dim），
+# 检索时与文本通道融合。全部默认关，开启由 settings.image_dual_channel 控制。
+IMAGE_COLLECTION = "agent_images"
+
+
+def _build_image_schema() -> CollectionSchema:
+    fields = [
+        FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=32),
+        FieldSchema(name="user_id", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=500),
+        FieldSchema(name="page", dtype=DataType.INT64),
+        FieldSchema(name="image_index", dtype=DataType.INT64),
+        FieldSchema(name="caption", dtype=DataType.VARCHAR, max_length=2000),
+        FieldSchema(name="metadata_json", dtype=DataType.VARCHAR, max_length=2000),
+        FieldSchema(
+            name="embedding",
+            dtype=DataType.FLOAT_VECTOR,
+            dim=settings.image_embedding_dim,
+        ),
+    ]
+    return CollectionSchema(fields=fields, description="图文双通道图像向量", enable_dynamic_field=False)
+
+
+def _ensure_image_indexes(client: MilvusClient, name: str) -> None:
+    if not _has_index(client, name, "embedding"):
+        ip = client.prepare_index_params()
+        ip.add_index(
+            field_name="embedding", index_type="IVF_FLAT",
+            metric_type=settings.milvus_metric_type, params={"nlist": 128},
+            index_name="embedding_idx",
+        )
+        client.create_index(name, ip)
+    for field in ("source", "user_id"):
+        if not _has_index(client, name, field):
+            ip = client.prepare_index_params()
+            ip.add_index(field_name=field, index_type="Trie", index_name=f"{field}_idx")
+            client.create_index(name, ip)
+
+
+def ensure_image_collection() -> str:
+    """确保图片 collection 存在（幂等）。失败抛异常（上层降级为禁用图像通道）。"""
+    client = _client()
+    name = IMAGE_COLLECTION
+    if not client.has_collection(name):
+        client.create_collection(name, schema=_build_image_schema())
+        _ensure_image_indexes(client, name)
+        client.load_collection(name)
+        logger.info("image collection '%s' 已创建", name)
+    else:
+        _ensure_image_indexes(client, name)
+        try:
+            client.load_collection(name)
+        except Exception:
+            pass
+    return name
+
+
+def add_image_vectors(records: list[dict[str, Any]]) -> list[str]:
+    """写入图片向量（records: {user_id,source,page,image_index,caption,metadata,embedding}）。"""
+    if not records:
+        return []
+    ensure_image_collection()
+    rows = []
+    for r in records:
+        rows.append(
+            {
+                "id": uuid.uuid4().hex,
+                "user_id": r["user_id"],
+                "source": r["source"],
+                "page": r.get("page", 0),
+                "image_index": r.get("image_index", 0),
+                "caption": (r.get("caption") or "")[:2000],
+                "metadata_json": json.dumps(r.get("metadata") or {}, ensure_ascii=False),
+                "embedding": r["embedding"],
+            }
+        )
+    _client().insert(IMAGE_COLLECTION, rows)
+    return [r["id"] for r in rows]
+
+
+def delete_image_by_source(source: str, user_id: str | None = None) -> None:
+    """按 source（可限定用户）删除该文档的所有图片向量（与 delete_by_source 配套）。"""
+    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
+    expr = f'source == "{escaped}"'
+    uf = user_filter_expr(user_id)
+    if uf:
+        expr += f" and {uf}"
+    try:
+        ensure_image_collection()
+    except Exception:
+        return
+    _client().delete(IMAGE_COLLECTION, filter=expr)
+
+
+def search_image(
+    query_vec: list[float],
+    top_k: int | None = None,
+    user_id: str | None = "default",
+) -> list[dict[str, Any]]:
+    """图像通道检索：返回按相似度排序的图片候选（含 caption）。失败返回 []。"""
+    top_k = top_k or settings.image_channel_top_k
+    try:
+        ensure_image_collection()
+    except Exception:
+        return []
+    results = _client().search(
+        IMAGE_COLLECTION,
+        data=[query_vec],
+        anns_field="embedding",
+        search_params={"metric_type": settings.milvus_metric_type, "params": {"nprobe": 16}},
+        limit=top_k * 3,
+        output_fields=["source", "page", "image_index", "caption", "metadata_json"],
+        filter=user_filter_expr(user_id) or "",
+    )
+    hits: list[dict[str, Any]] = []
+    for hit in (results[0] if results else []):
+        entity = hit.get("entity") or {}
+        meta = {}
+        try:
+            meta = json.loads(entity.get("metadata_json") or "{}")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        hits.append(
+            {
+                "source": entity.get("source"),
+                "image_index": entity.get("image_index"),
+                "page": entity.get("page"),
+                "text": entity.get("caption") or "",
+                "metadata": {"type": "image", **(meta or {})},
+                "score": round(float(hit["distance"]), 4),
+            }
+        )
+    return hits[:top_k]

@@ -23,17 +23,18 @@ def _get_reranker():
     )
 
 
-def rerank(query: str, hits: list[dict[str, Any]], top_k: int | None = None) -> list[dict[str, Any]]:
+def rerank(query: str, hits: list[dict[str, Any]], top_k: int | None = None, candidate_k: int | None = None) -> list[dict[str, Any]]:
     """对命中列表按 (query, text) 交叉编码重排，返回精排后的 Top-K。
 
-    - 仅对前 rerank_candidate_k 条候选重排，控制 CPU 推理量。
+    - 仅对前 candidate_k（默认 rerank_candidate_k）条候选重排，控制 CPU 推理量。
     - 输入文本按 rerank_max_length 截断，减少 token。
     - 失败时原样返回前 top_k 条（降级）。
     """
     if not hits:
         return []
     top_k = top_k or settings.rag_top_k
-    candidates = hits[: settings.rerank_candidate_k]
+    candidate_k = candidate_k or settings.rerank_candidate_k
+    candidates = hits[:candidate_k]
     try:
         model = _get_reranker()
         pairs = [
