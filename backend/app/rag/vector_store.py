@@ -260,7 +260,7 @@ def stats() -> dict[str, Any]:
         return {"connected": False, "error": str(exc)}
 
 
-# ───────────────────────── 图文双通道（③）─────────────────────────
+# ───────────────────────── 图文双通道 ─────────────────────────
 # 图片用独立 collection（agent_images）存多模态向量（维度=image_embedding_dim），
 # 检索时与文本通道融合。全部默认关，开启由 settings.image_dual_channel 控制。
 IMAGE_COLLECTION = "agent_images"

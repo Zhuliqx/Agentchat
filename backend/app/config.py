@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     mcp_db_server_args: str = "scripts/db_query_server.py"  # DB 查询脚本
     mcp_time_server_cmd: str = "python"         # 时间服务器命令
     mcp_time_server_args: str = "scripts/time_server.py"  # 时间服务器脚本
-    external_mcp_servers: str = ""              # 外部 HTTP/SSE 服务器（可选）：逗号分隔的 "name=url"，；如 "github=http://localhost:8080/mcp"
+    external_mcp_servers: str = ""              # 外部 HTTP/SSE 服务器（可选）：逗号分隔的 "name=url"，如 "github=http://localhost:8080/mcp"
 
     # ────────────────────── 原始文件存储 ──────────────────────
     upload_dir: str = "data/uploads"            # 网页上传的原始文档持久保存目录（相对项目根），供下载 / 预览 / 审计
@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     table_max_rows_per_chunk: int = 10          # 表格分块：每块含表头 + 最多 N 行
     image_ocr_enabled: bool = False             # 对 PDF 内嵌 / 扫描图做 OCR，把图中文字抽出入库
     image_ocr_engine: str = "rapidocr"          # rapidocr(推荐, 免系统依赖) | paddle | tesseract
-    image_vlm_enabled: bool = False             # 对图片 / 图表用 VLM 生成语义描述（②）。描述以文本块入现有向量通道，；解决「趋势 / 构图 / 示意图逻辑」等视觉语义不可检索的问题（不改变向量 schema / 模型）。
+    image_vlm_enabled: bool = False             # 对图片 / 图表用 VLM 生成语义描述。描述以文本块入现有向量通道，解决「趋势 / 构图 / 示意图逻辑」等视觉语义不可检索的问题（不改变向量 schema / 模型）。
     image_vlm_provider: str = "deepseek"        # deepseek(官方 v4-flash-vision-exp) | dashscope | openai | ollama
     image_vlm_model: str = "deepseek-v4-flash-vision-exp"  # 视觉模型名
     image_vlm_base_url: str = ""                # 留空则按 provider 推断（deepseek/dashscope/openai 官方端点）
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     markdown_strip_headers: bool = True         # Markdown 分块去掉正文标题（标题只存 metadata，减少重复；实测 strip_headers=True 更优）
     doc_level_dedup: bool = False               # 文档级去重：整篇内容（全部块）与已有文档相同 → 跳过
 
-    # ─────────── 图文双通道（③；默认关=行为不变）───────────
+    # ─────────── 图文双通道───────────
     image_dual_channel: bool = False            # 图片用多模态向量（独立 collection）索引，检索时与文本通道融合。
     image_embedding_provider: str = "local"     # local(Chinese-CLIP 等) | dashscope/openai 等兼容端点
     image_embedding_model: str = "OFA-Sys/chinese-clip-vit-base-patch16"  # 多模态模型名
@@ -187,7 +187,7 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""               # Langfuse secret key
 
     # ─────────────── 用户 / 认证（JWT）───────────────
-    auth_secret: str = "dev-secret-change-me-in-env-0123456789abcdef"  # 生产环境务必在 .env 中设置强随机 auth_secret（≥32 字节）；默认值仅用于本地开发，；使 token 在后端重启后仍有效（临时密钥会导致每次重启全部登出）。
+    auth_secret: str = "dev-secret-change-me-in-env-0123456789abcdef"  # 生产环境务必在 .env 中设置强随机 auth_secret（≥32 字节）；默认值仅用于本地开发，使 token 在后端重启后仍有效（临时密钥会导致每次重启全部登出）。
     guest_user_id: str = "default"              # 未登录访客使用的默认用户 id（保持现有单用户体验不破坏）
     admin_usernames: str = ""                   # 管理员用户名（逗号分隔，如 "admin,zhangsan"）；命中者可在管理后台查看 / 删除用户
 

@@ -216,7 +216,7 @@ class MilvusRetriever(BaseRetriever):
     score_threshold: float = 0.35
     user_id: str = "default"  # 知识库归属用户（隔离）
     filter_expr: Optional[str] = None
-    # 本查询的图像通道候选（③，用于结果保底，避免被 rerank 用弱 caption 降权剔除）
+    # 本查询的图像通道候选（用于结果保底，避免被 rerank 用弱 caption 降权剔除）
     _img_hits: list[dict] = PrivateAttr(default_factory=list)
 
     def _user_filter(self) -> str:
@@ -331,7 +331,7 @@ class MilvusRetriever(BaseRetriever):
 
     def _finalize(self, query: str, hits: list[dict], top_k: int) -> list[LCDocument]:
         """公共收尾：精排 / 去重 / 预算 / 截断 → Document 列表。"""
-        # 图文双通道（③）：并入图像通道候选（默认关=行为不变）
+        # 图文双通道：并入图像通道候选（默认关=行为不变）
         img_on = settings.image_dual_channel
         if img_on:
             hits = self._add_image_channel(query, hits)
@@ -354,7 +354,7 @@ class MilvusRetriever(BaseRetriever):
                 {**h, "text": h["text"][:max_chars]} if len(h["text"]) > max_chars else h
                 for h in hits
             ]
-        # ③ 图像通道保底：相关图（分数≥阈值）强制进入最终结果，避免被弱 caption rerank 剔除
+        # 图像通道保底：相关图（分数≥阈值）强制进入最终结果，避免被弱 caption rerank 剔除
         if img_on and self._img_hits:
             guard = [
                 dict(h) for h in self._img_hits

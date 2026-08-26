@@ -1,12 +1,11 @@
-"""图片语义描述（VLM；②）。
+"""图片语义描述（VLM）。
 
 对 PDF 内嵌/扫描图用视觉大模型（VLM）生成一段自然语言语义描述，
 描述以「文本块」形式走现有向量通道（不改变向量 schema / 模型）。
 
-- 默认 provider=deepseek（官方 deepseek-v4-flash-vision-exp，中文强、支持图表、便宜）；
+- 默认 provider=deepseek
 - 任意失败降级返回 ""（不中断摄入，等效关闭该图描述）。
 
-仅视觉模型接受图片；system/assistant 消息带图会 400，故图片只放入 user 消息。
 """
 from __future__ import annotations
 

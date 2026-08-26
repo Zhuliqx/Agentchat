@@ -205,7 +205,7 @@ def _via_pypdf(path: Path) -> str:
 def _pdf_to_text(path: Path) -> str:
     """PDF → 纯文本：pdfplumber→pymupdf→pypdf 逐级回退。
 
-    相较 pypdf，pdfplumber/pymupdf 对中文/多栏/表格保留更好、控制字符更少（C1）。
+    相较 pypdf，pdfplumber/pymupdf 对中文/多栏/表格保留更好、控制字符更少。
     """
     for fn in (_via_pdfplumber, _via_pymupdf, _via_pypdf):
         try:
@@ -358,7 +358,7 @@ def _build_vlm_chunks(images: list, source: str) -> list[dict]:
 
 
 def _write_image_vectors(images: list, source: str, user_id: str) -> int:
-    """③ 图文双通道：用多模态编码器对每张图编码 → 写 image_vectors collection。
+    """图文双通道：用多模态编码器对每张图编码 → 写 image_vectors collection。
 
     先删该 source 旧图片向量再写（幂等覆盖，避免 ghost）。编码 / 模型失败 → 降级为 0（不影响文本摄入）。
     """
@@ -450,7 +450,7 @@ def ingest_file(
         _progress(22, "结构化解析")
     chunks = chunks + table_chunks + image_chunks + vlm_chunks
     if not chunks:
-        # 无文本块时：③ 仍需删旧图向量（force/换配置）或写新图向量（双通道开启）
+        # 无文本块时：仍需删旧图向量（force/换配置）或写新图向量（双通道开启）
         if force_reingest:
             vector_store.delete_image_by_source(source, user_id)
         if settings.image_dual_channel and doc["images"]:
@@ -463,11 +463,11 @@ def ingest_file(
             c["metadata"]["chunk"] = idx
     new_hashes = [_chunk_hash(c["text"]) for c in chunks]
     _progress(25, "分块完成")
-    # ③ 图文双通道：图片向量写入独立 collection（默认关；放在增量判断前，保证文本 unchanged 也写）
+    # 图文双通道：图片向量写入独立 collection（默认关；放在增量判断前，保证文本 unchanged 也写）
     if settings.image_dual_channel and doc["images"]:
         _write_image_vectors(doc["images"], source, user_id)
 
-    # 2a. 文档级内容去重（A2，可选）：整篇内容已在库 → 跳过（跨文件同内容）
+    # 文档级内容去重：整篇内容已在库 → 跳过（跨文件同内容）
     content_hash = hashlib.sha256(
         "\n".join(c["text"] for c in chunks).encode("utf-8")
     ).hexdigest()

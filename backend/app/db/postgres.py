@@ -62,7 +62,7 @@ def init_db() -> None:
                 "tag VARCHAR(50)"
             )
         )
-        # 迁移：旧版 documents 表无 content_hash 列 → 补列（A2 文档级去重）
+        # 迁移：旧版 documents 表无 content_hash 列 → 补列（文档级去重）
         conn.execute(
             _text(
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "

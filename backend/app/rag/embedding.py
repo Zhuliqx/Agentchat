@@ -66,7 +66,7 @@ def get_embedder() -> BaseEmbedder:
 
 
 class ImageEmbedder:
-    """多模态（文本 + 图像）编码器，用于图文双通道的图像向量（③）。
+    """多模态（文本 + 图像）编码器，用于图文双通道的图像向量。
 
     基于 HuggingFace CLIP（默认中文 Chinese-CLIP）：
     - encode_text(query)：把用户问题编码为文本向量（与图像向量同空间）；
