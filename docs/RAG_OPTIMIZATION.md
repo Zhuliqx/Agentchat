@@ -12,6 +12,10 @@
 | 5 | **检索级意图路由** | `intent_routing` | 按 query 类型（fact/chat/list/compare）调策略：改写开不开、top_k、多子查询 | 低 |
 | 5' | **跨块去重 + 总预算** | `dedup_near_duplicate` / `rag_max_total_chars` | 指纹/语义去重 + 总字符预算，减少喂给 LLM 的冗余 | 低 |
 | 4 | **CI 完整 GT 回归** | ci.yml 一步 | 用 `eval_rag.py` 跑 GT MRR 防退化（非阻塞） | 低 |
+| ② | **图片语义描述（VLM）** | `image_vlm_enabled` | 对图片/图表用视觉大模型生成文本描述入文本通道——图内容（趋势/结构/示意图逻辑）可检索 | 中（每图一次 VLM 推理） |
+| ③ | **图文双通道** | `image_dual_channel` | 图片用多模态向量（独立 collection）索引，检索时与文本通道融合——像素级/“看一眼像”相似召回 | 中（多模态 embedding + 图向量 collection） |
+| C1 | **PDF 提取回退** | 恒启用 | PDF 文本用 `pdfplumber→pymupdf→pypdf` 逐级回退，中文/表格保留更好、控制字符更少 | 低 |
+| C3 | **Markdown 去标题** | `markdown_strip_headers=True`（已默认开） | 标题只存 metadata、不进正文，块更聚焦；实测 MRR 0.963→0.975 | 低 |
 
 ---
 
@@ -26,6 +30,23 @@ intent_routing: bool = False       # 检索级意图路由
 dedup_near_duplicate: bool = False # 跨块/跨源 指纹+语义 去重（默认关=行为不变）
 dedup_sim_threshold: float = 0.90
 rag_max_total_chars: int = 0       # 0=不限制；>0 按分数降序累计截断，防超长 context
+
+# ---- 图片语义描述（VLM；②）----
+image_vlm_enabled: bool = False
+image_vlm_provider: str = "deepseek"     # deepseek | dashscope | openai | ollama
+image_vlm_model: str = "deepseek-v4-flash-vision-exp"
+image_vlm_max_size: int = 1280           # 送入 VLM 前最长边缩放到此值
+image_vlm_detail: str = "low"            # low | high | original | auto
+# ---- 图文双通道（③）----
+image_dual_channel: bool = False         # 需下载多模态模型（见 SETUP）
+image_embedding_provider: str = "local"
+image_embedding_model: str = "OFA-Sys/chinese-clip-vit-base-patch16"
+image_embedding_dim: int = 512
+image_channel_top_k: int = 6
+image_channel_weight: float = 0.4
+# ---- 解析增强（C1 / C3）----
+markdown_strip_headers: bool = True      # C3：Markdown 去标题（默认开）
+# C1：PDF 文本提取使用 pdfplumber→pymupdf→pypdf 逐级回退
 ```
 
 > 全部**默认关**，现有检索行为零变化；评估通过后再按数据决定开启哪项。
@@ -96,6 +117,15 @@ rag_max_total_chars: int = 0       # 0=不限制；>0 按分数降序累计截�
 | adaptive + rule 改写 | `+QUERY_REWRITE_ENABLED=true, MODE=rule` | 0.958 | 0.925 | -0.005 / 0 |
 | intent | `INTENT_ROUTING=true` | 0.963 | 0.925 | 0 / 0 |
 | dedup + 预算 | `DEDUP_NEAR_DUPLICATE=true, RAG_MAX_TOTAL_CHARS=3000` | 0.963 | 0.925 | 0 / 0 |
+
+**图片 / 解析专项（含图 GT，来源级命中）**
+
+| 档 | 开关 | MRR | Hit@1 | 结论 |
+|----|------|-----|-------|------|
+| ② 图片语义 off → on | `IMAGE_VLM_ENABLED` false→true | 0.000 → **1.000** | 0.000 → **1.000** | 图内容从“完全不可检索”→ 全命中 |
+| ③ 图文双通道 off → on | `IMAGE_DUAL_CHANNEL` false→true | 0.000 → **0.750** | 0.000 → **0.667** (Hit@5=1.0) | 纯图文档由图向量召回；图像保底防弱 caption 剔除 |
+| C3 strip_headers 关→开 | `MARKDOWN_STRIP_HEADERS` false→true | 0.963 → **0.975** | 0.925 → **0.950** | 已默认开 |
+| C2 chunk_size | 500 / 800 / 1200 | 0.963 | 0.925 | 来源级饱和，三者持平；保持 800 |
 
 **口语集 `ground_truth_spoken.json`（8 条，改写目标场景）**
 

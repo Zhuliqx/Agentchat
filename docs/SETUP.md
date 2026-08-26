@@ -76,6 +76,12 @@ Copy-Item .env.example .env
 - **Embedding**：默认本地 `BAAI/bge-small-zh-v1.5`（首次运行自动下载）。也可改为 `EMBEDDING_PROVIDER=openai`。
 - **rerank**：默认开启 `RERANK_ENABLED=true`，模型 `BAAI/bge-reranker-base`（首次 RAG 检索自动下载约 1.1GB，应用启动后在后台线程预热；可设 `RERANK_ENABLED=false` 关闭）。
 - **混合检索**：默认开启 `HYBRID_SEARCH=true`（向量 + BM25 + RRF），检索质量更高。
+- **图片语义描述 / 图文双通道（可选）**：
+  -  图片语义描述：`IMAGE_VLM_ENABLED=true`，默认 `IMAGE_VLM_PROVIDER=deepseek`（`deepseek-v4-flash-vision-exp`）复用 `DEEPSEEK_API_KEY`，无需额外下载；
+  -  图文双通道：需先下载多模态模型再开启 `IMAGE_DUAL_CHANNEL=true`：
+    ```powershell
+    huggingface-cli download OFA-Sys/chinese-clip-vit-base-patch16
+    ```
 - **人工确认（HITL）**：默认 **LLM 自主判定**（`HITL_ACTIONS=[]`，类似 Claude Code/Codex）——注册 `request_confirmation` 工具，由模型根据操作影响自主决定是否请求用户授权；低风险/只读操作直接执行。需要**强制确认**时设 `HITL_ACTIONS=["mcp"]`（调用前无条件中断；有开关的动作如 search/rag 开关打开时自动豁免）。设 `HITL_ENABLED=false` 完全关闭。
 - **容错**：`AGENT_CACHE_ENABLED=true`（图执行/LLM 提示缓存）、`SUBAGENT_RETRIES=1`（子 Agent 重试）。模型调用超时/重试由 LLM 客户端（`LLM_TIMEOUT`/`LLM_MAX_RETRIES`）与统一 middleware（超时 + 日志）负责。
 - **模型离线加载**：`HF_OFFLINE=true`（默认）——embedding/rerank 已本地缓存时直接离线加载，避免 HF 网络不可达时启动/首次请求联网 HEAD 卡住重试；需下载新模型时临时设 `false`。

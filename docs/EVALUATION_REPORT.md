@@ -1,4 +1,4 @@
-# 查询改写(Query Rewriting)实验报告
+# RAG 实验报告（查询改写 · 图片语义描述 · 图文双通道）
 
 > 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
 
@@ -119,4 +119,39 @@ python scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --ou
 python scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --rewrite rule --out data/eval/qe_spoken_rule.json
 python scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --rewrite llm --out data/eval/qe_spoken_llm.json
 python scripts/eval_quality.py --compare data/eval/qe_spoken_off.json data/eval/qe_spoken_llm.json
+```
+
+---
+
+## 9. 图片语义描述（VLM）与图文双通道（补充 A/B）
+
+> 这两个是**可选、默认关**的图片能力，用含图 GT 做了 A/B（详见 [RAG_OPTIMIZATION](RAG_OPTIMIZATION.md)）。
+
+### 9.1 图片语义描述（`image_vlm_enabled`）
+对 PDF 内嵌/扫描图用**视觉大模型**生成一句文本描述，混入文本向量通道，让「趋势 / 构图 / 示意图逻辑」等视觉语义可检索（不改变向量 schema）。
+
+| 档 | MRR | Hit@1 | 结论 |
+|----|-----|-------|------|
+| off | 0.000 | 0.000 | 图内容完全不可检索 |
+| on | **1.000** | **1.000** | 图内容全命中 |
+
+- 默认 VLM = `deepseek-v4-flash-vision-exp`（官方、中文强、便宜，复用 `DEEPSEEK_API_KEY`）；也可配 `dashscope`/`openai`/`ollama`。
+- 任意失败降级返回空串，不中断摄入。
+
+### 9.2 图文双通道（`image_dual_channel`）
+图片用**多模态向量**（`Chinese-CLIP` 默认）存独立 collection（`agent_images`），检索时用多模态文本编码器编码 query，与文本通道融合召回（像素级/"看一眼像"相似）。
+
+| 档 | MRR | Hit@1 | Hit@5 | 结论 |
+|----|-----|-------|-------|------|
+| off | 0.000 | 0.000 | 0.000 | 纯图文档不可检索 |
+| on | **0.750** | **0.667** | **1.000** | 图片向量召回 + 图像保底 |
+
+- 需下载多模态模型：`huggingface-cli download OFA-Sys/chinese-clip-vit-base-patch16`（约 600MB，见 [SETUP](SETUP.md)）。
+- 图片向量 collection 与 `delete_by_source` / `force_reingest` 同步，防 ghost。
+
+复现：
+```bash
+# 图问答 off: 在含图 PDF 上摄入后 eval；on: 开 IMAGE_VLM_ENABLED=true 再摄入 eval
+# 同型：开 IMAGE_DUAL_CHANNEL=true
+python scripts/eval_rag.py --dataset data/eval/img_ground_truth.json   # （示例）
 ```

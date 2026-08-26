@@ -50,7 +50,7 @@
 ## ✨ 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
-- **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）
+- **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）。**解析增强**：PDF 用 `pdfplumber→pymupdf→pypdf` 回退、Markdown 去标题（默认开）；**图片能力**：可选 **图片语义描述**（VLM 转图内容为文本）与 **图文双通道**（多模态向量 + 文本融合，见 [RAG_DESIGN_ANALYSIS](docs/RAG_DESIGN_ANALYSIS.md)）
 - **联网搜索**：Tavily 直接搜索工具（`web_search`），实时获取最新网络资讯（LangChain 官方推荐工具）
 - **代码 Agent**：受限沙箱执行 Python（子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断），需要实际计算/验证算法/数据处理时由 Supervisor 自动调度；`CODE_AGENT_ENABLED` / `CODE_EXEC_TIMEOUT` 可配置
 - **MCP**：

@@ -75,8 +75,11 @@ flowchart TB
 |------|---------|---------|
 | txt/md | `_read_text_auto` | **chardet 自动检测编码**，检测失败回退 `utf-8` 容错（`errors="ignore"`） |
 | html/htm | `_HtmlTextExtractor` | stdlib `html.parser` 提取可见文本，**显式丢弃 `<script>/<style>`** |
-| pdf | `pypdf.PdfReader` | 逐页 `extract_text()`，空页容错 |
+| pdf | `pdfplumber→pymupdf→pypdf` 逐级回退 | 对中文/多栏/表格保留更好、控制字符更少（C1） |
 | docx | `_docx_to_text` | **段落 + 表格双通道**，表格单元格用 `\|` 拼接 |
+| pdf/docx/html 表格 | `table_parser` | 表格→**结构化块**（保表头/列语义，按表头+每 N 行切块） |
+| 内嵌/扫描图 | `image_parser` 抽图 + OCR | OCR 文字入文本通道；**VLM 语义描述（②）**把视觉语义转文本（趋势/图表/示意图逻辑） |
+| 图片向量 | `ImageEmbedder`（多模态） | **图文双通道（③）**：图像向量存独立 collection，与文本通道融合 |
 
 ### 2.2 为什么这样设计
 
@@ -88,7 +91,10 @@ flowchart TB
 
 | 问题 | 解法 |
 |------|------|
-| PDF 是**扫描件**（图片型）时 `extract_text()` 返回空 | 接入 OCR（PaddleOCR / Tesseract）作为解析后端；或至少在返回"无内容"时**显式提示用户**，避免静默丢内容 |
+| PDF 是**扫描件**（图片型）时 `extract_text()` 返回空 | 接入 OCR（`image_parser`，rapidocr）作为解析后端；或返回"无内容"时**显式提示用户**，避免静默丢内容 |
+| 图片的**视觉语义**（趋势/构图/示意图逻辑）不可被 OCR 提取 | **② VLM 语义描述**（`vlm.py`）：对每张图用视觉大模型生成一句文本描述，入文本通道 → 图内容可检索 |
+| 仅图文相关、**像素级相似**（如"看一眼像"）检索不到 | **③ 图文双通道**（`image_dual_channel`）：图片用多模态向量（Chinese-CLIP）独立 collection 索引，与文本通道融合召回 |
+| PDF 提取质量差（pypdf 有控制字符/乱序） | **C1**：PDF 提取改用 `pdfplumber→pymupdf→pypdf` 逐级回退，中文/表格保留更好 |
 | DOCX 表格单元格拼接后失去行列结构 | 拼接时保留表头，或在 metadata 中记录"该块来自表格"，必要时走高精度表格解析（Table Transformer 类模型） |
 | 大文件解析耗时 | 本已放后台线程（见 [12](#12-api-设计与后台任务)），可再加并发限制（信号量）避免多个大文件同时打爆 CPU |
 | HTML 只取文本丢失链接/引用 | 可保留链接文本做溯源；当前场景以内容问答为主，可接受 |
@@ -99,7 +105,7 @@ flowchart TB
 
 ```
 Markdown（以 # 开头）
-  → MarkdownHeaderTextSplitter 按 H1/H2/H3 切"章节"（strip_headers=False 保留标题）
+  → MarkdownHeaderTextSplitter 按 H1/H2/H3 切"章节"（strip_headers=True 把标题从正文剥离，只存 metadata）
   → 每章节内 RecursiveCharacterTextSplitter 再递归分块
   → metadata 携带 Header1/Header2/Header3 章节层级
 
@@ -115,7 +121,7 @@ Markdown（以 # 开头）
   1. **Markdown 按标题切分**：纯长度切分切断"标题 ↔ 正文"联系。按标题分块让每块自带语义边界与章节上下文，检索命中块时能携带**所在章节标题**，中文文档召回质量提升显著。
   2. **中文友好的分隔符优先级**：`段落 → 换行 → 句号/叹号/问号 → 空格`,保证分块**在完整语义单元处断裂**,而非生硬按字符截断。
   3. **chunk_overlap=100（约 12%）**：业界推荐重叠 10%~20%。防止跨块边界的关键信息丢失（如一段论证横跨两个块时，检索只命中后一半）。
-- **保留标题（strip_headers=False）**：让"章节标题文本"作为前缀出现在块文本中，提升 embedding 的语义锚定性。
+- **剥离标题（strip_headers=True）**：标题只存 metadata、不进正文，避免重复标题稀释 embedding 语义、让每块更聚焦。实测 C3：MRR **0.963 → 0.975**、Hit@1 **0.925 → 0.950**。
 
 ### 3.3 为什么不用更高级的分块
 
