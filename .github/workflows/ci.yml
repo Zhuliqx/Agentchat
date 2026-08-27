@@ -109,3 +109,11 @@ jobs:
           python -c "import json, pathlib; p=pathlib.Path('tests/fixtures/rag_ground_truth.example.json'); d=json.loads(p.read_text(encoding='utf-8')); print('GT cases:', len(d))"
           python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.example.json
 
+      - name: "GT v2 (图片/图文/表格/去重/口语) 加载校验"
+        working-directory: backend
+        continue-on-error: true
+        run: |
+          # v2 覆盖当前设计：图片/图文双通道、表格/多栏、文档级去重、口语改写。
+          python -c "from app.evaluation.dataset import load_ground_truth; cs=load_ground_truth('tests/fixtures/rag_ground_truth.v2.json'); ims=[c for c in cs if c.expected_images]; print('v2 cases:', len(cs), 'with-image:', len(ims)); assert len(cs)==8 and ims"
+          python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.v2.json
+

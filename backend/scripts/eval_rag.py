@@ -51,15 +51,47 @@ def _hit(mode: str, expected: list[str], source: str, text: str) -> bool:
     return any(k.lower() in joined for k in expected)
 
 
+def _img_hit(expected_images: list[str], source: str, image_index: object) -> bool:
+    """判定单个命中是否为期望图片（图文双通道）。
+
+    期望条目标记为 `source#image_index`（如 "D:\\\\...\\\\c.md#2"）：
+    - source 按子串匹配（与 source 模式一致，兼容绝对路径差异）；
+    - image_index 精确匹配。
+    未传 image_index 或未标注 expected_images 时一律不命中。
+    """
+    if not expected_images or image_index is None:
+        return False
+    idx = str(image_index).strip()
+    source = source or ""
+    for exp in expected_images:
+        exp = exp.strip()
+        if not exp or "#" not in exp:
+            continue
+        src_part, idx_part = exp.rsplit("#", 1)
+        if idx_part.strip() == idx and src_part.strip() and src_part.strip() in source:
+            return True
+    return False
+
+
 def _eval_case(
-    query: str, expected: list[str], mode: str, hits: list[dict], top_k: int
+    query: str,
+    expected: list[str],
+    mode: str,
+    hits: list[dict],
+    top_k: int,
+    expected_images: list[str] | None = None,
 ) -> dict:
-    """单条检索评估：hits 由生产同路径 retriever 产出（含改写/rerank/去重）。"""
+    """单条检索评估：hits 由生产同路径 retriever 产出（含改写/rerank/去重）。
+
+    命中判定 = 来源命中 OR 图片命中（图片来源与文本来源是"或"关系）。
+    """
+    exp_imgs = expected_images or []
     rank = next(
         (
             i
             for i, h in enumerate(hits, start=1)
             if _hit(mode, expected, str(h.get("source", "")), str(h.get("text", "")))
+            or _img_hit(exp_imgs, str(h.get("source", "")), h.get("image_index"))
         ),
         None,
     )
@@ -67,6 +99,7 @@ def _eval_case(
         "query": query,
         "rewritten": rewrite_query(query) if settings.query_rewrite_enabled else None,
         "expected": expected,
+        "expected_images": exp_imgs,
         "mode": mode,
         "hits_count": len(hits),
         "rank": rank,
@@ -111,6 +144,8 @@ def _collect_docs_retriever(cases: list[dict], top_k: int) -> list[list[dict]]:
             {
                 "text": d.page_content,
                 "source": (d.metadata or {}).get("source", ""),
+                # 文件通道命中带 image_index，供 _img_hit 判定图片命中
+                "image_index": (d.metadata or {}).get("image_index"),
             }
             for d in retriever.invoke(c["question"])
         ]
@@ -179,7 +214,14 @@ def run_eval(cases: list[dict], mode: str, top_k: int) -> dict:
     print(f"RAG retrieval eval（mode={mode}, top_k={top_k}, {len(cases)} 案例）\n")
     hits_list = _collect_docs_retriever(cases, top_k)  # 生产同路径（含改写）
     results = [
-        _eval_case(c["question"], c.get("expected", []), mode, hits, c.get("top_k") or top_k)
+        _eval_case(
+            c["question"],
+            c.get("expected", []),
+            mode,
+            hits,
+            c.get("top_k") or top_k,
+            c.get("expected_images"),
+        )
         for c, hits in zip(cases, hits_list)
     ]
     for r in results:
@@ -270,14 +312,15 @@ def load_cases(dataset_path: str | None) -> tuple[list[dict], str]:
         return list(CASES), "keywords"
     gt_cases = []
     for c in gts:
-        # 仅当 GT 提供了 expected_sources 才判"来源命中"；
-        # 无来源的 case 无判定依据，跳过（避免退回"问题分词"导致误报 miss）
-        if not c.expected_sources:
+        # 有来源或图片期望才有判定依据（图文双通道：图片期望与来源是"或"关系）；
+        # 两者都为空则跳过（避免退回"问题分词"导致误报 miss）
+        if not c.expected_sources and not c.expected_images:
             continue
         gt_cases.append(
             {
                 "question": c.question,
                 "expected": c.expected_sources,
+                "expected_images": c.expected_images,
                 "top_k": 4,
             }
         )

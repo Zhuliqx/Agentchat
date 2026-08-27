@@ -10,6 +10,7 @@
       "question": "公司有多少名员工?",
       "answer": "公司现有约 120 名员工。",     // 标准答案(生成质量/召回的参照)
       "expected_sources": [".../company.md"],  // 期望命中的文档(检索级校验)
+      "expected_images": [".../c.md#2"],       // 可选:期望命中的图片 id(图文双通道; 与 sources 是"或"关系)
       "notes": ""                              // 可空:标注注意点/困难点
     }
   ]
@@ -33,6 +34,9 @@ class Case:
     question: str
     answer: str = ""
     expected_sources: list[str] = field(default_factory=list)
+    # 图片/图文双通道命中的图片 id（格式 source#image_index，如 "D:\\...\\c.md#2"）。
+    # 与 expected_sources 是"或"的关系：命中任一即视为该 case 命中。
+    expected_images: list[str] = field(default_factory=list)
     notes: str = ""
 
     def to_doc_dict(self) -> dict[str, Any]:
@@ -41,6 +45,7 @@ class Case:
             "question": self.question,
             "answer": self.answer,
             "expected_sources": self.expected_sources,
+            "expected_images": self.expected_images,
             "notes": self.notes,
         }
 
@@ -88,6 +93,7 @@ def load_ground_truth(path: str | Path) -> list[Case]:
                 question=question,
                 answer=answer,
                 expected_sources=_clean_sources(raw.get("expected_sources")),
+                expected_images=_clean_sources(raw.get("expected_images")),
                 notes=str(raw.get("notes") or ""),
             )
         )

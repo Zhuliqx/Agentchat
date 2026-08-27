@@ -182,3 +182,49 @@ def test_eval_rag_load_cases_skips_no_source(tmp_path):
     cases2, mode2 = eval_rag.load_cases(str(gt2))
     assert mode2 == "keywords"
     assert len(cases2) == len(eval_rag.CASES)
+
+
+def test_load_ground_truth_expected_images():
+    """v2 GT（覆盖图片/图文/表格/去重/口语）应能被解析，图片维度生效。"""
+    cases = dataset.load_ground_truth(FIXTURES / "rag_ground_truth.v2.json")
+    assert len(cases) == 8
+    im = next(c for c in cases if c.id == "v2_img01")
+    assert im.expected_images == ["docs/annual_report_2023.md#1"]
+    assert im.expected_sources == ["docs/annual_report_2023.md"]
+    dd = next(c for c in cases if c.id == "v2_dd01")
+    assert dd.expected_images == []
+
+
+def test_eval_rag_image_hit():
+    """图片命中：source 子串 + image_index 精确匹配。"""
+    sys.path.insert(0, str(SCRIPTS))
+    import eval_rag  # noqa: E402
+
+    assert eval_rag._img_hit(["docs/c.md#2"], "docs/c.md", 2) is True
+    assert eval_rag._img_hit(["D:\\data\\c.md#2"], "D:\\data\\c.md", 2) is True
+    assert eval_rag._img_hit(["docs/c.md#2"], "docs/c.md", 3) is False
+    assert eval_rag._img_hit(["docs/x.md#1"], "docs/c.md", 2) is False
+    assert eval_rag._img_hit([], "docs/c.md", 2) is False
+    assert eval_rag._img_hit(["docs/c.md#2"], "docs/c.md", None) is False
+
+
+def test_eval_rag_combined_rank_includes_image():
+    """图文双通道：图片命中应参与 rank 计算（与来源命中为"或"关系）。"""
+    sys.path.insert(0, str(SCRIPTS))
+    import eval_rag  # noqa: E402
+
+    hits = [
+        {"source": "docs/other.md", "text": "无关内容"},
+        {"source": "docs/annual_report_2023.md", "text": "", "image_index": 1},
+    ]
+    r = eval_rag._eval_case(
+        "营收峰值",
+        [],
+        "source",
+        hits,
+        4,
+        expected_images=["docs/annual_report_2023.md#1"],
+    )
+    assert r["rank"] == 2
+    assert r["hit_at"]["hit@3"] is True
+    assert r["expected_images"] == ["docs/annual_report_2023.md#1"]

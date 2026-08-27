@@ -1,0 +1,64 @@
+{
+  "name": "agentchat-rag-benchmark-v2-demo",
+  "note": "公开示例 GT v2（可提交、CI 用）：覆盖当前设计的图片/图文双通道、表格/多栏解析、文档级去重、口语改写。source/image 路径为示意占位，评估前请替换为真实 source（_img_hit 按 source#index 子串匹配）。仅用于演示 eval_rag.py / eval_quality.py 流程与 CI 回归。",
+  "cases": [
+    {
+      "id": "v2_img01",
+      "question": "根据 2023 年报的折线图，营收在哪一年达到峰值？",
+      "answer": "从趋势图看，营收在 2023 年达到峰值。",
+      "expected_sources": ["docs/annual_report_2023.md"],
+      "expected_images": ["docs/annual_report_2023.md#1"],
+      "notes": "图文双通道:需命中报表内第 1 张图(趋势折线图)"
+    },
+    {
+      "id": "v2_img02",
+      "question": "系统架构图中的编排层由哪几个模块组成？",
+      "answer": "架构图显示编排层由 Supervisor、Planner、Tools 三部分构成。",
+      "expected_sources": ["docs/architecture.md"],
+      "expected_images": ["docs/architecture.md#0"],
+      "notes": "图文双通道:需命中架构流程图"
+    },
+    {
+      "id": "v2_tb01",
+      "question": "2024 年预算表中研发费用是多少？",
+      "answer": "预算表中研发费用为 1200 万元。",
+      "expected_sources": ["docs/budget_2024.md"],
+      "notes": "表格解析:信息位于表格单元格内"
+    },
+    {
+      "id": "v2_tb02",
+      "question": "对比两档套餐中支持外部协作者的数量上限分别是多少？",
+      "answer": "基础版 20 个、专业版 100 个。",
+      "expected_sources": ["docs/pricing_table.md"],
+      "notes": "表格解析+对比:需跨行/跨列读取两档"
+    },
+    {
+      "id": "v2_dd01",
+      "question": "公司简介里研发团队占比是多少？",
+      "answer": "研发团队占比 60%。",
+      "expected_sources": ["docs/company_profile.md"],
+      "notes": "文档级去重:同内容在 company.md 与 company_profile.md 重复,命中任一即可"
+    },
+    {
+      "id": "v2_sp01",
+      "question": "公司啥时候成立的呀",
+      "answer": "公司成立于 2020 年。",
+      "expected_sources": ["docs/company.md"],
+      "notes": "口语改写:口语化问题→规范书面语,校验 query rewrite"
+    },
+    {
+      "id": "v2_sp02",
+      "question": "那个旗舰产品到底是个啥东西",
+      "answer": "旗舰产品是“多 Agent 协作平台”。",
+      "expected_sources": ["docs/company.md"],
+      "notes": "口语改写:口语化问题→规范化"
+    },
+    {
+      "id": "v2_dup01",
+      "question": "哪一篇文档里详尽描述了数据保留策略的冻结期？",
+      "answer": "数据保留策略详见套餐说明文档。",
+      "expected_sources": ["docs/retention_policy.md"],
+      "notes": "去重+预算:多段描述同一主题,校验上下文压缩"
+    }
+  ]
+}

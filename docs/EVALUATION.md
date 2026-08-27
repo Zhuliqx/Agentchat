@@ -156,7 +156,8 @@ cd backend
 ## 4. Ground Truth 标注规范
 
 文件：`backend/data/eval/ground_truth.json`（被 gitignore，属私有基准）；
-公共示例：`backend/tests/fixtures/rag_ground_truth.example.json`（可提交，CI 单测用）。
+公共示例：`backend/tests/fixtures/rag_ground_truth.example.json`（可提交，CI 单测用）；
+设计扩充示例：`backend/tests/fixtures/rag_ground_truth.v2.json`（覆盖图片/图文双通道、表格/多栏、文档级去重、口语改写）。
 
 ```json
 { "id": "q01",
@@ -175,6 +176,8 @@ cd backend
   - **否定型**（q28-q29：库内确实无答案，answer 填"知识库中没有相关信息"——测"承认不知道"）
   - **难例**（q31-q40）：对比型 / 计算型 / 条件推理 / 筛选型 / 状态型——提升评估区分度
 - `expected_sources` 供 eval_rag.py 做 source 模式判定（文档级），内容级判定看四指标；
+- `expected_images`（可选）供图文双通道判定：格式 `source#image_index`（如 `.../c.md#2`），
+  与 `expected_sources` 是"或"关系（命中任一即该 case 命中）；
 - `notes` 必填"来源: 文件名@位置"，便于指标异常时回溯定位。
 
 ---
