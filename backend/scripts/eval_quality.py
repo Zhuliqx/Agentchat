@@ -47,11 +47,15 @@ EVAL_DIR = Path(__file__).resolve().parent.parent / "data" / "eval"
 DEFAULT_GT = EVAL_DIR / "ground_truth.json"
 CONCURRENCY = 4
 
+# 评估用知识库用户（环境变量 RAG_EVAL_USER 覆盖；默认 "default"，与既有行为一致）
+import os as _os
+_USER_ID = _os.environ.get("RAG_EVAL_USER", "default")
+
 
 # ---------------- 检索（与生产同路径，线程池执行） ----------------
 
 def _retrieve_sync(question: str) -> list[dict]:
-    retriever = get_retriever(user_id="default")
+    retriever = get_retriever(user_id=_USER_ID)
     docs = retriever.invoke(question)
     return [
         {

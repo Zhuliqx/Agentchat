@@ -16,6 +16,7 @@ venv/
 models_cache/
 *.local.json
 data/uploads/
+data/kb_expand/
 volumes/
 backend/data/
 

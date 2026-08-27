@@ -32,6 +32,9 @@ setup_utf8_stdio()
 
 EVAL_DIR = Path(__file__).resolve().parent.parent / "data" / "eval"
 
+# 评估用知识库用户（--user 覆盖；默认 "default"，与既有行为一致）
+_USER_ID = "default"
+
 # 内置回归案例：(问题, 期望关键词, top_k)
 CASES: list[dict] = [
     {"question": "公司有多少名员工", "expected": ["员工", "120"], "top_k": 4},
@@ -137,7 +140,7 @@ def _collect_docs_retriever(cases: list[dict], top_k: int) -> list[list[dict]]:
     真实系统输出（q05 实证：核心块在 hybrid 排 #2，rerank 后升到 #1），
     导致 NDCG 低估排序质量。故与 eval_quality 一致，走 retriever。
     """
-    retriever = get_retriever(user_id="default")
+    retriever = get_retriever(user_id=_USER_ID)
     retriever.top_k = top_k
     return [
         [
@@ -333,6 +336,7 @@ def load_cases(dataset_path: str | None) -> tuple[list[dict], str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="RAG 检索回归评估（MRR/Hit@K，可选 NDCG 分级）")
     parser.add_argument("--dataset", default=None, help="GT json 路径（默认内置案例）")
+    parser.add_argument("--user", default="default", help="评估用知识库用户（默认 default）")
     parser.add_argument("--top-k", type=int, default=4, help="检索 top_k")
     parser.add_argument("--graded", action="store_true", help="NDCG 分级模式（LLM judge 打 0/1/2）")
     parser.add_argument("--concurrency", type=int, default=4, help="graded 模式 LLM 并发数")
@@ -380,6 +384,8 @@ def main() -> None:
         if args.threshold is not None:
             settings.rag_score_threshold = args.threshold
 
+    global _USER_ID
+    _USER_ID = args.user
     cases, mode = load_cases(args.dataset)
     if args.graded:
         payload = run_eval_graded(cases, top_k=args.top_k, concurrency=args.concurrency)
