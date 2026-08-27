@@ -183,3 +183,44 @@ $env:DEDUP_NEAR_DUPLICATE="true"; $env:RAG_MAX_TOTAL_CHARS="3000"; .\venv\Script
 
 ### 7.3 决策
 - 图片能力推荐 **图片语义描述+图文双通道 同时开启 + guard 排序调和**（`image_dual_channel` + `image_vlm_enabled` 均显式开启，见 SETUP）：当前含图 GT 达 **1.000**，优于仅图文双通道（0.750）。
+
+
+---
+
+## 8. 补充复测（扩样口语/难例 + 端到端四指标 + 超参 sweep）
+
+> 背景：既有**检索级（来源级）**在书面/口语/难例上已饱和（Hit@1≈100%），"返回哪个来源"无法区分 RAG 优化档。
+> 这次改用**扩样后的口语（58）/难例（26）GT + 内容级端到端四指标**复测，判断 RAG 优化档是否默认开启。
+
+### 8.1 判定口径与基线确认
+- **扩样**：新增 `ground_truth_spoken_large.json`（58 条口语化变体）、`ground_truth_hard_large.json`（26 条推理/计算/对比/条件型难例），变体**继承原 answer/source，仅改措辞**（保证答案可验证、来源可命中）。
+- **指标**：端到端四指标（`context_precision` / `context_recall` / `faithfulness` / `answer_relevancy`），DeepSeek-judge、temperature=0，覆盖生成层。
+- **检索级确认**：口语/难例扩样集上 off / adaptive / intent / dedup 均 **MRR=Hit@1=1.0**——来源级饱和，检索级无法判定，必须用内容级。
+
+### 8.2 难例集（26 条）四指标
+| 档 | context_precision | context_recall | faithfulness | answer_relevancy | vs off faithful |
+|----|------------------|----------------|--------------|------------------|-----------------|
+| off（基线） | **0.971** | 0.942 | **0.964** | 0.992 | — |
+| adaptive | 0.933 | **0.962** | 0.927 | **1.000** | **-0.037** |
+| intent | 0.955 | **0.962** | 0.911 | **1.000** | **-0.053** |
+| dedup+预算 | 0.965 | 0.952 | 0.925 | **1.000** | **-0.039** |
+
+- 三档在难例集上**一致降低 faithfulness**（最明显 intent -0.053、dedup -0.039、adaptive -0.037），只小幅提升 recall（+0.01~0.02）与 relevancy（+0.008），且 adaptive 还会降 context_precision（-0.038）。
+
+### 8.3 口语集（58 条）四指标
+| 档 | context_precision | context_recall | faithfulness | answer_relevancy | vs off faithful |
+|----|------------------|----------------|--------------|------------------|-----------------|
+| off（基线） | 0.928 | **0.918** | 0.948 | 1.000 | — |
+| adaptive | 0.942 | 0.918 | 0.935 | 1.000 | **-0.013** |
+| intent | 0.942 | 0.918 | **0.950** | 1.000 | **+0.002** |
+| dedup+预算 | **0.955** | 0.918 | 0.937 | 1.000 | **-0.011** |
+
+- 口语集三档差异小：intent 基本持平（faithful +0.002），dedup / adaptive 略降（-0.011 / -0.013）；dedup 与 adaptive 的 context_precision 略升（+0.027 / +0.014）。
+
+### 8.4 混合检索超参 sweep（检索级）
+`rrf_k`（40/60/80）× `hybrid_candidate_k`（10/20/30）在书面集 40 条上全部 **MRR=0.975 / Hit@1=0.95 / Hit@3=1.0**——来源级饱和，零区分度 → 维持默认 `rrf_k=60`、`hybrid_candidate_k=20`。
+
+### 8.5 决策（更新）
+- **RAG 三档（adaptive / intent / dedup）维持默认关、行为不变**：检索级饱和无收益；内容级（困难例）三档**一致伤 faithfulness**，无一致的正向权衡——延续"数据驱动、实验证明后再开"。
+- **混合检索超参维持默认**（`rrf_k=60`、`hybrid_candidate_k=20`）：sweep 零区分。
+- **dedup+预算 的忠实度权衡（明确）**：会**降 faithfulness**（难例 -0.039、口语 -0.011），换来更高 `context_precision`（口语 +0.027）与更少上下文冗余——**非零伤**；若追求更高相关度/省 token 可开，代价是生成忠实度略降。**建议默认关闭**，除非有明确的省 token / 长上下文需求。
