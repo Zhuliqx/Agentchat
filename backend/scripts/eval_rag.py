@@ -337,6 +337,8 @@ def main() -> None:
     parser.add_argument("--graded", action="store_true", help="NDCG 分级模式（LLM judge 打 0/1/2）")
     parser.add_argument("--concurrency", type=int, default=4, help="graded 模式 LLM 并发数")
     parser.add_argument("--rerank-max-length", type=int, default=None, help="覆盖 RERANK_MAX_LENGTH（A/B）")
+    parser.add_argument("--max-per-doc", type=int, default=None, help="覆盖 RAG_MAX_PER_DOC（同文档最多保留块数，A/B）")
+    parser.add_argument("--threshold", type=float, default=None, help="覆盖 RAG_SCORE_THRESHOLD（最低相关分，A/B）")
     parser.add_argument(
         "--rewrite",
         default=None,
@@ -353,7 +355,14 @@ def main() -> None:
     if args.compare:
         raise SystemExit(compare(Path(args.compare[0]), Path(args.compare[1])))
 
-    if args.rerank_max_length is not None or args.rewrite is not None or args.no_rerank or args.no_hybrid:
+    if (
+        args.rerank_max_length is not None
+        or args.rewrite is not None
+        or args.no_rerank
+        or args.no_hybrid
+        or args.max_per_doc is not None
+        or args.threshold is not None
+    ):
         from app.config import settings
 
         if args.rerank_max_length is not None:
@@ -366,6 +375,10 @@ def main() -> None:
             settings.rerank_enabled = False
         if args.no_hybrid:
             settings.hybrid_search = False
+        if args.max_per_doc is not None:
+            settings.rag_max_per_doc = args.max_per_doc
+        if args.threshold is not None:
+            settings.rag_score_threshold = args.threshold
 
     cases, mode = load_cases(args.dataset)
     if args.graded:

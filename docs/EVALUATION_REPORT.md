@@ -14,7 +14,7 @@
 |------|------|
 | `app/rag/query_rewrite.py` | 两档改写：`rule`（去口语框架词/句尾疑问词 + 同义词**并列扩展**，零依赖）、`llm`（one-shot prompt 改写为精炼检索词，失败/拒绝模板自动回退） |
 | `app/rag/retriever.py` | `_expand_queries` 双路检索（原 query + 改写结果），按 `(source, chunk_index)` 合并去重 |
-| 防退化 | ① 精确词豁免：含数字/型号/英文专名跳过 llm 档；② 拒绝词回退：LLM 输出"请提供问题"等模板即回退原句；③ 双路兜底：改写丢信息时原句仍能召回 |
+| 防退化 | 精确词豁免：含数字/型号/英文专名跳过 llm 档；拒绝词回退：LLM 输出"请提供问题"等模板即回退原句；双路兜底：改写丢信息时原句仍能召回 |
 | 评估 | `scripts/eval_rag.py` 增 `--rewrite {none,rule,llm}`；MRR 主模式改走生产同路径 retriever（顺带统一了此前 graded/非 graded 两条路径） |
 | 配置 | `query_rewrite_enabled=False`（默认关）、`query_rewrite_mode`、`query_rewrite_cache_size` |
 
@@ -145,6 +145,16 @@ python scripts/eval_quality.py --compare data/eval/qe_spoken_off.json data/eval/
 |----|-----|-------|-------|------|
 | off | 0.000 | 0.000 | 0.000 | 纯图文档不可检索 |
 | on | **0.750** | **0.667** | **1.000** | 图片向量召回 + 图像保底 |
+
+**图片语义描述+图文双通道 组合（VLM 描述 + 图向量，含图 GT 4 条纯图问答）**：
+
+| 配置 | MRR | Hit@1 | Hit@3 | Hit@5 | 说明 |
+|------|-----|-------|-------|-------|------|
+| 图文双通道（无图片语义描述） | 0.750 | 0.750 | 0.750 | 0.750 | "走势"类(img03)靠图向量弱 |
+| 图片语义描述+图文双通道 | 0.583 | 0.250 | **1.000** | **1.000** | 召回满，但首名被 VLM 块占用 |
+| **图片语义描述+图文双通道 + guard 排序调和** | **1.000** | **1.000** | **1.000** | **1.000** | 图片强制前置+移同位置 VLM 块 → 全 rank1 |
+
+> **结论**：单纯叠加 图片语义描述+图文双通道 会"召回满但首名被 VLM 文本块抢走"；对图像保底做**排序调和**（相关图强制前置）后，**图片语义描述+图文双通道 达到满分、优于仅图文双通道**。推荐图片能力用"图片语义描述+图文双通道 同开 + guard 调和"。
 
 - 需下载多模态模型：`huggingface-cli download OFA-Sys/chinese-clip-vit-base-patch16`（约 600MB，见 [SETUP](SETUP.md)）。
 - 图片向量 collection 与 `delete_by_source` / `force_reingest` 同步，防 ghost。

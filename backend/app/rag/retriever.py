@@ -361,8 +361,10 @@ class MilvusRetriever(BaseRetriever):
                 if float(h.get("score") or 0) >= 0.30
             ][:2]
             if guard:
-                seen = {(h.get("source"), h.get("image_index")) for h in hits}
-                guard = [g for g in guard if (g.get("source"), g.get("image_index")) not in seen]
+                guard_keys = {(g.get("source"), g.get("image_index")) for g in guard}
+                # 排序调和：相关图(≥阈值)强制前置到最前，并移除同位置旧命中(如 VLM 文本块)，
+                # 使图片命中稳定占据首名(Hit@1)，而非被文本块挤到后位。
+                hits = [h for h in hits if (h.get("source"), h.get("image_index")) not in guard_keys]
                 hits = guard + hits
         hits = hits[:top_k]
         return [
@@ -371,6 +373,7 @@ class MilvusRetriever(BaseRetriever):
                 metadata={
                     "source": h.get("source", ""),
                     "chunk_index": h.get("chunk_index"),
+                    "image_index": h.get("image_index"),
                     "score": h.get("score"),
                     "vector_id": h.get("id"),
                     "rrf_score": h.get("rrf_score"),

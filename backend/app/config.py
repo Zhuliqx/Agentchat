@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     milvus_port: int = 19530                    # 端口
     milvus_collection: str = "agent_documents"  # 向量 collection 名
     milvus_uri: str = ""                        # 留空则用 host:port 拼接；也可填 zilliz 云端 uri
-    milvus_metric_type: str = "IP"              # 索引度量: IP(内积;向量已归一化时=余弦,最快) / COSINE(自动归一化 query,更防御) / L2
+    milvus_metric_type: str = "IP"              # 索引度量: IP / COSINE / L2
 
     # ────────────────────── Embedding 模型 ──────────────────────
     embedding_model: str = "BAAI/bge-small-zh-v1.5"  # 本地: BAAI/bge-small-zh-v1.5, sentence-transformers/all-MiniLM-L6-v2；OpenAI 兼容: text-embedding-3-small 等
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     agent_cache_enabled: bool = True            # 图执行 / LLM 提示缓存
     subagent_retries: int = 1                   # agent_to_tool 包装的子 Agent 调用失败重试次数
 
-    openai_api_key: str = ""                    # OpenAI（LLM_PROVIDER=openai 时使用）
+    openai_api_key: str = ""                    # OpenAI
     openai_base_url: str = "https://api.openai.com/v1"  # OpenAI 兼容端点
     openai_model: str = "gpt-4o-mini"           # 模型名
     temperature: float = 0.3                    # 采样温度
@@ -92,18 +92,18 @@ class Settings(BaseSettings):
     max_upload_mb: int = 50                     # 上传文件大小上限（MB），超限返回 413
 
     # ─────────────── 文档解析增强（表格 / 图片 OCR / 图片 VLM）───────────────
-    table_extract: bool = False                 # 提取 PDF/DOCX/HTML 表格为结构化块（解决表格乱序 / 截断 / 列语义丢失）
-    table_to_text_mode: str = "nl"              # 表格序列化: nl(推荐, embedding 更佳) | markdown
+    table_extract: bool = False                 # 提取 PDF/DOCX/HTML 表格为结构化块
+    table_to_text_mode: str = "nl"              # 表格序列化: nl | markdown
     table_max_rows_per_chunk: int = 10          # 表格分块：每块含表头 + 最多 N 行
     image_ocr_enabled: bool = False             # 对 PDF 内嵌 / 扫描图做 OCR，把图中文字抽出入库
-    image_ocr_engine: str = "rapidocr"          # rapidocr(推荐, 免系统依赖) | paddle | tesseract
-    image_vlm_enabled: bool = False             # 对图片 / 图表用 VLM 生成语义描述。描述以文本块入现有向量通道，解决「趋势 / 构图 / 示意图逻辑」等视觉语义不可检索的问题（不改变向量 schema / 模型）。
+    image_ocr_engine: str = "rapidocr"          # rapidocr | paddle | tesseract
+    image_vlm_enabled: bool = False             # 对图片 / 图表用 VLM 生成语义描述。
     image_vlm_provider: str = "deepseek"        # deepseek(官方 v4-flash-vision-exp) | dashscope | openai | ollama
     image_vlm_model: str = "deepseek-v4-flash-vision-exp"  # 视觉模型名
-    image_vlm_base_url: str = ""                # 留空则按 provider 推断（deepseek/dashscope/openai 官方端点）
+    image_vlm_base_url: str = ""                # 留空则按 provider 推断
     image_vlm_api_key: str = ""                 # 留空则按 provider 取各自 *_api_key
     image_vlm_max_size: int = 1280              # 送入 VLM 前最长边缩放到此值（控 token / 成本）
-    image_vlm_detail: str = "low"               # low(缩放512省token) | high | original | auto
+    image_vlm_detail: str = "low"               # 可选 detail：low(省token/低分辨率) | high | original | auto；控制图片处理与成本
 
     # ─────────────── 嵌入 / 分块 微调 ───────────────
     embed_batch_size: int = 32                  # 分批嵌入批次大小（大文档防超时 / 显存峰值）
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     doc_level_dedup: bool = False               # 文档级去重：整篇内容（全部块）与已有文档相同 → 跳过
 
     # ─────────── 图文双通道───────────
-    image_dual_channel: bool = False            # 图片用多模态向量（独立 collection）索引，检索时与文本通道融合。
+    image_dual_channel: bool = False            # 图片用多模态向量索引，检索时与文本通道融合。
     image_embedding_provider: str = "local"     # local(Chinese-CLIP 等) | dashscope/openai 等兼容端点
     image_embedding_model: str = "OFA-Sys/chinese-clip-vit-base-patch16"  # 多模态模型名
     image_embedding_dim: int = 512              # 图像向量维度（与模型投影维对齐）
@@ -174,15 +174,16 @@ class Settings(BaseSettings):
 
     # ──────────────── Human-in-the-Loop（人工确认）────────────────
     hitl_enabled: bool = True                   # 总开关
-    hitl_actions: list[str] = []                # HITL 模式：；默认 [](空) = LLM 自主判定：注册 request_confirmation 工具，由模型根据操作；影响自主决定是否请求用户确认；非空（如 ["mcp"]）= 强制确认：对应动作调用前无条件 interrupt（confirm_before）；；有前端开关的动作（search/rag/remember）开关打开时自动豁免。；注：search=联网搜索 | rag=知识库检索 | mcp=MCP工具 | remember=保存长期记忆
+    hitl_actions: list[str] = []                # HITL 模式：；默认 [](空) = LLM 自主判定；非空（如 ["mcp"]）= 强制确认；有前端开关的动作（search/rag/remember）开关打开时自动豁免；
+                                                # 注：search=联网搜索 | rag=知识库检索 | mcp=MCP工具 | remember=保存长期记忆
 
     # ───────────── 代码 Agent（受限沙箱执行 Python）─────────────
-    code_agent_enabled: bool = True  # 是否启用代码执行 Agent
+    code_agent_enabled: bool = True             # 是否启用代码执行 Agent
     code_exec_timeout: float = 15.0             # 单段代码执行超时（秒），settrace 计时中断
     code_exec_max_output: int = 8000            # stdout/stderr 截断上限（字符）
 
     # ───────────── 可观测性（Langfuse，可选；三个变量都配置才启用）─────────────
-    langfuse_host: str = ""                     # Langfuse 地址（须配 3 个才启用）
+    langfuse_host: str = ""                     # Langfuse 地址
     langfuse_public_key: str = ""               # Langfuse public key
     langfuse_secret_key: str = ""               # Langfuse secret key
 

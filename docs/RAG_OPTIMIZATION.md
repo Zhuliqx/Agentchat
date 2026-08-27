@@ -8,14 +8,14 @@
 
 | # | 优化 | 开关（默认关=不变） | 作用 | 成本 |
 |---|------|-------------------|------|------|
-| 2+3 | **自适应检索**（低置信触发改写 + 放宽候选） | `adaptive_retrieval` | 口语/低召回 query 才走"改写双路 + 放宽 rerank 候选"，正式 query 零额外成本 | 低 |
-| 5 | **检索级意图路由** | `intent_routing` | 按 query 类型（fact/chat/list/compare）调策略：改写开不开、top_k、多子查询 | 低 |
-| 5' | **跨块去重 + 总预算** | `dedup_near_duplicate` / `rag_max_total_chars` | 指纹/语义去重 + 总字符预算，减少喂给 LLM 的冗余 | 低 |
-| 4 | **CI 完整 GT 回归** | ci.yml 一步 | 用 `eval_rag.py` 跑 GT MRR 防退化（非阻塞） | 低 |
-| ② | **图片语义描述（VLM）** | `image_vlm_enabled` | 对图片/图表用视觉大模型生成文本描述入文本通道——图内容（趋势/结构/示意图逻辑）可检索 | 中（每图一次 VLM 推理） |
-| ③ | **图文双通道** | `image_dual_channel` | 图片用多模态向量（独立 collection）索引，检索时与文本通道融合——像素级/“看一眼像”相似召回 | 中（多模态 embedding + 图向量 collection） |
-| C1 | **PDF 提取回退** | 恒启用 | PDF 文本用 `pdfplumber→pymupdf→pypdf` 逐级回退，中文/表格保留更好、控制字符更少 | 低 |
-| C3 | **Markdown 去标题** | `markdown_strip_headers=True`（已默认开） | 标题只存 metadata、不进正文，块更聚焦；实测 MRR 0.963→0.975 | 低 |
+| **自适应检索**（低置信触发改写 + 放宽候选） | `adaptive_retrieval` | 口语/低召回 query 才走"改写双路 + 放宽 rerank 候选"，正式 query 零额外成本 | 低 |
+| **检索级意图路由** | `intent_routing` | 按 query 类型（fact/chat/list/compare）调策略：改写开不开、top_k、多子查询 | 低 |
+| **跨块去重 + 总预算** | `dedup_near_duplicate` / `rag_max_total_chars` | 指纹/语义去重 + 总字符预算，减少喂给 LLM 的冗余 | 低 |
+| **CI 完整 GT 回归** | ci.yml 一步 | 用 `eval_rag.py` 跑 GT MRR 防退化（非阻塞） | 低 |
+| **图片语义描述（VLM）** | `image_vlm_enabled` | 对图片/图表用视觉大模型生成文本描述入文本通道——图内容（趋势/结构/示意图逻辑）可检索 | 中（每图一次 VLM 推理） |
+| **图文双通道** | `image_dual_channel` | 图片用多模态向量（独立 collection）索引，检索时与文本通道融合——像素级/“看一眼像”相似召回 | 中（多模态 embedding + 图向量 collection） |
+| **PDF 提取回退** | 恒启用 | PDF 文本用 `pdfplumber→pymupdf→pypdf` 逐级回退，中文/表格保留更好、控制字符更少 | 低 |
+| **Markdown 去标题** | `markdown_strip_headers=True`（已默认开） | 标题只存 metadata、不进正文，块更聚焦；实测 MRR 0.963→0.975 | 低 |
 
 ---
 
@@ -31,22 +31,22 @@ dedup_near_duplicate: bool = False # 跨块/跨源 指纹+语义 去重（默认
 dedup_sim_threshold: float = 0.90
 rag_max_total_chars: int = 0       # 0=不限制；>0 按分数降序累计截断，防超长 context
 
-# ---- 图片语义描述（VLM；②）----
+# ---- 图片语义描述（VLM）----
 image_vlm_enabled: bool = False
 image_vlm_provider: str = "deepseek"     # deepseek | dashscope | openai | ollama
 image_vlm_model: str = "deepseek-v4-flash-vision-exp"
 image_vlm_max_size: int = 1280           # 送入 VLM 前最长边缩放到此值
 image_vlm_detail: str = "low"            # low | high | original | auto
-# ---- 图文双通道（③）----
+# ---- 图文双通道----
 image_dual_channel: bool = False         # 需下载多模态模型（见 SETUP）
 image_embedding_provider: str = "local"
 image_embedding_model: str = "OFA-Sys/chinese-clip-vit-base-patch16"
 image_embedding_dim: int = 512
 image_channel_top_k: int = 6
 image_channel_weight: float = 0.4
-# ---- 解析增强（C1 / C3）----
-markdown_strip_headers: bool = True      # C3：Markdown 去标题（默认开）
-# C1：PDF 文本提取使用 pdfplumber→pymupdf→pypdf 逐级回退
+# ---- 解析增强----
+markdown_strip_headers: bool = True      # Markdown 去标题（默认开）
+# PDF 文本提取使用 pdfplumber→pymupdf→pypdf 逐级回退
 ```
 
 > 全部**默认关**，现有检索行为零变化；评估通过后再按数据决定开启哪项。
@@ -122,10 +122,10 @@ markdown_strip_headers: bool = True      # C3：Markdown 去标题（默认开�
 
 | 档 | 开关 | MRR | Hit@1 | 结论 |
 |----|------|-----|-------|------|
-| ② 图片语义 off → on | `IMAGE_VLM_ENABLED` false→true | 0.000 → **1.000** | 0.000 → **1.000** | 图内容从“完全不可检索”→ 全命中 |
-| ③ 图文双通道 off → on | `IMAGE_DUAL_CHANNEL` false→true | 0.000 → **0.750** | 0.000 → **0.667** (Hit@5=1.0) | 纯图文档由图向量召回；图像保底防弱 caption 剔除 |
-| C3 strip_headers 关→开 | `MARKDOWN_STRIP_HEADERS` false→true | 0.963 → **0.975** | 0.925 → **0.950** | 已默认开 |
-| C2 chunk_size | 500 / 800 / 1200 | 0.963 | 0.925 | 来源级饱和，三者持平；保持 800 |
+| 图片语义 off → on | `IMAGE_VLM_ENABLED` false→true | 0.000 → **1.000** | 0.000 → **1.000** | 图内容从“完全不可检索”→ 全命中 |
+| 图文双通道 off → on | `IMAGE_DUAL_CHANNEL` false→true | 0.000 → **0.750** | 0.000 → **0.667** (Hit@5=1.0) | 纯图文档由图向量召回；图像保底防弱 caption 剔除 |
+| strip_headers 关→开 | `MARKDOWN_STRIP_HEADERS` false→true | 0.963 → **0.975** | 0.925 → **0.950** | 已默认开 |
+| chunk_size | 500 / 800 / 1200 | 0.963 | 0.925 | 来源级饱和，三者持平；保持 800 |
 
 **口语集 `ground_truth_spoken.json`（8 条，改写目标场景）**
 
@@ -150,3 +150,36 @@ $env:INTENT_ROUTING="true";     .\venv\Scripts\python.exe scripts/eval_rag.py --
 $env:DEDUP_NEAR_DUPLICATE="true"; $env:RAG_MAX_TOTAL_CHARS="3000"; .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
 ```
 生成结果存 `data/eval/rag_eval_*.json`（评估+时间戳）。
+
+---
+
+## 7. 补充 A/B（2026-08-27：检索级饱和确认 + 图片图片语义描述与图文双通道融合实测）
+
+> 在既有 40 书面 + 8 口语 + 10 难例(q31-q40) 上，**来源级检索已完全饱和**（Hit@3/Hit@5≈100%），
+> 因此任何"检索级 MRR/Hit"调参均无区分度。真正能区分的是**内容级/图片命中**。
+
+### 7.1 检索级三档：零差异（维持默认）
+
+| 变量 | 取值(书面集) | 结果 | 结论 |
+|------|------------|------|------|
+| `bm25_use_jieba` | off / on | 0.975 / 0.950 持平 | 默认关 |
+| `rag_max_per_doc` | 2 / 3 / 4 | 全 0.975 / 0.950 | 维持 3 |
+| `rag_score_threshold` | 0.25 / 0.35 / 0.45 | 全 0.975 / 0.950 | 维持 0.35 |
+
+- 口语集 off/on jieba、max_per_doc、threshold 均持平（口语集 1.000）。
+- **难例子集 `ground_truth_hard.json`（q31-q40，10 条）**：off / adaptive / intent / dedup 均 **1.000**——连"难例"来源级也 rank1 命中。
+
+> 结论：当前小知识库来源级检索饱和，检索级参数无法由 MRR 区分；继续维持默认，不做无依据改动。
+
+### 7.2 图片 图片语义描述与图文双通道 融合实测（含图 GT `img_ground_truth.json`，4 条纯图问答）
+
+| 配置 | MRR | Hit@1 | Hit@3 | Hit@5 | 说明 |
+|------|-----|-------|-------|-------|------|
+| 图文双通道（无图片语义描述） | 0.750 | 0.750 | 0.750 | 0.750 | 图向量+保底；"走势"类(img03)靠图向量弱 |
+| 图片语义描述+图文双通道（VLM 描述 + 图向量） | 0.583 | 0.250 | **1.000** | **1.000** | 召回满(救回 img03)，但首名被 VLM 块占用 |
+| **图片语义描述+图文双通道 + guard 排序调和** | **1.000** | **1.000** | **1.000** | **1.000** | 图片强制前置 + 移除同位置 VLM 块 → 全 rank1 |
+
+- **VLM 用法**：`deepseek-v4-flash-vision-exp` 官方支持图像输入；OpenAI 兼容 Chat Completions，`image_url` **支持可选 `detail`**(low/high/original/auto)。
+
+### 7.3 决策
+- 图片能力推荐 **图片语义描述+图文双通道 同时开启 + guard 排序调和**（`image_dual_channel` + `image_vlm_enabled` 均显式开启，见 SETUP）：当前含图 GT 达 **1.000**，优于仅图文双通道（0.750）。

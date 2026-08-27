@@ -73,26 +73,37 @@ def _encode_image(img) -> str:
 
 
 def describe_image(img, max_size: int | None = None, detail: str | None = None) -> str:
-    """用 VLM 描述一张图片。任何失败/未配置 → 返回 ""（安全降级）。"""
-    try:
-        client = _client()
-        max_size = int(max_size if max_size is not None else settings.image_vlm_max_size)
-        detail = detail or settings.image_vlm_detail
-        img = _resize(img, max_size)
-        content: list[dict[str, Any]] = [
-            {"type": "text", "text": _PROMPT},
-            {"type": "image_url", "image_url": {"url": _encode_image(img), "detail": detail}},
-        ]
-        resp = client.chat.completions.create(
-            model=settings.image_vlm_model,
-            messages=[{"role": "user", "content": content}],
-            max_tokens=_MAX_TOKENS,
-            temperature=0.0,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        return "" if text in ("空", "图片为空") else text
-    except Exception:
-        return ""
+    """用 VLM 描述一张图片。任何失败/未配置 → 返回 ""（安全降级）。
+
+    DeepSeek 等视觉端点对同一请求**偶发返回空 content**（不抛异常），故对"
+    空响应"做有限重试兜底，才保证描述稳定可拿到。
+    """
+    last_text = ""
+    for _ in range(3):
+        try:
+            client = _client()
+            max_size = int(max_size if max_size is not None else settings.image_vlm_max_size)
+            detail = detail or settings.image_vlm_detail
+            img = _resize(img, max_size)
+            image_url: dict[str, Any] = {"url": _encode_image(img)}
+            if detail:  # 部分兼容端点（如 DeepSeek）不接受 OpenAI 特有 detail 字段，为空则省略
+                image_url["detail"] = detail
+            content: list[dict[str, Any]] = [
+                {"type": "text", "text": _PROMPT},
+                {"type": "image_url", "image_url": image_url},
+            ]
+            resp = client.chat.completions.create(
+                model=settings.image_vlm_model,
+                messages=[{"role": "user", "content": content}],
+                temperature=0.0,
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            if text and text not in ("空", "图片为空"):
+                return text
+            last_text = text
+        except Exception:
+            continue
+    return last_text
 
 
 def describe_images(images, max_size: int | None = None, detail: str | None = None) -> list[str]:

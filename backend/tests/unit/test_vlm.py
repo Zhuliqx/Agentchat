@@ -40,7 +40,7 @@ class _FakeClient:
 
 
 def test_describe_image_ok(monkeypatch):
-    # VLM 成功 → 返回描述文案，且消息按 OpenAI 兼容 + detail 传图
+    # VLM 成功 → 返回描述文案；消息按 OpenAI 兼容结构，image_url 支持可选 detail 字段（默认 low）
     fake = _FakeClient("这是一张公司组织架构图")
     monkeypatch.setattr(vlm, "_client", lambda: fake)
     monkeypatch.setattr(vlm, "_resize", lambda img, ms: img)
@@ -55,7 +55,7 @@ def test_describe_image_ok(monkeypatch):
     assert blocks[0]["type"] == "text"
     assert blocks[1]["type"] == "image_url"
     assert "url" in blocks[1]["image_url"]
-    assert "detail" in blocks[1]["image_url"]
+    assert "detail" in blocks[1]["image_url"]  # detail 可选（low/high/original/auto），默认 low
 
 
 def test_describe_image_blank_returns_empty(monkeypatch):
