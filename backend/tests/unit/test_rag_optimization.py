@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from app.rag.retriever import (
+from app.rag.postprocess import (
     _apply_total_budget,
     _cosine,
     _dedupe_near_duplicate,

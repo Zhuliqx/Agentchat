@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 from app.agents.context import UserContext
 from app.agents.llm import get_llm
 from app.agents.middleware import resilience_middleware
+from app.agents.prompts import build_supervisor_prompt
+from app.agents.streaming import _PreludeDedupe
 from app.agents.tools import (
     agent_to_tool,
     build_code_agent,
@@ -50,163 +52,6 @@ from app.db.memory_store import get_checkpointer, get_store
 
 class AgentTimeoutError(Exception):
     """单轮对话执行超时。"""
-
-
-class _PreludeDedupe:
-    """流式去重：跳过与"已推送开场白"匹配的前缀。
-
-    工具调用后，LLM 常把开场白连同最终答案一起重新生成（完整重复一遍）。
-    由于流式输出按小分块到达（首个分块往往只是开场白的一小段前缀），
-    不能直接 `text.startswith(整段开场白)` 判断（首个分块永远不等于整段开场白，
-    导致去重失败、完整重复）。这里按字符逐块前缀匹配：
-
-    - 分块完全属于开场白前缀 → 丢弃（开场白已推送过）；
-    - 一旦出现分歧 → 只推送分歧后的部分，之后不再去重；
-    - 完全没重复 → 首个字符即分歧，原样推送（无额外延迟）。
-    """
-
-    __slots__ = ("expected", "matched")
-
-    def __init__(self, expected: str):
-        self.expected = expected or ""
-        self.matched = 0
-
-    @property
-    def active(self) -> bool:
-        return self.matched < len(self.expected)
-
-    def feed(self, text: str) -> str:
-        """输入一个 token 分块，返回应推送的文本（可能为空串）。"""
-        if self.matched >= len(self.expected):
-            return text
-        i, j = self.matched, 0
-        n = len(text)
-        while j < n and i < len(self.expected) and text[j] == self.expected[i]:
-            j += 1
-            i += 1
-        self.matched = i
-        if j < n:
-            self.matched = len(self.expected)  # 出现分歧：之后直接推送
-            return text[j:]
-        return ""
-
-
-def _build_supervisor_prompt(
-    use_rag: bool = True, use_search: bool = True, use_memory: bool = True
-) -> str:
-    """按开关动态生成 supervisor 提示词。
-
-    关闭知识库/搜索/记忆时，对应工具不会注册进图；提示词也必须**同步移除**对应
-    描述并明确禁止，否则 LLM 会幻觉调用不存在的工具（生成 name=rag_agent 的
-    工具消息，事件流误报"工具: rag_agent"，且回答谎称"查了知识库"）。
-    """
-    tool_lines = []
-    if use_rag:
-        tool_lines.append(
-            "- rag_agent：知识库问答。当问题涉及已摄入的文档/资料/公司信息/产品信息时使用。"
-        )
-    tool_lines.append(
-        "- mcp_agent：数据库查询、时间计算等 MCP 工具。当问题需要查数据库或调用外部工具时使用。"
-    )
-    if settings.code_agent_enabled:
-        tool_lines.append(
-            "- code_agent：执行 Python 代码并返回结果。**仅当需要真正运行代码**（算法验证/数学计算/数据处理脚本）时使用；数据库/统计/时间查询直接用 mcp_agent 的结果，不要用 code_agent 重复处理。"
-        )
-    if use_search:
-        tool_lines.append(
-            "- web_search：直接联网搜索最新网络信息（Tavily）。当问题需要实时/最新资讯时使用；"
-            "调用时传入提炼好的 1-3 个搜索关键词。"
-        )
-    if use_memory:
-        tool_lines.append(
-            "- remember_memory：把用户透露的重要信息/偏好保存到长期记忆（跨会话有效）。"
-        )
-        tool_lines.append(
-            "- recall_memory：读取该用户的长期记忆（背景、偏好、历史信息）。"
-        )
-    if settings.hitl_enabled and not settings.hitl_actions:
-        tool_lines.append(
-            "- request_confirmation：请求用户确认/授权。**仅当操作没有对应开关且风险较高**"
-            "（数据库写入、外部 MCP 调用、不可逆操作等），或用户明确要求确认时，调用本工具"
-            "征得用户同意；用户已开启开关的能力（联网/知识库/记忆）无需调用。"
-        )
-
-    rules = []
-    rn = 1
-    if use_rag:
-        rules.append(
-            f"{rn}. 知识库问题（文档、资料、公司介绍、产品信息等）**必须**调用 rag_agent，"
-            "绝不要用 mcp_agent 去查数据库代替。"
-        )
-    else:
-        rules.append(
-            f"{rn}. **知识库检索已关闭**：禁止调用 rag_agent，也不要声称查询/引用了知识库内容，"
-            "不要编造文档/资料信息。"
-        )
-    rn += 1
-    rules.append(f"{rn}. 数据库查询/统计/时间/简单计算 -> 调用 mcp_agent，其返回结果直接可用，禁止再调 code_agent。")
-    rn += 1
-    if settings.code_agent_enabled:
-        rules.append(
-            f"{rn}. 需要真正运行 Python 代码（算法验证/数学计算/数据处理脚本）-> 调用 code_agent；数据库查询/统计/时间直接用 mcp_agent 结果，无需 code_agent 再次处理。"
-        )
-        rn += 1
-    if use_search:
-        rules.append(f"{rn}. 需要实时资讯/最新信息/新闻 -> 调用 web_search。")
-        rn += 1
-    else:
-        rules.append(
-            f"{rn}. **联网搜索已关闭**：禁止调用 web_search，也不要声称\"联网搜索\""
-            "或\"获取了最新资讯\"；不要编造实时新闻/信息，直接说明当前无法联网获取最新资讯。"
-        )
-        rn += 1
-    if use_memory:
-        rules.append(
-            f"{rn}. 用户提供个人信息、偏好，或说\"记住/我叫/我的名字/我喜欢\"时，"
-            "**必须调用 remember_memory 工具真正保存**，绝不能只在回答中口头说\"记住了\"而不调用工具。"
-        )
-        rn += 1
-        rules.append(
-            f"{rn}. 回答涉及用户背景/偏好，或想了解用户历史信息时 -> 先调用 recall_memory。"
-        )
-        rn += 1
-    else:
-        rules.append(
-            f"{rn}. **长期记忆已关闭**：不要声称已保存/记住了用户信息，也不要调用记忆相关工具。"
-        )
-        rn += 1
-    rules.append(f"{rn}. 多个都相关 -> 依次调用。")
-    rn += 1
-    rules.append(f"{rn}. 简单寒暄或无需工具 -> 直接回答。")
-    rn += 1
-    if settings.hitl_enabled and settings.hitl_actions:
-        # 强制确认模式（confirm_before）：由系统在调用前强制确认，无需软性工具
-        rules.append(f"{rn}. 最终必须给用户一个完整、友好的中文回答。")
-    elif settings.hitl_enabled:
-        # LLM 自主判定模式：像 Claude Code/Codex 一样，由模型判断何时需要请求用户授权。
-        # 关键约束：用户已开启的开关=已授权，对应的能力绝不能再请求确认。
-        rules.append(
-            f"{rn}. **开关即授权**：用户已开启的开关（联网/知识库/记忆）表示已授权对应能力——"
-            "联网搜索（web_search）、知识库检索（rag_agent）、记忆读写直接执行，"
-            "**绝不要**为这些已授权的能力请求确认。"
-        )
-        rn += 1
-        rules.append(
-            f"{rn}. request_confirmation **仅**用于没有开关控制的高风险/外部操作"
-            "（数据库写入、外部 MCP 调用、不可逆操作等），或用户明确要求确认时，"
-            "才调用它征得用户同意；低风险只读操作（只读查询等）直接执行。"
-        )
-        rn += 1
-        rules.append(f"{rn}. 最终必须给用户一个完整、友好的中文回答。")
-    else:
-        rules.append(f"{rn}. 最终必须给用户一个完整、友好的中文回答。")
-
-    return (
-        "你是一个多 Agent 平台的主管协调者，负责调度下面的专业 Agent 工具：\n\n"
-        + "\n".join(tool_lines)
-        + "\n\n决策规则：\n"
-        + "\n".join(rules)
-    )
 
 
 # 参与 used_agents 统计的 Agent 工具名（web_search 为直接工具；code_agent 有意不统计）
@@ -320,7 +165,7 @@ def get_supervisor_graph(
     graph = create_agent(
         get_llm(),
         tools=tools,
-        system_prompt=_build_supervisor_prompt(use_rag, use_search, use_memory),
+        system_prompt=build_supervisor_prompt(use_rag, use_search, use_memory),
         checkpointer=get_checkpointer(),
         store=get_store(),
         context_schema=UserContext,
@@ -511,7 +356,7 @@ async def run_agent(
         result = await graph.ainvoke(
             input_data,
             config=config,
-            context=UserContext(user_id=user_id or "default"),
+            context=UserContext(user_id=user_id or "default", session_id=session_id or ""),
         )
     msgs = result["messages"]
 
@@ -623,7 +468,7 @@ async def stream_agent(
         async for mode, data in graph.astream(
             input_data,
             config=config,
-            context=UserContext(user_id=user_id or "default"),
+            context=UserContext(user_id=user_id or "default", session_id=session_id or ""),
             stream_mode=["updates", "messages"],
         ):
             if mode == "updates":

@@ -51,8 +51,6 @@ def _client():
 
 def _resize(img, max_size: int):
     """等比缩放到最长边 ≤ max_size；保持 RGB，返回副本。"""
-    from PIL import Image
-
     if img.mode != "RGB":
         img = img.convert("RGB")
     if max_size and max(img.size) > max_size:

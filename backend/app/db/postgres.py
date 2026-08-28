@@ -75,6 +75,26 @@ def init_db() -> None:
                 "ON documents (content_hash)"
             )
         )
+        # 迁移：向量同步状态（Postgres 事实源 → Milvus 派生索引的对账标记）。
+        # 存量行默认 synced（假定旧数据已入库），新摄入显式置 pending。
+        conn.execute(
+            _text(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
+                "vector_status VARCHAR(16) NOT NULL DEFAULT 'synced'"
+            )
+        )
+        conn.execute(
+            _text(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
+                "vector_synced_at TIMESTAMPTZ"
+            )
+        )
+        conn.execute(
+            _text(
+                "CREATE INDEX IF NOT EXISTS ix_documents_vector_status "
+                "ON documents (vector_status)"
+            )
+        )
         # 迁移：旧版 messages 表无 sources 列 → 补列（引用溯源，JSON 数组）
         conn.execute(
             _text(
@@ -322,6 +342,23 @@ def get_messages(session_id: str, limit: int = 50) -> list[Message]:
             .limit(limit)
         )
         return list(db.scalars(stmt))
+
+
+def get_recent_messages(session_id: str, limit: int = 50) -> list[Message]:
+    """读取某会话**最近** limit 条消息（按时间正序返回）。
+
+    与 get_messages 的差异：get_messages 取的是「最早 limit 条」（历史展示
+    场景按时间正序翻页），这里取**最新** limit 条再倒序回正——检索上文/
+    多轮上下文（RAG_MULTI_TURN_CONTEXT）需要最近几轮，不能用最早几条。
+    """
+    with SessionLocal() as db:
+        stmt = (
+            select(Message)
+            .where(Message.session_id == session_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        return list(reversed(db.scalars(stmt).all()))
 
 
 # ---------------- 定时任务管理 ----------------

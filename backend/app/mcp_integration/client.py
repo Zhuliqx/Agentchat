@@ -56,7 +56,7 @@ class McpClientManager:
                 await self._start_stdio(name, cmd, args)
             except Exception as exc:
                 logger.warning("自建 MCP '%s' 启动失败: %s", name, exc)
-        for name, url in settings.external_mcp_dict.items():
+        for name, url in settings.external_mcp_servers.items():
             try:
                 await self._start_http(name, url)
             except Exception as exc:

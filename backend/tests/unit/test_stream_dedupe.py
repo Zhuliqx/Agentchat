@@ -4,7 +4,7 @@
 （重复开场白）。流式输出按小分块到达，验证去重在各种切割下都成立。
 """
 
-from app.agents.graph import _PreludeDedupe
+from app.agents.streaming import _PreludeDedupe
 
 
 def test_exact_repeat_small_chunks():

@@ -14,17 +14,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-# ---- 依赖可用性检查：Postgres 不可达则跳过整个模块 ----
-try:
-    from sqlalchemy import text
+from helpers import db_available
 
-    from app.db.postgres import engine
-
-    with engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
-    _DB_OK = True
-except Exception:
-    _DB_OK = False
+# ---- 依赖可用性检查：Postgres/Milvus 不可达则跳过整个模块 ----
+_DB_OK = db_available()
 
 pytestmark = pytest.mark.skipif(
     not _DB_OK,

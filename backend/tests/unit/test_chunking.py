@@ -1,7 +1,7 @@
 """文档分块单元测试（含 Markdown 标题分块）。"""
 from __future__ import annotations
 
-from app.rag.ingestion import split_text
+from app.rag.chunkers import split_text
 
 
 def test_markdown_split_keeps_heading_metadata():

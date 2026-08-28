@@ -31,7 +31,7 @@ def test_dashscope_default_model(monkeypatch):
 
 
 def test_chunk_hash_deterministic():
-    from app.rag.ingestion import _chunk_hash
+    from app.rag.chunkers import _chunk_hash
 
     assert _chunk_hash("abc") == _chunk_hash("abc")
     assert _chunk_hash("abc") != _chunk_hash("abd")

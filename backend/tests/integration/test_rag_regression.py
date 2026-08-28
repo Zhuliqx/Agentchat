@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from helpers import db_available, wait_milvus_visible
+
 BACKEND = Path(__file__).resolve().parent.parent.parent
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
@@ -39,24 +41,8 @@ MIN_HIT_RATE = 0.85
 TOP_K = 3
 
 
-def _db_available() -> bool:
-    """检查 Postgres 与 Milvus 是否可达（不可达则跳过本测试）。"""
-    try:
-        from app.db.postgres import SessionLocal
-        from app.rag.vector_store import _client
-
-        with SessionLocal() as db:
-            from sqlalchemy import text
-
-            db.execute(text("SELECT 1"))
-        _client().list_collections()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
-
-
 pytestmark = pytest.mark.skipif(
-    not _db_available(), reason="Postgres/Milvus 不可用（需 Docker 依赖）"
+    not db_available(), reason="Postgres/Milvus 不可用（需 Docker 依赖）"
 )
 
 
@@ -76,6 +62,7 @@ def test_retrieval_hit_rate_regression() -> None:
     from app.rag import hybrid
 
     _ingest_once()
+    wait_milvus_visible(str(KB_DOC.resolve()))
     hit = 0
     details: list[str] = []
     for q, kws in CASES:

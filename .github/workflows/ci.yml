@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 3 * * *"  # 每天 03:17 UTC 全量回归（含 LLM-judge 质量评估）
 
 jobs:
   lint-and-test:
@@ -64,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # CI 中关闭 rerank（避免下载 ~1.1GB 模型），只验证混合检索召回
-      RAG_RERANK_ENABLED: "false"
+      RERANK_ENABLED: "false"
       # 允许从 HF 下载 bge-small-zh-v1.5（~100MB，首次拉取）
       HF_OFFLINE: "false"
     steps:
@@ -116,4 +118,59 @@ jobs:
           # v2 覆盖当前设计：图片/图文双通道、表格/多栏、文档级去重、口语改写。
           python -c "from app.evaluation.dataset import load_ground_truth; cs=load_ground_truth('tests/fixtures/rag_ground_truth.v2.json'); ims=[c for c in cs if c.expected_images]; print('v2 cases:', len(cs), 'with-image:', len(ims)); assert len(cs)==8 and ims"
           python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.v2.json
+
+  # 端到端质量评估（LLM-judge 四指标，需 DEEPSEEK_API_KEY）：
+  # 补 §15.2 自述的"四指标无自动化闭环"差距。push + nightly 运行，
+  # continue-on-error 不阻塞主 CI；--max-cases 限缩 LLM 成本。
+  rag-quality:
+    name: RAG Quality (LLM-judge)
+    runs-on: ubuntu-latest
+    env:
+      RERANK_ENABLED: "false"
+      HF_OFFLINE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: "Install dependencies"
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: "Start Postgres + Milvus"
+        run: docker compose up -d postgres etcd minio standalone
+
+      - name: "Wait for Milvus healthy"
+        run: |
+          for i in $(seq 1 90); do
+            if docker compose ps --status running --format '{{.Service}} {{.Health}}' | grep -q 'standalone healthy'; then
+              echo "Milvus healthy"; break
+            fi
+            sleep 5
+          done
+          docker compose ps
+
+      - name: "Init DB + ingest fixture"
+        working-directory: backend
+        run: |
+          python scripts/init_db.py
+          python -c "from pathlib import Path; from app.rag.ingestion import ingest_file; print(ingest_file(Path('tests/fixtures/kb_ci.txt'), user_id='default'))"
+
+      - name: "Quality eval (LLM-judge, max 10 cases, non-blocking)"
+        if: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+        continue-on-error: true
+        working-directory: backend
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python scripts/eval_quality.py --dataset tests/fixtures/rag_ground_truth.example.json --max-cases 10 --out data/eval/ci_quality.json --report
+
+      - name: "Upload quality report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-quality-report
+          path: backend/data/eval/ci_quality*
 

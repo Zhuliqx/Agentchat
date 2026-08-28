@@ -15,21 +15,10 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from helpers import FakeLLM, patch_llms
-
-try:
-    from sqlalchemy import text
-
-    from app.db.postgres import engine
-
-    with engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
-    _DB_OK = True
-except Exception:
-    _DB_OK = False
+from helpers import FakeLLM, patch_llms, postgres_available
 
 pytestmark = pytest.mark.skipif(
-    not _DB_OK,
+    not postgres_available(),
     reason="需要运行中的 Postgres/Milvus（请先启动 Docker 服务）",
 )
 

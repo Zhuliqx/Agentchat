@@ -1,12 +1,7 @@
 """Milvus 向量库封装（MilvusClient 新 API，单例连接）。
 
-职责：
-- 确保 collection 存在（自动创建 schema + 向量/标量索引）
-- 插入 / 删除向量
-- 相似度检索
-
-基于 MilvusClient 一套 API 实现（避免 3.0 弃用的 Collection/connections，
-且全局单例连接，消除每次调用新建客户端的资源泄漏）。
+基于 MilvusClient 一套 API（避免 3.0 弃用的 Collection/connections），
+全局单例连接，消除每次调用新建客户端的资源泄漏。
 """
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ from typing import Any, Optional, cast
 from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
 
 from app.config import settings
-from app.rag.embedding import get_embedder
+from app.rag.embedding import embed_query_cached, get_embedder
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +63,7 @@ def _ensure_indexes(client: MilvusClient, name: str) -> None:
     """确保向量索引 + 标量索引存在（缺失则创建，幂等）。
 
     - embedding：IVF_FLAT / IP（相似度检索）
-    - source：Trie 标量索引（加速 delete_by_source / 过滤，数据量大时尤其重要）
-    - user_id：Trie 标量索引（加速按用户隔离的检索过滤）
+    - source / user_id：Trie 标量索引（加速按来源/用户的过滤与删除）
     """
     if not _has_index(client, name, "embedding"):
         ip = client.prepare_index_params()
@@ -81,22 +75,11 @@ def _ensure_indexes(client: MilvusClient, name: str) -> None:
             index_name="embedding_idx",
         )
         client.create_index(name, ip)
-    if not _has_index(client, name, "source"):
-        ip = client.prepare_index_params()
-        ip.add_index(
-            field_name="source",
-            index_type="Trie",
-            index_name="source_idx",
-        )
-        client.create_index(name, ip)
-    if not _has_index(client, name, "user_id"):
-        ip = client.prepare_index_params()
-        ip.add_index(
-            field_name="user_id",
-            index_type="Trie",
-            index_name="user_idx",
-        )
-        client.create_index(name, ip)
+    for field in ("source", "user_id"):
+        if not _has_index(client, name, field):
+            ip = client.prepare_index_params()
+            ip.add_index(field_name=field, index_type="Trie", index_name=f"{field}_idx")
+            client.create_index(name, ip)
 
 
 def _validate_embedding_dim(client: MilvusClient, name: str) -> None:
@@ -140,17 +123,23 @@ def add_chunks(
     source: str,
     user_id: str = "default",
     vectors: Optional[list[list[float]]] = None,
+    chunk_indexes: Optional[list[int]] = None,
 ) -> list[str]:
     """批量插入文档块。
 
     chunks: [{"text": "...", "metadata": {...}}]
     doc_ids: 与 chunks 等长，每个 chunk 对应的 Postgres Document.id
-    user_id: 知识库归属用户（按用户隔离）
-    vectors: 可选，预计算的嵌入向量（调用方已嵌入时传入，避免重复计算）
+    vectors: 可选，预计算嵌入向量（已嵌入时传入，避免重复计算）
+    chunk_indexes: 可选，与 chunks 等长的原始块序号，缺省用批内位置；
+        增量摄入必须传原始序号，保证向量通道与 Postgres（BM25 通道）的
+        ``chunk_index`` 一致——融合键 ``doc_id:chunk_index`` 失配会破坏
+        交集加分与相邻块合并。
     返回插入的向量主键 id 列表。
     """
     if len(doc_ids) != len(chunks):
         raise ValueError("doc_ids 与 chunks 长度不一致")
+    if chunk_indexes is not None and len(chunk_indexes) != len(chunks):
+        raise ValueError("chunk_indexes 与 chunks 长度不一致")
 
     if vectors is None:
         embedder = get_embedder()
@@ -164,7 +153,7 @@ def add_chunks(
                 "doc_id": doc_ids[i],
                 "user_id": user_id,
                 "source": source,
-                "chunk_index": i,
+                "chunk_index": chunk_indexes[i] if chunk_indexes is not None else i,
                 "text": chunk["text"],
                 "metadata_json": json.dumps(chunk.get("metadata") or {}, ensure_ascii=False),
                 "embedding": vec,
@@ -173,6 +162,33 @@ def add_chunks(
 
     _client().insert(settings.milvus_collection, rows)
     return [r["id"] for r in rows]
+
+
+def sync_chunks(
+    chunks: list[dict[str, Any]],
+    *,
+    doc_ids: list[str],
+    source: str,
+    user_id: str = "default",
+    vectors: Optional[list[list[float]]] = None,
+    chunk_indexes: Optional[list[int]] = None,
+) -> list[str]:
+    """幂等同步一批块：先按 doc_id 删除旧行，再插入（等于按 doc_id 的 upsert）。
+
+    对账任务 / 重试场景复用：同一批 doc_id 重复执行不会产生重复向量或幽灵残留
+    （Milvus 主键 id 是独立 uuid4，靠 doc_id 过滤保证幂等）。
+    """
+    if not doc_ids:
+        return []
+    delete_by_ids(doc_ids)
+    return add_chunks(
+        chunks,
+        doc_ids=doc_ids,
+        source=source,
+        user_id=user_id,
+        vectors=vectors,
+        chunk_indexes=chunk_indexes,
+    )
 
 
 def delete_by_source(source: str, user_id: str | None = None) -> None:
@@ -190,11 +206,36 @@ def delete_by_source(source: str, user_id: str | None = None) -> None:
 
 
 def delete_by_ids(ids: list[str]) -> None:
-    """按主键批量删除向量（增量摄入时清理已消失的块）。"""
+    """按 Postgres 文档 id（Milvus 的 doc_id 字段）批量删除向量。
+
+    增量摄入时清理已消失的块：Milvus 行的主键 ``id`` 是独立的 uuid4，
+    与 Postgres ``documents.id`` 的对应关系在 ``doc_id`` 字段——必须按
+    ``doc_id`` 过滤，否则过滤条件永远匹配不到行（幽灵向量残留）。
+    """
     if not ids:
         return
     quoted = ", ".join(f'"{i}"' for i in ids)
-    _client().delete(settings.milvus_collection, filter=f"id in [{quoted}]")
+    _client().delete(settings.milvus_collection, filter=f"doc_id in [{quoted}]")
+
+
+def query_source_pairs(
+    source: str, user_id: str | None = None
+) -> list[tuple[str, int]]:
+    """查询某 source（可限定用户）在 Milvus 中的 (doc_id, chunk_index) 集合。
+
+    供对账任务与集成测试使用：与 Postgres documents 行做双向 diff。
+    """
+    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
+    expr = f'source == "{escaped}"'
+    uf = user_filter_expr(user_id)
+    if uf:
+        expr += f" and {uf}"
+    res = _client().query(
+        settings.milvus_collection,
+        filter=expr,
+        output_fields=["doc_id", "chunk_index"],
+    )
+    return [(r.get("doc_id"), int(r.get("chunk_index"))) for r in res]
 
 
 def search(
@@ -204,8 +245,7 @@ def search(
     filter_expr: str | None = None,
 ) -> list[dict[str, Any]]:
     """语义检索，返回排序后的命中文档块。"""
-    embedder = get_embedder()
-    query_vec = embedder.embed_query(query)
+    query_vec = list(embed_query_cached(query))
 
     top_k = top_k or settings.rag_top_k
     score_threshold = score_threshold if score_threshold is not None else settings.rag_score_threshold
@@ -215,7 +255,7 @@ def search(
         data=[query_vec],
         anns_field="embedding",
         search_params={"metric_type": settings.milvus_metric_type, "params": {"nprobe": 16}},
-        limit=top_k * 3,  # 先取多些，再按阈值过滤
+        limit=max(top_k * 4, 32),  # 先取多些，再按阈值过滤（避免过滤后不足 top_k）
         output_fields=["id", "doc_id", "source", "chunk_index", "text", "metadata_json"],
         filter=filter_expr or "",
     )
@@ -243,6 +283,11 @@ def search(
                 "metadata": meta,
                 "score": round(float(hit["distance"]), 4),
             }
+        )
+    if len(hits) < top_k:
+        logger.debug(
+            "向量通道阈值过滤后不足 top_k: raw=%s kept=%s top_k=%s threshold=%s",
+            len(results[0]) if results else 0, len(hits), top_k, score_threshold,
         )
     return hits[:top_k]
 
@@ -284,33 +329,17 @@ def _build_image_schema() -> CollectionSchema:
     return CollectionSchema(fields=fields, description="图文双通道图像向量", enable_dynamic_field=False)
 
 
-def _ensure_image_indexes(client: MilvusClient, name: str) -> None:
-    if not _has_index(client, name, "embedding"):
-        ip = client.prepare_index_params()
-        ip.add_index(
-            field_name="embedding", index_type="IVF_FLAT",
-            metric_type=settings.milvus_metric_type, params={"nlist": 128},
-            index_name="embedding_idx",
-        )
-        client.create_index(name, ip)
-    for field in ("source", "user_id"):
-        if not _has_index(client, name, field):
-            ip = client.prepare_index_params()
-            ip.add_index(field_name=field, index_type="Trie", index_name=f"{field}_idx")
-            client.create_index(name, ip)
-
-
 def ensure_image_collection() -> str:
     """确保图片 collection 存在（幂等）。失败抛异常（上层降级为禁用图像通道）。"""
     client = _client()
     name = IMAGE_COLLECTION
     if not client.has_collection(name):
         client.create_collection(name, schema=_build_image_schema())
-        _ensure_image_indexes(client, name)
+        _ensure_indexes(client, name)
         client.load_collection(name)
         logger.info("image collection '%s' 已创建", name)
     else:
-        _ensure_image_indexes(client, name)
+        _ensure_indexes(client, name)
         try:
             client.load_collection(name)
         except Exception:

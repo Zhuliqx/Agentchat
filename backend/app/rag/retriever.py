@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Optional
 
 from langchain_core.documents import Document as LCDocument
@@ -15,19 +14,14 @@ from pydantic import PrivateAttr
 
 from app.config import settings
 from app.rag import hybrid, vector_store
+from app.rag.postprocess import (
+    _apply_total_budget,
+    _best_score,
+    _dedupe_and_merge,
+    _dedupe_near_duplicate,
+    _merge_multi,
+)
 from app.rag.rerank import rerank
-
-
-def _hit_key(h: dict) -> float:
-    """命中的排序分数（rerank > rrf > 向量 > bm25，取可用项）。"""
-    for k in ("rerank_score", "rrf_score", "score", "bm25_score"):
-        v = h.get(k)
-        if v is not None:
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                pass
-    return 0.0
 
 
 def _expand_queries(query: str) -> list[str]:
@@ -46,169 +40,6 @@ def _expand_queries(query: str) -> list[str]:
     return [query, rewritten]
 
 
-def _normalize_text(text: str) -> str:
-    """文本归一化：去空白/标点/低权重符号，用于指纹去重判重。"""
-    return re.sub(r"\s+|[，。、；：？！,.?!:;\"'、\-_]", "", text or "").lower()
-
-
-def _best_score(hits: list[dict]) -> float:
-    """候选集最高分（rerank > rrf > score），作为置信信号。"""
-    if not hits:
-        return 0.0
-    best = 0.0
-    for h in hits:
-        s = _hit_key(h)
-        if s is not None:
-            best = max(best, s)
-    return float(best)
-
-
-def _merge_multi(hits: list[dict]) -> list[dict]:
-    """多路（原 query + 改写）检索结果合并：按 (source, chunk_index) 保最高分。
-
-    注意：多路的 rrf/向量分数各自独立量纲，不能直接跨路比较，这里"保最高分"
-    只是近似去重；真正统一量纲依赖后续 rerank（开启时）。chunk_index 缺失的
-    结果用 vector_id 兜底区分，避免不同块被误并。
-    """
-    best: dict[tuple, dict] = {}
-    for h in hits:
-        key = (
-            h.get("source") or "",
-            h.get("chunk_index"),
-            h.get("id") if h.get("chunk_index") is None else None,
-        )
-        if key not in best or _hit_key(h) > _hit_key(best[key]):
-            best[key] = h
-    return sorted(best.values(), key=_hit_key, reverse=True)
-
-
-def _dedupe_and_merge(hits: list[dict], max_per_doc: int) -> list[dict]:
-    """检索结果去重 + 相邻块合并（上下文压缩的第一层）。
-
-    - 同一文档（source）的命中按分数降序，最多保留 `max_per_doc` 组，
-      避免 Top-K 被同一章节占满，释放名额给更多文档；
-    - 同一文档内 chunk_index 连续的块合并为一条（文本拼接），
-      保持章节上下文完整（如标题块与其正文块）；
-    - 合并后按分数全局重排，质量优先。
-    """
-    groups: dict[str, list[dict]] = {}
-    for h in hits:
-        groups.setdefault(h.get("source") or "", []).append(h)
-
-    out: list[dict] = []
-    for source, items in groups.items():
-        items.sort(key=_hit_key, reverse=True)
-        # 同文档同 chunk_index 的重复记录（Milvus 残留重复向量）只保留最高分
-        seen_idx: set[tuple[str, object]] = set()
-        unique: list[dict] = []
-        for it in items:
-            ci = it.get("chunk_index")
-            key = (source, ci)
-            if ci is not None and key in seen_idx:
-                continue
-            if ci is not None:
-                seen_idx.add(key)
-            unique.append(it)
-        merged: list[dict] = []
-        for it in unique:
-            ci = it.get("chunk_index")
-            if (
-                merged
-                and ci is not None
-                and merged[-1].get("chunk_index") is not None
-                and ci == merged[-1]["chunk_index"] + 1
-            ):
-                # 相邻块合并：保留高分块的其余字段，文本拼接
-                merged[-1] = {
-                    **merged[-1],
-                    "text": merged[-1]["text"] + "\n\n" + it["text"],
-                }
-            else:
-                merged.append(dict(it))
-        out.extend(merged[:max_per_doc])
-    out.sort(key=_hit_key, reverse=True)
-    return out
-
-
-def _dedupe_near_duplicate(hits: list[dict]) -> list[dict]:
-    """指纹去重（零成本）+ 可选语义近似去重，减少喂给 LLM 的冗余。
-
-    仅在 `settings.dedup_near_duplicate=True` 时生效（默认关 → 原样返回，行为不变）；
-    开启后：
-    - 指纹去重：归一化文本相同 → 只留最高分（跨源也适用，零成本）；
-    - 语义去重：开启时对上一步结果再做 embedding 相似度≥阈值去重（有成本）。
-    """
-    if not settings.dedup_near_duplicate or not hits:
-        return hits
-    seen_norm: dict[str, float] = {}
-    deduped: list[dict] = []
-    for h in hits:
-        norm = _normalize_text(h.get("text", ""))
-        if not norm:
-            continue
-        if norm in seen_norm:
-            continue
-        # 指纹去重：同一文本只保留首个（已按分数降序）
-        seen_norm[norm] = _hit_key(h)
-        deduped.append(h)
-    if len(deduped) <= 1:
-        return deduped
-    # 语义近似去重：两两归一化不同但 embedding 相似≥阈值 → 保留分数高者
-    try:
-        from app.rag.embedding import get_embedder
-
-        embedder = get_embedder()
-        texts = [h.get("text", "") for h in deduped]
-        vecs = embedder.embed_texts(texts) if texts else []
-        if vecs:
-            keep: list[bool] = [True] * len(deduped)
-            # 顺序已按分数降序，只需删除与已保留项相似的后续项
-            kept_vecs: list = []
-            for idx, v in enumerate(vecs if len(vecs) == len(deduped) else []):
-                is_dup = False
-                for kv in kept_vecs:
-                    if _cosine(v, kv) >= settings.dedup_sim_threshold:
-                        is_dup = True
-                        break
-                if is_dup:
-                    keep[idx] = False
-                else:
-                    kept_vecs.append(v)
-            deduped = [h for h, k in zip(deduped, keep) if k]
-    except Exception:  # embedding 不可用/失败 → 只保留指纹去重
-        pass
-    return deduped
-
-
-def _cosine(a: list, b: list) -> float:
-    """向量余弦相似度（用于语义近似去重）。"""
-    if not a or not b:
-        return 0.0
-    import math
-
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
-
-
-def _apply_total_budget(hits: list[dict], max_total: int) -> list[dict]:
-    """总字符预算：按分数降序累计，达到预算即截断（防超长 context 喂给 LLM）。"""
-    if max_total <= 0 or not hits:
-        return hits
-    # hits 已按分数降序（_dedupe_near_duplicate 后）
-    total = 0
-    out: list[dict] = []
-    for h in hits:
-        total += len(h.get("text", ""))
-        if total > max_total:
-            break
-        out.append(h)
-    return out
-
-
 class MilvusRetriever(BaseRetriever):
     """基于 Milvus + BM25 的混合检索器（可选 rerank），限定用户知识库。"""
 
@@ -216,7 +47,7 @@ class MilvusRetriever(BaseRetriever):
     score_threshold: float = 0.35
     user_id: str = "default"  # 知识库归属用户（隔离）
     filter_expr: Optional[str] = None
-    # 本查询的图像通道候选（用于结果保底，避免被 rerank 用弱 caption 降权剔除）
+    # 本查询的图像通道候选（_finalize 中用于保底，见下）
     _img_hits: list[dict] = PrivateAttr(default_factory=list)
 
     def _user_filter(self) -> str:
@@ -229,110 +60,71 @@ class MilvusRetriever(BaseRetriever):
             from app.rag.intent import classify, split_compare
 
             intent = classify(query)
-            # 用户隔离过滤表达式：所有子分支（fact/chat/list/compare）在向量通道
-            # 都需要它（filter_expr），故在此统一绑定，避免仅 compare 定义导致 NameError。
             user_filter = self._user_filter()
+            # 候选：rerank 开启时最多取 rerank_candidate_k 条供精排（控制 CPU 推理量）
+            candidate_k = (
+                min(self.top_k * 3, settings.adaptive_candidate_k if intent == "chat" else settings.rerank_candidate_k)
+                if settings.rerank_enabled else self.top_k
+            )
             top_k = self.top_k
             threshold = self.score_threshold
-            # 候选：rerank 开启时最多取 rerank_candidate_k 条供精排（控制 CPU 推理量）
-            if settings.rerank_enabled:
-                candidate_k = min(top_k * 3, settings.adaptive_candidate_k if intent == "chat" else settings.rerank_candidate_k)
-            else:
-                candidate_k = top_k
             if intent == "list":
-                top_k = max(top_k, 6); threshold = max(threshold - 0.1, 0.1)  # 放宽
+                top_k = max(top_k, 6)
+                threshold = max(threshold - 0.1, 0.1)  # 放宽
             elif intent == "compare":
                 # 对比类：拆多子查询分别检索再合并
-                queries = split_compare(query) or [query]
                 all_hits: list[dict] = []
-                for sub in queries:
-                    for q in ([sub] if not settings.query_rewrite_enabled else _expand_queries(sub)):
-                        all_hits.extend(
-                            hybrid.search_hybrid(query=q, top_k=candidate_k,
-                                                 score_threshold=threshold, user_id=self.user_id)
-                            if settings.hybrid_search else
-                            vector_store.search(query=q, top_k=candidate_k, score_threshold=threshold,
-                                                filter_expr=user_filter)
-                        )
-                hits = _merge_multi(all_hits)
-                return self._finalize(query, hits, top_k)
+                for sub in split_compare(query) or [query]:
+                    subs = [sub] if not settings.query_rewrite_enabled else _expand_queries(sub)
+                    all_hits.extend(self._search_queries(subs, candidate_k, user_filter, threshold))
+                return self._finalize(query, _merge_multi(all_hits), top_k)
             else:
-                queries = _expand_queries(query)
-                all_hits: list[dict] = []
-                for q in queries:
-                    all_hits.extend(
-                        hybrid.search_hybrid(query=q, top_k=candidate_k,
-                                             score_threshold=threshold, user_id=self.user_id)
-                        if settings.hybrid_search else
-                        vector_store.search(query=q, top_k=candidate_k, score_threshold=threshold,
-                                            filter_expr=user_filter)
-                    )
-                hits = _merge_multi(all_hits)
+                hits = self._search_queries(_expand_queries(query), candidate_k, user_filter, threshold)
                 return self._finalize(query, hits, top_k)
-        # ---------- 非意图路由：现有行为 + 低置信自适应 ----------
-        # 候选：rerank 开启时最多取 rerank_candidate_k 条供精排（控制 CPU 推理量）
-        if settings.rerank_enabled:
-            candidate_k = min(self.top_k * 3, settings.rerank_candidate_k)
-        else:
-            candidate_k = self.top_k
+        # 非意图路由：候选受 rerank_candidate_k 限制（控制 CPU 推理量）
+        candidate_k = (
+            min(self.top_k * 3, settings.rerank_candidate_k)
+            if settings.rerank_enabled else self.top_k
+        )
         user_filter = self._user_filter()
         if settings.adaptive_retrieval:
-            # 自适应：先单路初检索算置信；低置信 → 放宽候选 + 触发改写双路二次检索
+            # 自适应：先单路初检索算置信；低置信 → 放宽候选 + 改写双路二次检索
             first = self._search_queries([query], candidate_k, user_filter)
             if _best_score(first) < settings.conf_trigger_threshold:
                 widen_k = max(candidate_k, settings.adaptive_candidate_k)
-                queries = _expand_queries(query)  # 原 query + 改写（改写未启用则单路）
-                hits = _merge_multi(self._search_queries(queries, widen_k, user_filter))
+                hits = self._search_queries(_expand_queries(query), widen_k, user_filter)
                 return self._finalize(query, hits, self.top_k)
             return self._finalize(query, first, self.top_k)
         # 查询改写：原 query + 改写结果双路检索（未启用时单路，行为不变）
-        queries = _expand_queries(query)
-        all_hits: list[dict] = []
-        for q in queries:
-            all_hits.extend(
-                hybrid.search_hybrid(
-                    query=q,
-                    top_k=candidate_k,
-                    score_threshold=self.score_threshold,
-                    user_id=self.user_id,
-                )
-                if settings.hybrid_search
-                else vector_store.search(
-                    query=q,
-                    top_k=candidate_k,
-                    score_threshold=self.score_threshold,
-                    filter_expr=user_filter,
-                )
-            )
-        hits = _merge_multi(all_hits)
+        hits = self._search_queries(_expand_queries(query), candidate_k, user_filter)
         return self._finalize(query, hits, self.top_k)
 
     def _search_queries(
-        self, queries: list[str], top_k: int, user_filter: str
+        self, queries: list[str], top_k: int, user_filter: str, threshold: float | None = None
     ) -> list[dict]:
-        """对一组 query 分别检索并合并（供自适应/意图路由复用）。"""
+        """对一组 query 分别检索并合并（供意图路由/自适应/改写双路复用）。"""
+        threshold = self.score_threshold if threshold is None else threshold
         all_hits: list[dict] = []
         for q in queries:
             if settings.hybrid_search:
                 all_hits.extend(
                     hybrid.search_hybrid(
                         query=q, top_k=top_k,
-                        score_threshold=self.score_threshold, user_id=self.user_id,
+                        score_threshold=threshold, user_id=self.user_id,
                     )
                 )
             else:
                 all_hits.extend(
                     vector_store.search(
                         query=q, top_k=top_k,
-                        score_threshold=self.score_threshold, filter_expr=user_filter,
+                        score_threshold=threshold, filter_expr=user_filter,
                     )
                 )
         return _merge_multi(all_hits)
 
     def _finalize(self, query: str, hits: list[dict], top_k: int) -> list[LCDocument]:
         """公共收尾：精排 / 去重 / 预算 / 截断 → Document 列表。"""
-        # 图文双通道：并入图像通道候选（默认关=行为不变）
-        img_on = settings.image_dual_channel
+        img_on = settings.image_dual_channel  # 图文双通道（默认关）
         if img_on:
             hits = self._add_image_channel(query, hits)
         if settings.rerank_enabled:
@@ -342,12 +134,10 @@ class MilvusRetriever(BaseRetriever):
             hits = rerank(query, hits, top_k=top_k, candidate_k=cand)
         else:
             hits = hits[:top_k]
-        # 上下文压缩：同文档去重 + 相邻块合并（释放名额、补全上下文）
+        # 上下文压缩管线：去重合并 → 近似去重 → 总字符预算 → 块截断
         hits = _dedupe_and_merge(hits, settings.rag_max_per_doc)
-        # RAG 优化：指纹/语义近似去重（减少冗余）+ 总字符预算
         hits = _dedupe_near_duplicate(hits)
         hits = _apply_total_budget(hits, settings.rag_max_total_chars)
-        # 上下文压缩：超长块截断，减少噪音 token
         max_chars = settings.rag_max_chunk_chars
         if max_chars > 0:
             hits = [
@@ -387,7 +177,7 @@ class MilvusRetriever(BaseRetriever):
     def _search_image_channel(self, query: str, top_k: int, user_id: str) -> list[dict]:
         """图像通道检索：用多模态文本编码器编码 query → 查图片 collection。失败/无模型 → []。"""
         try:
-            from app.rag.embedding import get_image_embedder
+            from app.rag.image_embedding import get_image_embedder
 
             qvec = get_image_embedder().encode_text(query)
         except Exception:

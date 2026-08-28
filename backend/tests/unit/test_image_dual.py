@@ -1,4 +1,4 @@
-"""③ 图文双通道单元测试：mock 多模态编码器 / Milvus，不依赖真实模型。"""
+"""图文双通道单元测试：mock 多模态编码器 / Milvus，不依赖真实模型。"""
 from __future__ import annotations
 
 from app.config import settings
@@ -50,7 +50,7 @@ def test_write_image_vectors(monkeypatch):
         def encode_image(self, img):
             return [0.1] * 8
 
-    monkeypatch.setattr("app.rag.embedding.get_image_embedder", lambda: E())
+    monkeypatch.setattr("app.rag.image_embedding.get_image_embedder", lambda: E())
     deleted = {}
     added: list = []
     monkeypatch.setattr(vector_store, "delete_image_by_source", lambda s, u: deleted.update(src=s, uid=u))

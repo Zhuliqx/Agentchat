@@ -70,3 +70,30 @@ def flush_langfuse() -> None:
         except Exception:  # noqa: BLE001
             pass
 
+
+def record_retrieval_stats(name: str, stats: dict, elapsed_ms: float) -> None:
+    """记录检索链路内部指标（fail-open，调用方无需 try/except）。
+
+    - 始终输出结构化日志（``RAG_METRIC`` 前缀），供离线分析检索各通道表现
+      （通道命中数 / 分数分布 / 耗时），无需任何外部依赖；
+    - langfuse 启用且当前上下文存在活动 span 时，额外以 span 上报
+      （v4 ``start_as_current_observation``）。检索常在 ``asyncio.to_thread``
+      线程内执行，contextvars 不传播 → 无活动 span 时自动跳过，不产生噪音
+      或孤儿观测。
+    """
+    try:
+        logger.info("RAG_METRIC %s elapsed_ms=%.1f stats=%s", name, elapsed_ms, stats)
+        if not langfuse_enabled():
+            return
+        from langfuse import Langfuse
+
+        lf = Langfuse()
+        if lf.get_current_observation_id() is None:
+            return
+        with lf.start_as_current_observation(
+            name=f"rag.{name}", type="SPAN", input=stats
+        ):
+            pass  # 耗时与入参已记录；上下文管理器退出时自动 end
+    except Exception:  # noqa: BLE001 - 观测失败不影响检索
+        pass
+

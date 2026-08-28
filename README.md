@@ -8,7 +8,7 @@
 
 | 领域 | 关键指标 | 结果 | 一句话结论 |
 |------|---------|------|-----------|
-| 检索质量（GT 40 条） | MRR / Hit@1 | **0.944 / 0.900** | 混合检索 + rerank，来源级命中（[评估](docs/EVALUATION.md)） |
+| 检索质量（GT 40 条） | MRR / Hit@1 | **0.963 / 0.925** | 混合检索 + rerank，来源级命中（最终基线 [RAG_OPTIMIZATION](docs/RAG_OPTIMIZATION.md)；EVALUATION 早期口径 0.944/0.900 为演进快照） |
 | 生成质量 | Faithfulness / Relevancy | **0.923 / 1.0** | LLM-judge 四指标，低幻觉（[评估](docs/EVALUATION.md)） |
 | 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益（[评估 §7.3](docs/EVALUATION.md)） |
 | Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝（[AGENT_EVAL](docs/AGENT_EVAL.md)） |
@@ -16,7 +16,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成（[PERFORMANCE](docs/PERFORMANCE.md)） |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[REPORT](docs/EVALUATION_REPORT.md)） |
-| 工程质量 | 单测 / 集成 | **103 / 18** | CI 挂检索回归（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 | **217 / 19** | CI 挂检索回归 + LLM-judge 质量评估（Ruff + pytest） |
 ## 🧑‍💻 简历速览
 
 > 面向简历/面试的精选版。本文档对应**项目 1 · Agentchat**；另一个独立项目**· 自主任务 Agent（`backend/app/task_agent/`）详见 [其独立 README](backend/app/task_agent/README.md)**。
@@ -25,13 +25,13 @@
 - **定位**：FastAPI + LangGraph + LangChain 的多 Agent 平台，融合 **RAG + MCP + 三层记忆 + HITL + Time Travel**，前端 Vue3 深色主题。
 - **技术栈**：FastAPI / LangGraph（Supervisor·Checkpointer·Store·interrupt）/ Milvus（向量）/ Postgres+pgvector（关系·长期记忆语义检索）/ DeepSeek 多模型 / Vue3+TS+Tailwind4。
 - **核心亮点**：
-  - **检索链路**：混合检索（向量+BM25+RRF）+ rerank 精排 + 中文 embedding 选型 —— Hit@1 **0.975**、检索 MRR **0.944**、Faithfulness **0.923**（LLM-judge 四指标、GT 40 条）；
+  - **检索链路**：混合检索（向量+BM25+RRF）+ rerank 精排 + 中文 embedding 选型 —— Hit@1 **0.975**、检索 MRR **0.963**、Faithfulness **0.923**（LLM-judge 四指标、GT 40 条，最终基线见 [RAG_OPTIMIZATION](docs/RAG_OPTIMIZATION.md)）；
   - **消融实证**：纯向量→混合→+rerank = 0.894→0.931→**0.963**，每层都有量化收益；
   - **Agent**：Supervisor 层级路由（rag/web_search/mcp/code），危险操作全 HITL/拒绝（route@1、拒绝率 **1.0**）；代码 Agent 受限沙箱；
   - **记忆**：短期 Checkpointer / 长期 Store+语义检索+写入去重（LangGraph 原生三层记忆）；
   - **安全**：Prompt 注入防护（不可信数据隔离+规则+可选 LLM 复核）、SQL 只读沙箱、输出泄露检测；
   - **体验**：SSE token 级流式（首 token ~19ms）、会话/记忆/知识库按用户隔离、JWT 认证、会话统计；
-  - **工程**：单测 **103** + 集成 **18**、CI（Ruff+Pyright+检索回归）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
+  - **工程**：单测 **217** + 集成 **19**、CI（Ruff+Pyright+检索回归 + LLM-judge 质量评估）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
 - **一句话**：检索质量、Agent 安全、可观测全闭环，用**真实评估数据**驱动每一个取舍（非拍脑袋）。
 
 ### 项目 2 · 自主任务 Agent（`backend/app/task_agent/`）—— 长任务自主执行器

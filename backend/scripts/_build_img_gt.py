@@ -10,14 +10,14 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent  # backend/
 sys.path.insert(0, str(ROOT))
 
 import fitz  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from app.rag import image_parser, vector_store  # noqa: E402
-from app.rag.embedding import get_image_embedder  # noqa: E402
+from app.rag.image_embedding import get_image_embedder  # noqa: E402
 from app.rag.ingestion import ingest_file  # noqa: E402
 
 

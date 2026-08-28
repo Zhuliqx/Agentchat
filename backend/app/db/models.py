@@ -92,7 +92,11 @@ class Message(Base):
 
 
 class Document(Base):
-    """文档元数据。向量存储在 Milvus，ID 与此表一致。
+    """文档元数据。向量存储在 Milvus。
+
+    对应关系：本表 ``id`` 写入 Milvus 行的 ``doc_id`` 字段（Milvus 主键
+    ``id`` 是独立 uuid4）；混合检索按 ``doc_id:chunk_index`` 跨通道对齐，
+    两库的 chunk_index 必须一致（见 app/rag/vector_store.add_chunks）。
 
     user_id：知识库按用户隔离（每个用户拥有独立知识库）。
     """
@@ -116,6 +120,15 @@ class Document(Base):
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 整篇内容指纹（文档级去重）
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # 向量同步状态（Postgres 为事实源、Milvus 为派生索引）：
+    # pending=已入库未同步到 Milvus（由 reconcile_vectors 对账任务补同步）；
+    # synced=已同步。存量行默认 synced（假定旧数据已入库），新摄入显式置 pending。
+    vector_status: Mapped[str] = mapped_column(
+        String(16), default="synced", server_default="synced", nullable=False, index=True
+    )
+    vector_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )

@@ -1,4 +1,4 @@
-"""VLM 语义描述（②）单元测试：mock，不依赖真实 API / 网络 / 图片。"""
+"""VLM 语义描述单元测试：mock，不依赖真实 API / 网络 / 图片。"""
 from __future__ import annotations
 
 from app.rag import vlm
@@ -86,7 +86,7 @@ def test_describe_images_batch(monkeypatch):
 def test_build_vlm_chunks_disabled(monkeypatch):
     # image_vlm_enabled=False → 不生成任何块（行为不变）
     from app.config import settings
-    from app.rag.ingestion import _build_vlm_chunks
+    from app.rag.chunkers import _build_vlm_chunks
 
     monkeypatch.setattr(settings, "image_vlm_enabled", False)
     assert _build_vlm_chunks([object()], "src") == []
@@ -95,7 +95,7 @@ def test_build_vlm_chunks_disabled(monkeypatch):
 def test_build_vlm_chunks_enabled(monkeypatch):
     # 开启后：describle_image 返回描述 → 生成 kind=image_vlm 块；空描述跳过
     from app.config import settings
-    from app.rag.ingestion import _build_vlm_chunks
+    from app.rag.chunkers import _build_vlm_chunks
 
     monkeypatch.setattr(settings, "image_vlm_enabled", True)
     calls = {"n": 0}

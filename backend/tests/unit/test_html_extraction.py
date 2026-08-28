@@ -1,7 +1,7 @@
 """HTML 文本提取单元测试（A1：内联拼接、块级换行、表格 | 分隔、列表 - 前缀）。"""
 from __future__ import annotations
 
-from app.rag.ingestion import _html_to_text
+from app.rag.extractors.html import _html_to_text
 
 
 def test_inline_tags_do_not_break_lines():

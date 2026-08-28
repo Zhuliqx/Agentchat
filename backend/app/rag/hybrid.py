@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
+import logging
+import threading
 import time
 from functools import lru_cache
 from typing import Any
@@ -14,20 +17,31 @@ from sqlalchemy import func, select
 from app.config import settings
 from app.db.models import Document
 from app.db.postgres import SessionLocal
+from app.observability import record_retrieval_stats
 from app.rag import vector_store
 from app.rag.bm25 import BM25Index
+
+logger = logging.getLogger(__name__)
+
+# 向量通道与 BM25 通道并行检索的共享线程池（search_hybrid 常在
+# asyncio.to_thread 内被调用，这里再并发两个纯读通道，缩短检索延迟）
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="rag-hybrid"
+)
 
 # 文档集签名的短 TTL 缓存（按用户隔离）：避免每次检索都查一次 COUNT/MAX（摄入后主动失效）。
 _SIGNATURE_TTL = 5.0
 _signature_cache: dict[str, dict[str, Any]] = {}  # user_id -> {"ts": float, "value": tuple}
+_signature_lock = threading.Lock()  # 双通道并行后 _docs_signature 可能被多线程并发访问
 
 
 def _docs_signature(user_id: str = "default") -> tuple:
     """文档集签名：该用户的行数 + 最新创建时间（TTL 缓存），用于 BM25 索引失效判断。"""
     now = time.monotonic()
-    entry = _signature_cache.get(user_id)
-    if entry is not None and now - entry["ts"] < _SIGNATURE_TTL:
-        return entry["value"]
+    with _signature_lock:
+        entry = _signature_cache.get(user_id)
+        if entry is not None and now - entry["ts"] < _SIGNATURE_TTL:
+            return entry["value"]
     with SessionLocal() as db:
         count, latest = db.execute(
             select(func.count(), func.max(Document.created_at)).select_from(Document).where(
@@ -35,13 +49,15 @@ def _docs_signature(user_id: str = "default") -> tuple:
             )
         ).one()
     value = (count or 0, latest)
-    _signature_cache[user_id] = {"ts": now, "value": value}
+    with _signature_lock:
+        _signature_cache[user_id] = {"ts": now, "value": value}
     return value
 
 
 def invalidate_docs_signature() -> None:
     """文档变化（摄入/删除）后立即失效签名缓存，使 BM25 索引重建。"""
-    _signature_cache.clear()
+    with _signature_lock:
+        _signature_cache.clear()
 
 
 @lru_cache(maxsize=16)
@@ -88,25 +104,43 @@ def search_hybrid(
         if score_threshold is not None
         else settings.rag_score_threshold
     )
+    _t0 = time.perf_counter()
     # 按用户隔离的向量过滤表达式
     filter_expr = vector_store.user_filter_expr(user_id) or None
 
-    # 1. 向量通道（Milvus 语义检索，限定用户）
-    dense = vector_store.search(
-        query, top_k=top_k * 3, score_threshold=threshold, filter_expr=filter_expr
-    )
+    # 两路纯读通道并行检索，缩短检索延迟
+    def _run_dense() -> list[dict]:
+        return vector_store.search(
+            query, top_k=top_k * 3, score_threshold=threshold, filter_expr=filter_expr
+        )
 
-    # 2. BM25 关键词通道（该用户的 Postgres 文本）
-    #    文档块数超过 bm25_max_docs 时跳过，避免全量建索引的内存/CPU 开销
-    bm25_hits: list[tuple[int, float]] = []
-    signature = _docs_signature(user_id)
-    if signature[0] and signature[0] <= settings.bm25_max_docs:
-        index, docs = _bm25_index(signature, user_id)
-        bm25_hits = index.search(query, top_k=settings.hybrid_candidate_k)
-    else:
-        docs: list[dict] = []
+    def _run_bm25() -> tuple[list[tuple[int, float]], list[dict]]:
+        # 文档块数超过 bm25_max_docs 时跳过，避免全量建索引的内存/CPU 开销
+        signature = _docs_signature(user_id)
+        if signature[0] and signature[0] <= settings.bm25_max_docs:
+            index, docs_local = _bm25_index(signature, user_id)
+            return index.search(query, top_k=settings.hybrid_candidate_k), docs_local
+        return [], []
 
-    # 3. 构建两路排名（融合 id 空间）
+    f_dense = _EXECUTOR.submit(_run_dense)
+    f_bm25 = _EXECUTOR.submit(_run_bm25)
+    # 两个 future 都取结果：任一通道异常都向上抛出（dense 优先），
+    # 且不会因 dense 失败而吞掉 bm25 侧的异常。
+    dense_exc = bm25_exc = None
+    try:
+        dense = f_dense.result()
+    except BaseException as exc:  # noqa: BLE001 - 统一收集后按原优先级抛出
+        dense_exc = exc
+    try:
+        bm25_hits, docs = f_bm25.result()
+    except BaseException as exc:  # noqa: BLE001
+        bm25_exc = exc
+    if dense_exc is not None:
+        raise dense_exc
+    if bm25_exc is not None:
+        raise bm25_exc
+
+    # 构建两路排名（融合 id 空间）
     dense_list: list[str] = []
     dense_meta: dict[str, dict] = {}
     for h in dense:
@@ -130,7 +164,7 @@ def search_hybrid(
     if bm25_list:
         ranked_lists.append(bm25_list)
 
-    # 4. RRF 融合
+    # RRF 融合
     fused = _rrf(ranked_lists, k=settings.rrf_k)[:top_k]
 
     results: list[dict] = []
@@ -151,4 +185,18 @@ def search_hybrid(
                 "rrf_score": round(rrf_score, 4),
             }
         results.append(item)
+
+    # 记录通道命中数与耗时（观测内部自带 fail-open，不影响检索）
+    record_retrieval_stats(
+        "hybrid",
+        {
+            "user": user_id,
+            "dense_hits": len(dense),
+            "bm25_hits": len(bm25_hits),
+            "fused": len(results),
+            "top_k": top_k,
+            "threshold": threshold,
+        },
+        (time.perf_counter() - _t0) * 1000,
+    )
     return results

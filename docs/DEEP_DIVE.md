@@ -377,7 +377,7 @@ async def lifespan(app):
 
 - 挂载路由：`/api/health` `/api/sessions` `/api/memory` `/api/rag` `/api/chat` `/api/auth` `/api/tasks` `/api/models`。
 - 后台 `scheduler_loop`（asyncio 任务）按 `interval:<秒>` / `cron:<分钟>` 周期执行注册的批处理任务。
-- `app.mount("/", StaticFiles(directory=APP_DIST, html=True))` 托管 `frontend-v2/dist` 构建产物（Vue 3 前端）。
+- `app.mount("/", _NoCacheStaticFiles(directory=APP_DIST, html=True))` 托管 `frontend-v2/dist` 构建产物（Vue 3 前端；禁用静态缓存避免浏览器缓存旧版）。
 - CORS 显式白名单。
 
 ### 8.2 路由总览
