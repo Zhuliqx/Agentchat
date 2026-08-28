@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "task-agent"
+version = "0.1.0"
+description = "自主任务 Agent：面向模糊长目标的多步自主执行引擎（LangGraph），零业务依赖"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=1.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+
+[project.scripts]
+task-agent-demo = "task_agent.demo:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,15 +1,11 @@
-"""自主任务 Agent 的图状态（TaskState）。
-
-一期 fixed 与二期 replan 共用同一状态结构；两种模式各自使用其子集字段。
-"""
+"""自主任务 Agent 的图状态（TaskState）。"""
 from __future__ import annotations
 
 from typing import Annotated, Optional, TypedDict
 
 
 def _append_findings(a: Optional[list[str]], b: Optional[list[str]]) -> list[str]:
-    """findings 的 reducer：以增量方式合并状态（节点返回新增片段，而非每次回写全量）。
-    首轮前值可能为 None，归一后拼接。"""
+    """findings 的 reducer：以增量方式合并状态（节点返回新增片段，而非每次回写全量）。"""
     return (a or []) + (b or [])
 
 

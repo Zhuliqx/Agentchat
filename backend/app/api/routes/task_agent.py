@@ -2,6 +2,9 @@
 
 节点级 HITL：开启 task_agent_hitl 后，首次操作前会中断返回 awaiting_confirm，
 需调用 /agent-tasks/confirm 提交决策(proceed/edit/skip)恢复执行(target thread_id)。
+
+图由宿主适配器（app.agents.task_agent_adapter）注入 LLM / Checkpointer / 执行器构建；
+自主任务引擎本体为独立包 task-agent。
 """
 from __future__ import annotations
 
@@ -11,8 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from app.agents.task_agent_adapter import build_host_task_agent, list_task_history
 from app.api.deps import get_current_user_id
-from app.task_agent.graph import get_task_agent, list_task_history
 
 router = APIRouter()
 
@@ -48,7 +51,7 @@ def _pack(result: dict, thread: str) -> dict:
 
 @router.post("/agent-tasks/run")
 async def run_agent_task(req: AgentTaskRun, user_id: str = Depends(get_current_user_id)) -> dict:
-    graph = get_task_agent()
+    graph = build_host_task_agent()
     thread = req.session_id or f"task-{uuid.uuid4().hex[:12]}"
     config = {"configurable": {"thread_id": thread}}
     if req.checkpoint_id:
@@ -84,14 +87,15 @@ class AgentTaskHistory(BaseModel):
 @router.post("/agent-tasks/history")
 async def agent_task_history(req: AgentTaskHistory, user_id: str = Depends(get_current_user_id)) -> dict:
     """Time Travel：列出线程的 checkpoint 历史(新→旧)，每条含 checkpoint_id 可回退/分叉。"""
-    items = await list_task_history(req.session_id, req.limit)
+    graph = build_host_task_agent()
+    items = await list_task_history(graph, req.session_id, req.limit)
     return {"session_id": req.session_id, "history": items}
 
 
 @router.post("/agent-tasks/confirm")
 async def confirm_agent_task(req: AgentTaskConfirm, user_id: str = Depends(get_current_user_id)) -> dict:
     """HITL 恢复：提交决策，从上次 interrupt 处继续执行（同一 thread_id）。"""
-    graph = get_task_agent()
+    graph = build_host_task_agent()
     decision = {"verb": req.verb, "action": req.action, "source": req.source}
     try:
         result = await graph.ainvoke(
