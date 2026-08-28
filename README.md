@@ -2,6 +2,8 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+
 ## 📊 量化成果速览
 
 > 全部数字来自真实评估（GT 40 条 / LLM-judge / 压测 / 多采样），方法、条件与复现见各文档。
@@ -15,11 +17,11 @@
 | 性能（单 worker） | 检索 p50 / 吞吐 | 82ms / ~16 QPS | 单机满足小团队，扩展触发信号明确（[PERFORMANCE](docs/PERFORMANCE.md)） |
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成（[PERFORMANCE](docs/PERFORMANCE.md)） |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
-| 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[REPORT](docs/EVALUATION_REPORT.md)） |
-| 工程质量 | 单测 / 集成 | **217 / 19** | CI 挂检索回归 + LLM-judge 质量评估（Ruff + pytest） |
+| 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[实验记录](docs/EXPERIMENTS.md)） |
+| 工程质量 | 单测 / 集成 | **180 / 22**（另有 task-agent 独立包 50） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 ## 🧑‍💻 简历速览
 
-> 面向简历/面试的精选版。本文档对应**项目 1 · Agentchat**；另一个独立项目**· 自主任务 Agent（`backend/app/task_agent/`）详见 [其独立 README](backend/app/task_agent/README.md)**。
+> 面向简历/面试的精选版。本文档对应**项目 1 · Agentchat**；另一个独立项目**· 自主任务 Agent（仓库顶层 `task-agent/` 独立包）详见 [其独立 README](task-agent/README.md)**。
 
 ### 项目 1 · Agentchat —— 企业级多 Agent 知识问答平台
 - **定位**：FastAPI + LangGraph + LangChain 的多 Agent 平台，融合 **RAG + MCP + 三层记忆 + HITL + Time Travel**，前端 Vue3 深色主题。
@@ -34,9 +36,9 @@
   - **工程**：单测 **217** + 集成 **19**、CI（Ruff+Pyright+检索回归 + LLM-judge 质量评估）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
 - **一句话**：检索质量、Agent 安全、可观测全闭环，用**真实评估数据**驱动每一个取舍（非拍脑袋）。
 
-### 项目 2 · 自主任务 Agent（`backend/app/task_agent/`）—— 长任务自主执行器
-- **定位**：接收**模糊复杂目标** → LLM 分解/每步重规划 → 循环执行 → 结构化交付；复用项目 1 全部子 Agent 能力。详见 [`docs/AGENT_TASK.md`](docs/AGENT_TASK.md)。
-- **技术栈**：FastAPI + LangGraph（StateGraph·interrupt·Command·retry_policy·timeout·error_handler·time-travel）/ DeepSeek / 复用 rag·mcp·web_search·code 子 Agent。
+### 项目 2 · 自主任务 Agent（仓库顶层 `task-agent/` 独立包）—— 长任务自主执行器
+- **定位**：接收**模糊复杂目标** → LLM 分解/每步重规划 → 循环执行 → 结构化交付；零业务依赖的独立 Python 包，宿主经适配器注入 LLM/Checkpointer/执行器。详见 [`docs/AGENT_TASK.md`](docs/AGENT_TASK.md)。
+- **技术栈**：LangGraph（StateGraph·interrupt·Command·retry_policy·timeout·error_handler·time-travel）/ DeepSeek / 宿主注入 rag·mcp·web_search·code 执行器。
 - **核心亮点**：
   - **每步动态重规划**（`replan`）+ 独立 **`check`** 判完成 + **`MAX_STEPS`** 防循环；`TASK_AGENT_MODE=fixed|replan` 可切；
   - **信息源感知（L1+L2）**：replan 标注 `expected_source`(kb/db/web/code)，执行按源收紧开关+前缀引导——公司/产品**优先知识库**，不再误联网查真实企业；
@@ -44,7 +46,7 @@
   - **verify 自检重试**：子任务失败 → LLM 判是否值得重试（不计步数，`MAX_RETRIES` 上限）；
   - **节点级 fault tolerance**：`retry_policy` + `timeout` + `error_handler`（返回 `Command`）+ 自定义 `retry_on`（网络/超时/5xx 重试、确定性错误不重试）；
   - **Time Travel 长任务恢复**：`list_task_history` + `run` 支持 `checkpoint_id`（分叉 / 重放）；
-  - **验证**：单测贯穿（`tests/unit/test_task_agent.py`）；真实 LLM 跑通（目标→信息源感知→结构化交付），HITL/verify/分叉真实链路均验证。
+  - **验证**：独立包单测（`task-agent/tests/`）全绿；真实 LLM 跑通（目标→信息源感知→结构化交付），HITL/verify/分叉真实链路均验证。
 - **一句话**：把 LangGraph 的 **交互式 HITL / 容错 / 时间旅行 / 状态管理**组合成一整套面向"模糊长目标"的 Agentic 引擎。
 
 ## ✨ 特性
@@ -106,11 +108,11 @@ Agentchat/
 │   ├── requirements.txt / requirements-dev.txt / Dockerfile
 │   ├── app/
 │   │   ├── main.py           # FastAPI 入口（托管前端 + API + 模型预热）
-│   │   ├── config.py         # 配置中心（pydantic-settings）
-│   │   ├── api/routes/       # chat(含SSE) / sessions / rag / memory / health / auth / tasks / task_agent
-│   │   ├── agents/           # LangGraph 多 Agent（context / llm / tools / graph）
-│   │   ├── task_agent/       # 项目2·自主任务Agent（graph / nodes / state / prompts）
-│   │   ├── rag/              # 嵌入 / 向量库 / BM25 / 混合检索 / rerank / 摄入
+│   │   ├── config.py         # 配置中心（字段分组在 config_sections.py）
+│   │   ├── api/routes/       # chat / sessions / rag / memory / health / auth / tasks / admin / search / agent-tasks
+│   │   ├── agents/           # LangGraph 多 Agent（graph / llm / prompts / streaming / tools 包）
+│   │   ├── task_agent_adapter.py # 项目2宿主适配器（引擎在顶层 task-agent/ 独立包）
+│   │   ├── rag/              # 嵌入(image_embedding) / 向量库 / BM25 / 混合检索 / rerank / 摄入(extractors+chunkers) / postprocess
 │   │   ├── db/               # Postgres 模型、会话管理、Checkpointer/Store
 │   │   ├── mcp_integration/  # MCP 服务器 + 客户端管理器
 │   │   ├── evaluation/       # 评估（LLM-judge / 四指标聚合 / 指纹去重）
@@ -123,23 +125,26 @@ Agentchat/
 │   ├── tests/                # pytest 测试（unit/ 单元 + integration/ 集成）
 │   │   ├── unit/             # 纯逻辑单元测试（BM25 / 分块 / 评估 / RRF / 流式去重…）
 │   │   └── integration/      # 需 Postgres+Milvus 的集成测试（test_api / 检索回归）
-│   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / verify_auth_tasks / MCP 服务器入口
+│   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / check_docs_stale / MCP 服务器入口
 │   └── .env.example
+├── task-agent/              # 项目2·自主任务 Agent（独立包，src 布局，零 app.* 依赖）
 ├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
 ├── data/                     # 用户内容（知识库文档 / 上传文件）
 │   ├── kb/                   # 示例知识库文档
 │   └── uploads/              # 网页上传的原始文件（自动生成，可下载/预览）
 └── docs/
-    ├── ARCHITECTURE.md       # 架构与两项目文档地图
+    ├── README.md             # 文档地图与唯一基线
+    ├── ARCHITECTURE.md       # 系统架构总览
     ├── SETUP.md              # 环境搭建指南
     ├── DEPLOYMENT.md         # 部署与扩展（单机取舍 / 演进）
     ├── OBSERVABILITY.md      # Langfuse 可观测性
     ├── PERFORMANCE.md        # 性能压测报告
-    ├── EXPLAIN.md            # 项目详解（14 章）
+    ├── EXPLAIN.md            # 项目详解（10 分钟总览）
     ├── DEEP_DIVE.md          # 实现详解（Agent 编排 / 记忆 / FastAPI / RAG / MCP）
     ├── RAG_DESIGN_ANALYSIS.md # RAG 设计分析
     ├── EVALUATION.md         # 评估方法与指标
-    ├── EVALUATION_REPORT.md  # 查询改写实验报告
+    ├── EXPERIMENTS.md        # 历史实验快照（改写 / VLM / 图文 / RAG 优化 / 评估迭代）
+    ├── interview/            # 面试素材（RAG Q&A / 评估话术 / 部署决策）
     ├── AGENT_EVAL.md         # Agent 编排质量评估
     └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```
@@ -210,7 +215,7 @@ python run.py
 | `LLM_PROVIDER` | `deepseek` | deepseek / dashscope / openai / ollama |
 | `TAVILY_API_KEY` | - | 联网搜索（为空则 `web_search` 工具不可用） |
 | `RERANK_ENABLED` | `true` | 检索后 rerank 精排（首次下载约 1.1GB 模型） |
-| `QUERY_REWRITE_ENABLED` | `false` | 查询改写总开关（rule 零依赖 / llm 需 LLM；实验见 `docs/EVALUATION_REPORT.md`） |
+| `QUERY_REWRITE_ENABLED` | `false` | 查询改写总开关（rule 零依赖 / llm 需 LLM；实验见 `docs/EXPERIMENTS.md`） |
 | `QUERY_REWRITE_MODE` | `rule` | 改写档位：`none` / `rule` / `llm` |
 | `HYBRID_SEARCH` | `true` | 混合检索（向量 + BM25 + RRF） |
 | `AGENT_TIMEOUT` | `120` | 单轮对话超时（秒） |
@@ -272,13 +277,13 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 .\venv\Scripts\python.exe scripts/benchmark.py --endpoint chat --concurrency 2 --total 6
 ```
 
-查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照），完整实验报告见 `docs/EVALUATION_REPORT.md`。
+查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照），完整实验记录见 `docs/EXPERIMENTS.md`。
 
 CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类型检查（非阻塞）→ 单元测试。
 
 ## 🧩 其他建议（后续可扩展）
 
-- **更多 Agent**：注册新工具即可扩展（现有 rag / mcp / code / web_search / 记忆工具，见 `backend/app/agents/tools.py`）
+- **更多 Agent**：注册新工具即可扩展（现有 rag / mcp / code / web_search / 记忆工具，见 `backend/app/agents/tools/` 包）
 - **可观测性（已实现）**：已接入自托管 **Langfuse**，trace `supervisor→子Agent→工具→LLM`（见 [OBSERVABILITY](docs/OBSERVABILITY.md)）；LangSmith 可作未来云端选项
 - **记忆语义检索**：`docker-compose.yml` 已用 pgvector 镜像；若你仍在使用旧的 `postgres:16` 容器，重建（`docker compose down && up -d`，数据卷保留）即可启用长期记忆语义检索（当前自动降级为关键词检索）
 - **认证加固**：接入 OAuth / 企业 SSO；为 `default` 访客用户设置密码；给 API 加速率限制

@@ -1,8 +1,9 @@
 # RAG 优化方案（自适应检索 / 意图路由 / 去重 / 预算 / CI 回归）
 
-> 目标：在不破坏现有检索质量、且**默认全部关闭（行为不变）**的前提下，提供一整套可开启、可 A/B 评估的 RAG 优化能力，延续"数据驱动决策"的风格（类似查询改写的"默认关、实验证明后再开"）。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> A/B 实测数据见 [EXPERIMENTS.md](EXPERIMENTS.md) §2-§3；当前基线以 [docs/README.md](README.md) 为准。
 
----
+> 目标：在不破坏现有检索质量、且**默认全部关闭（行为不变）**的前提下，提供一整套可开启、可 A/B 评估的 RAG 优化能力，延续"数据驱动决策"的风格（类似查询改写的"默认关、实验证明后再开"）。
 
 ## 1. 优化点总览
 
@@ -13,23 +14,21 @@
 | **跨块去重 + 总预算** | `dedup_near_duplicate` / `rag_max_total_chars` | 指纹/语义去重 + 总字符预算，减少喂给 LLM 的冗余 | 低 |
 | **CI 完整 GT 回归** | ci.yml 一步 | 用 `eval_rag.py` 跑 GT MRR 防退化（非阻塞） | 低 |
 | **图片语义描述（VLM）** | `image_vlm_enabled` | 对图片/图表用视觉大模型生成文本描述入文本通道——图内容（趋势/结构/示意图逻辑）可检索 | 中（每图一次 VLM 推理） |
-| **图文双通道** | `image_dual_channel` | 图片用多模态向量（独立 collection）索引，检索时与文本通道融合——像素级/“看一眼像”相似召回 | 中（多模态 embedding + 图向量 collection） |
+| **图文双通道** | `image_dual_channel` | 图片用多模态向量（独立 collection）索引，检索时与文本通道融合——像素级/"看一眼像"相似召回 | 中（多模态 embedding + 图向量 collection） |
 | **PDF 提取回退** | 恒启用 | PDF 文本用 `pdfplumber→pymupdf→pypdf` 逐级回退，中文/表格保留更好、控制字符更少 | 低 |
-| **Markdown 去标题** | `markdown_strip_headers=True`（已默认开） | 标题只存 metadata、不进正文，块更聚焦；实测 MRR 0.963→0.975 | 低 |
+| **Markdown 去标题** | `markdown_strip_headers=True`（已默认开） | 标题只存 metadata、不进正文，块更聚焦 | 低 |
 
----
-
-## 2. 配置项（`backend/app/config.py`）
+## 2. 配置项（字段声明在 `backend/app/config_sections.py`，经 `config.py` 聚合）
 
 ```python
-# ---- 自适应检索（RAG 优化）----
-adaptive_retrieval: bool = False   # 低置信触发改写双路 + 放宽候选（默认关=行为不变）
+# ---- 检索增强（默认关；见 EXPERIMENTS.md §3 的 A/B 结论）----
+adaptive_retrieval: bool = False   # 低置信触发改写双路 + 放宽候选
 conf_trigger_threshold: float = 0.45  # 初检索最高分低于此值 → 判"可能召不全"触发自适应
-adaptive_candidate_k: int = 9      # 自适应放宽后的 rerank 候选（默认≈6×1.5）
+adaptive_candidate_k: int = 9      # 自适应放宽后的 rerank 候选
 intent_routing: bool = False       # 检索级意图路由
-dedup_near_duplicate: bool = False # 跨块/跨源 指纹+语义 去重（默认关=行为不变）
+dedup_near_duplicate: bool = False # 跨块/跨源 指纹+语义 去重
 dedup_sim_threshold: float = 0.90
-rag_max_total_chars: int = 0       # 0=不限制；>0 按分数降序累计截断，防超长 context
+rag_max_total_chars: int = 0       # 0=不限制；>0 按分数降序累计截断
 
 # ---- 图片语义描述（VLM）----
 image_vlm_enabled: bool = False
@@ -46,19 +45,14 @@ image_channel_top_k: int = 6
 image_channel_weight: float = 0.4
 # ---- 解析增强----
 markdown_strip_headers: bool = True      # Markdown 去标题（默认开）
-# PDF 文本提取使用 pdfplumber→pymupdf→pypdf 逐级回退
 ```
-
-> 全部**默认关**，现有检索行为零变化；评估通过后再按数据决定开启哪项。
-
----
 
 ## 3. 各优化点详细说明
 
 ### 3.1 自适应检索（低置信触发）
-- **文件**：`backend/app/rag/retriever.py`（`_get_relevant_documents` / `_search_queries` / `_best_score`）
+- **文件**：`backend/app/rag/retriever.py`（`_get_relevant_documents` / `_search_queries`）；置信信号 `_best_score` 在 `app/rag/postprocess.py`
 - **流程**：先单路初检索 → `_best_score`（rerank/rrf/向量最高分）→ 低于 `conf_trigger_threshold` → 判定"可能召不全" → 用 `adaptive_candidate_k` 放宽候选 + `_expand_queries` 改写双路**二次检索**合并；否则直接收尾（**零额外成本**）。
-- **为什么**：正式书面 query 基线已饱和（`EVALUATION_REPORT`），只有"口语/低召回"才值得为改写付出 LLM/双路成本。
+- **为什么**：正式书面 query 基线已饱和，只有"口语/低召回"才值得为改写付出 LLM/双路成本。
 
 ### 3.2 检索级意图路由
 - **文件**：`backend/app/rag/intent.py`（`classify` / `split_compare`，规则版零 LLM）
@@ -70,193 +64,42 @@ markdown_strip_headers: bool = True      # Markdown 去标题（默认开）
   - `fact` → 走默认（不改写、默认 top_k）。
 
 ### 3.3 跨块去重 + 总预算
-- **文件**：`retriever.py`（`_dedupe_near_duplicate` / `_apply_total_budget` / `_cosine`）
+- **文件**：`app/rag/postprocess.py`（`_dedupe_near_duplicate` / `_apply_total_budget` / `_cosine` / `_normalize_text`）
 - **指纹去重**：`_normalize_text`（去空白/标点/小写）后相同文本只留最高分（跨源也适用，零成本）；
 - **语义去重**：`dedup_near_duplicate=True` 时，对指纹去重后用 `get_embedder().embed_texts` 求余弦，相似≥`0.90` 只留分数高者（失败自动降级为仅指纹去重）；
 - **总预算**：`rag_max_total_chars` >0 时按分数降序累计到预算即截断，防超长 context。
 
 ### 3.4 CI 完整 GT 回归
-- **文件**：`.github/workflows/ci.yml`（`rag-regression` job 内新增一步）
-- 在现有 "hit-rate threshold" 后，加"full GT MRR, non-blocking"：`python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.example.json`，`continue-on-error: true` 防阻塞。
-
----
+- **文件**：`.github/workflows/ci.yml`（`rag-regression` job）
+- 在 "hit-rate threshold" 后，加"full GT MRR, non-blocking"：`python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.example.json`，`continue-on-error: true` 防阻塞。
 
 ## 4. A/B 评估方法（延续查询改写"数据驱动"）
 
-- **测试集**：
-  - 书面：`data/eval/ground_truth.json`（40 条，MRR 0.944 / Hit@1 0.900）；
-  - 口语：`data/eval/ground_truth_spoken.json`（8 条，命中"改写目标场景"）。
-- **对比档**：`off`（基线）vs `adaptive`（自适应）vs `intent`（意图路由）vs `dedup`（去重+预算）。
+- **测试集**：书面 `data/eval/ground_truth.json`（40 条）、口语 `data/eval/ground_truth_spoken.json`（8 条）、扩样 `*_large.json`、扩库 `ground_truth_expand.json`；
+- **对比档**：`off`（基线）vs `adaptive` vs `intent` vs `dedup`；
 - **复现命令**：
   ```powershell
-  # 基线(off)
+  cd backend
   .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
-  # 自适应
   $env:ADAPTIVE_RETRIEVAL="true"; .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
-  # 口语集 + 端到端四指标
-  .\venv\Scripts\python.exe scripts/eval_quality.py --dataset data/eval/ground_truth_spoken.json --rewrite rule
+  $env:INTENT_ROUTING="true";     .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
+  $env:DEDUP_NEAR_DUPLICATE="true"; $env:RAG_MAX_TOTAL_CHARS="3000"; .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
   ```
 - **看什么**：MRR / Hit@1（召回层）与 faithfulness（生成层）是否提升；再算 **token 用量**（`rag_max_total_chars` / 去重是否减少输入）。
 
-> ⚠️ **重要**：RAG 优化各开关**默认全关**，需在真实/自建 GT 上 A/B，**用数据决定**是否开启及阈值（同查询改写"默认关"的决策）。**没有 A/B 结论前，不要在生产开启。**
-
----
+> ⚠️ **重要**：RAG 优化各开关**默认全关**，需在真实/自建 GT 上 A/B，**用数据决定**是否开启及阈值。**没有 A/B 结论前，不要在生产开启。**
 
 ## 5. 单元测试
+
 - `tests/unit/test_rag_optimization.py`：意图分类 / 拆分 / 指纹去重 / 语义去重降级 / 总预算截断 / 文本归一化 / 余弦。
 - 全部 mock，不依赖 Milvus/Postgres/embedding 模型。
 
-## 6. A/B 实测结果（2026-08-25，Postgres+Milvus 在线，本地 bge-small-zh / rerank）
+## 6. A/B 实测结论（2026-08）
 
-**书面集 `ground_truth.json`（40 条，`expected_sources` 命中）**
+> 完整数据表（书面/口语/难例/扩库四指标 + 超参 sweep + 图片专项）见 [EXPERIMENTS.md](EXPERIMENTS.md) §2-§3。
 
-| 档 | 开关 | MRR | Hit@1 | vs off |
-|----|------|-----|-------|--------|
-| off（基线） | 全关 | **0.963** | **0.925** | — |
-| adaptive | `ADAPTIVE_RETRIEVAL=true` | 0.963 | 0.925 | 0 / 0 |
-| adaptive + rule 改写 | `+QUERY_REWRITE_ENABLED=true, MODE=rule` | 0.958 | 0.925 | -0.005 / 0 |
-| intent | `INTENT_ROUTING=true` | 0.963 | 0.925 | 0 / 0 |
-| dedup + 预算 | `DEDUP_NEAR_DUPLICATE=true, RAG_MAX_TOTAL_CHARS=3000` | 0.963 | 0.925 | 0 / 0 |
-
-**图片 / 解析专项（含图 GT，来源级命中）**
-
-| 档 | 开关 | MRR | Hit@1 | 结论 |
-|----|------|-----|-------|------|
-| 图片语义 off → on | `IMAGE_VLM_ENABLED` false→true | 0.000 → **1.000** | 0.000 → **1.000** | 图内容从“完全不可检索”→ 全命中 |
-| 图文双通道 off → on | `IMAGE_DUAL_CHANNEL` false→true | 0.000 → **0.750** | 0.000 → **0.667** (Hit@5=1.0) | 纯图文档由图向量召回；图像保底防弱 caption 剔除 |
-| strip_headers 关→开 | `MARKDOWN_STRIP_HEADERS` false→true | 0.963 → **0.975** | 0.925 → **0.950** | 已默认开 |
-| chunk_size | 500 / 800 / 1200 | 0.963 | 0.925 | 来源级饱和，三者持平；保持 800 |
-
-**口语集 `ground_truth_spoken.json`（8 条，改写目标场景）**
-
-| 档 | 开关 | MRR | Hit@1 | vs off |
-|----|------|-----|-------|--------|
-| off（基线） | 全关 | **0.938** | **0.875** | — |
-| adaptive + rule 改写 | `ADAPTIVE_RETRIEVAL=true` + 改写规则 | 0.938 | 0.875 | 0 / 0 |
-| intent | `INTENT_ROUTING=true` | 0.938 | 0.875 | 0 / 0 |
-
-### 读取结论
-- **书面集已饱和**（MRR 0.963 / Hit@1 0.925），5 档 RAG 优化全部**零回退**；规则改写对规范书面 query 无增益（MRR 微降 0.005 属噪声）。
-- **口语集 8 条**：自适应+改写与 intent 均与基线持平（0.938/0.875），**无回退**（样本仅 8 条，规则改写对低置信句子的提升在 MRR 层面不可见）。
-- **决策**：现有 GT 不足以证明任一开关有显著收益，因此**维持默认关、行为不变**（与查询改写"默认关、数据驱动启用"一致）。后续用**更大口径口语 GT 或线上真实 query** 复测，决定是否开启 `adaptive_retrieval` / `intent_routing` / `dedup_near_duplicate` 及其阈值。
-
-### 复现命令（A/B）
-```powershell
-cd backend
-$env:PYTHONIOENCODING="utf-8"
-.\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json          # off
-$env:ADAPTIVE_RETRIEVAL="true"; .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
-$env:INTENT_ROUTING="true";     .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
-$env:DEDUP_NEAR_DUPLICATE="true"; $env:RAG_MAX_TOTAL_CHARS="3000"; .\venv\Scripts\python.exe scripts/eval_rag.py --dataset data/eval/ground_truth.json
-```
-生成结果存 `data/eval/rag_eval_*.json`（评估+时间戳）。
-
----
-
-## 7. 补充 A/B（2026-08-27：检索级饱和确认 + 图片图片语义描述与图文双通道融合实测）
-
-> 在既有 40 书面 + 8 口语 + 10 难例(q31-q40) 上，**来源级检索已完全饱和**（Hit@3/Hit@5≈100%），
-> 因此任何"检索级 MRR/Hit"调参均无区分度。真正能区分的是**内容级/图片命中**。
-
-### 7.1 检索级三档：零差异（维持默认）
-
-| 变量 | 取值(书面集) | 结果 | 结论 |
-|------|------------|------|------|
-| `bm25_use_jieba` | off / on | 0.975 / 0.950 持平 | 默认关 |
-| `rag_max_per_doc` | 2 / 3 / 4 | 全 0.975 / 0.950 | 维持 3 |
-| `rag_score_threshold` | 0.25 / 0.35 / 0.45 | 全 0.975 / 0.950 | 维持 0.35 |
-
-- 口语集 off/on jieba、max_per_doc、threshold 均持平（口语集 1.000）。
-- **难例子集 `ground_truth_hard.json`（q31-q40，10 条）**：off / adaptive / intent / dedup 均 **1.000**——连"难例"来源级也 rank1 命中。
-
-> 结论：当前小知识库来源级检索饱和，检索级参数无法由 MRR 区分；继续维持默认，不做无依据改动。
-
-### 7.2 图片 图片语义描述与图文双通道 融合实测（含图 GT `img_ground_truth.json`，4 条纯图问答）
-
-| 配置 | MRR | Hit@1 | Hit@3 | Hit@5 | 说明 |
-|------|-----|-------|-------|-------|------|
-| 图文双通道（无图片语义描述） | 0.750 | 0.750 | 0.750 | 0.750 | 图向量+保底；"走势"类(img03)靠图向量弱 |
-| 图片语义描述+图文双通道（VLM 描述 + 图向量） | 0.583 | 0.250 | **1.000** | **1.000** | 召回满(救回 img03)，但首名被 VLM 块占用 |
-| **图片语义描述+图文双通道 + guard 排序调和** | **1.000** | **1.000** | **1.000** | **1.000** | 图片强制前置 + 移除同位置 VLM 块 → 全 rank1 |
-
-- **VLM 用法**：`deepseek-v4-flash-vision-exp` 官方支持图像输入；OpenAI 兼容 Chat Completions，`image_url` **支持可选 `detail`**(low/high/original/auto)。
-
-### 7.3 决策
-- 图片能力推荐 **图片语义描述+图文双通道 同时开启 + guard 排序调和**（`image_dual_channel` + `image_vlm_enabled` 均显式开启，见 SETUP）：当前含图 GT 达 **1.000**，优于仅图文双通道（0.750）。
-
-
----
-
-## 8. 补充复测（扩样口语/难例 + 端到端四指标 + 超参 sweep）
-
-> 背景：既有**检索级（来源级）**在书面/口语/难例上已饱和（Hit@1≈100%），"返回哪个来源"无法区分 RAG 优化档。
-> 这次改用**扩样后的口语（58）/难例（26）GT + 内容级端到端四指标**复测，判断 RAG 优化档是否默认开启。
-
-### 8.1 判定口径与基线确认
-- **扩样**：新增 `ground_truth_spoken_large.json`（58 条口语化变体）、`ground_truth_hard_large.json`（26 条推理/计算/对比/条件型难例），变体**继承原 answer/source，仅改措辞**（保证答案可验证、来源可命中）。
-- **指标**：端到端四指标（`context_precision` / `context_recall` / `faithfulness` / `answer_relevancy`），DeepSeek-judge、temperature=0，覆盖生成层。
-- **检索级确认**：口语/难例扩样集上 off / adaptive / intent / dedup 均 **MRR=Hit@1=1.0**——来源级饱和，检索级无法判定，必须用内容级。
-
-### 8.2 难例集（26 条）四指标
-| 档 | context_precision | context_recall | faithfulness | answer_relevancy | vs off faithful |
-|----|------------------|----------------|--------------|------------------|-----------------|
-| off（基线） | **0.971** | 0.942 | **0.964** | 0.992 | — |
-| adaptive | 0.933 | **0.962** | 0.927 | **1.000** | **-0.037** |
-| intent | 0.955 | **0.962** | 0.911 | **1.000** | **-0.053** |
-| dedup+预算 | 0.965 | 0.952 | 0.925 | **1.000** | **-0.039** |
-
-- 三档在难例集上**一致降低 faithfulness**（最明显 intent -0.053、dedup -0.039、adaptive -0.037），只小幅提升 recall（+0.01~0.02）与 relevancy（+0.008），且 adaptive 还会降 context_precision（-0.038）。
-
-### 8.3 口语集（58 条）四指标
-| 档 | context_precision | context_recall | faithfulness | answer_relevancy | vs off faithful |
-|----|------------------|----------------|--------------|------------------|-----------------|
-| off（基线） | 0.928 | **0.918** | 0.948 | 1.000 | — |
-| adaptive | 0.942 | 0.918 | 0.935 | 1.000 | **-0.013** |
-| intent | 0.942 | 0.918 | **0.950** | 1.000 | **+0.002** |
-| dedup+预算 | **0.955** | 0.918 | 0.937 | 1.000 | **-0.011** |
-
-- 口语集三档差异小：intent 基本持平（faithful +0.002），dedup / adaptive 略降（-0.011 / -0.013）；dedup 与 adaptive 的 context_precision 略升（+0.027 / +0.014）。
-
-### 8.4 混合检索超参 sweep（检索级）
-`rrf_k`（40/60/80）× `hybrid_candidate_k`（10/20/30）在书面集 40 条上全部 **MRR=0.975 / Hit@1=0.95 / Hit@3=1.0**——来源级饱和，零区分度 → 维持默认 `rrf_k=60`、`hybrid_candidate_k=20`。
-
-### 8.5 决策（更新）
-- **RAG 三档（adaptive / intent / dedup）维持默认关、行为不变**：检索级饱和无收益；内容级（困难例）三档**一致伤 faithfulness**，无一致的正向权衡——延续"数据驱动、实验证明后再开"。
-- **混合检索超参维持默认**（`rrf_k=60`、`hybrid_candidate_k=20`）：sweep 零区分。
-- **dedup+预算 的忠实度权衡（明确）**：会**降 faithfulness**（难例 -0.039、口语 -0.011），换来更高 `context_precision`（口语 +0.027）与更少上下文冗余——**非零伤**；若追求更高相关度/省 token 可开，代价是生成忠实度略降。**建议默认关闭**，除非有明确的省 token / 长上下文需求。
-
-
----
-
-## 9. 扩库重测（多公司/多行业知识库，来源级不饱和 + 内容级四指标）
-
-> 目标：用更大、更嘈杂的知识库（24 家不同行业公司，158 块）复测 RAG 三档，
-> 验证"来源级饱和导致检索级无区分度"的结论是否在更大口径下依然成立。
-
-### 9.1 数据工程
-- 文档集 `data/kb_expand/`：抓取 24 家中文公司维基词条正文（AI/大模型 + 互联网 + 硬科技 + 传统行业作干扰源），共 158 块；摄入到隔离用户 `expand`。
-- 新 GT `ground_truth_expand.json`：34 条歧义/难例（品牌归属、多条件锁定、跨公司对比等），expected_sources 指向对应公司文档。
-- 复测对象：off / adaptive / intent / dedup+预算。
-
-### 9.2 检索级（来源级 MRR/Hit@1）
-| 档 | MRR | Hit@1 | Hit@3 | Hit@5 |
-|----|-----|-------|-------|-------|
-| off | 0.985 | 0.971 | 1.000 | 1.000 |
-| adaptive | 0.985 | 0.971 | 1.000 | 1.000 |
-| intent | 0.985 | 0.971 | 1.000 | 1.000 |
-| dedup+预算 | 0.985 | 0.971 | 1.000 | 1.000 |
-- 扩库后来源级从"1.0 全饱和"降到 0.985/0.971（个别 query 不再 rank1）；但三档检索级仍完全一致。
-
-### 9.3 内容级四指标（end-to-end，DeepSeek-judge）
-| 档 | context_precision | context_recall | faithfulness | answer_relevancy | vs off faithful |
-|----|------------------|----------------|--------------|------------------|-----------------|
-| off | 0.941 | 0.927 | **0.988** | 1.000 | — |
-| dedup+预算 | 0.941 | 0.927 | 0.987 | 1.000 | **-0.001** |
-| adaptive | 0.941 | 0.927 | 0.953 | 1.000 | **-0.035** |
-| intent | 0.941 | 0.927 | 0.924 | 1.000 | **-0.065** |
-
-### 9.4 结论（更新，更大口径）
-- 在更大、更嘈杂的知识库上：三档在**检索级仍然零差异**（来源级虽降到 0.971，但三档 MRR/Hit 一字不差）。
-- **内容级（faithfulness）三档仍一致下降**：intent -0.065、adaptive -0.035、dedup -0.001（几乎不伤）——三档不会带来生成质量收益，且 intent / adaptive 明显伤忠实。
-- 决策：**RAG 三档维持默认关、行为不变**（扩库重测进一步印证"数据驱动、无正向收益不开"）；混合检索超参维持默认（见 §8.4）。
-- 说明：三档的收益只可能体现在内容级（改写/去重改变喂给 LLM 的上下文），而非"返回哪个来源"；本扩库重测证实——即便来源级不再饱和，检索级仍无法区分，且内容级层面三档伤忠实。
+- **检索级**：书面 40（0.963/0.925）与口语 8（0.938/0.875）上，adaptive / intent / dedup 全部持平或微降；扩样与扩库后三档检索级仍零差异（来源级饱和）。
+- **内容级**：三档在难例/口语/扩库上**一致伤 faithfulness**（intent 最明显，adaptive 次之，dedup 几乎不伤），只小幅提升 recall/precision。
+- **超参**：`rrf_k` × `hybrid_candidate_k` sweep 零区分 → 维持默认 `rrf_k=60`、`hybrid_candidate_k=20`。
+- **图片专项**：VLM on → MRR 1.000；图文双通道 on → 0.750；**VLM + 图文双通道 + guard 调和 → 1.000**（推荐同开）。
+- **决策**：RAG 三档（adaptive / intent / dedup）**维持默认关、行为不变**；图片能力按需开启。

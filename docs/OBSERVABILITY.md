@@ -1,6 +1,7 @@
 # 可观测性指南（Langfuse 可视 trace）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 > 目标：让每次对话在 Langfuse 上形成**完整可视化调用链**——
 > `supervisor → 子 Agent → 工具 → LLM`，含 token 用量、延迟、检索细节。
@@ -57,7 +58,7 @@ LANGFUSE_SECRET_KEY=sk-lf-agentchat-dev
 | `app/observability.py` | handler 工厂 + fail-open + flush |
 | `app/agents/graph.py::_prepare_run` | 每次 invocation 在 config 挂 `callbacks`（不写进 lru 缓存的图实例，避免跨会话复用） |
 | `app/main.py::lifespan` | 关闭时 `flush_langfuse()`，确保尾部 trace 不丢 |
-| `app/config.py` | `langfuse_host / public_key / secret_key` 配置字段 |
+| `app/config_sections.py`（ObservabilitySection，经 `config.py` 聚合） | `langfuse_host / public_key / secret_key` 配置字段 |
 
 ## 5. 验证
 
@@ -70,4 +71,4 @@ LANGFUSE_SECRET_KEY=sk-lf-agentchat-dev
 ## 6. 已知限制
 
 - **AGENT_CACHE_ENABLED=true** 时，命中缓存的调用不产生 LLM 调用（trace 会偏短）——属预期；深度调试时建议临时关缓存。
-- 检索内部数值（BM25/RRF 分数）目前未手动埋 span，trace 只到"工具调用"级别；如需检索细节可后续在 `hybrid.search_hybrid` / `rerank` 内加 span。
+- 检索内部指标**已接入**：`hybrid.search_hybrid` / `rerank` 调用 `record_retrieval_stats`——始终输出结构化日志（`RAG_METRIC` 前缀：通道命中数/分数/耗时），Langfuse 启用且有活动 span 时额外上报 `rag.hybrid` / `rag.rerank` span（fail-open）。

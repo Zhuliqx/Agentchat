@@ -1,5 +1,7 @@
 # RAG 子系统深度设计分析
 
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+
 > 本文档基于 `backend/app/rag/` 与 `backend/app/api/routes/rag.py` 的**实际代码**逐条分析
 > 每个设计决策的**动机、收益、潜在问题与解法**，并结合业界公开的 RAG 失败模式研究
 > （Seven Failure Points 论文、RAGAS 评估框架、索引一致性/读后写竞争等）交叉印证。
@@ -62,8 +64,8 @@ flowchart TB
     end
 ```
 
-- **存储双写**：`Milvus` 存向量（`id` 与 Postgres `documents.id` 一一对应），`Postgres` 存文本与元数据（同时是 BM25 通道的数据源）。
-- **设计哲学**：向量索引本质是**文本的"缓存"**（派生视图），因此项目围绕"缓存失效"做了大量工作——见 [4](#4-增量摄入--内容指纹去重) 与 [13](#13-rag-常见失败模式--本项目的应对)。
+- **存储双写**：`Milvus` 存向量（主键 `id` 是独立 uuid4，与 Postgres `documents.id` 的对应关系在 **`doc_id` 字段**），`Postgres` 存文本与元数据（同时是 BM25 通道的数据源、**唯一事实源**）。
+- **设计哲学**：向量索引本质是**文本的"缓存"**（派生视图），因此项目围绕"缓存失效"做了大量工作——Postgres 事实源 + `vector_status` 状态标记 + `reconcile_vectors` 对账任务——见 [4](#4-增量摄入--内容指纹去重) 与 [13](#13-rag-常见失败模式--本项目的应对)。
 
 ---
 
@@ -79,7 +81,7 @@ flowchart TB
 | docx | `_docx_to_text` | **段落 + 表格双通道**，表格单元格用 `\|` 拼接 |
 | pdf/docx/html 表格 | `table_parser` | 表格→**结构化块**（保表头/列语义，按表头+每 N 行切块） |
 | 内嵌/扫描图 | `image_parser` 抽图 + OCR | OCR 文字入文本通道；**VLM 语义描述**把视觉语义转文本（趋势/图表/示意图逻辑） |
-| 图片向量 | `ImageEmbedder`（多模态） | **图文双通道**：图像向量存独立 collection，与文本通道融合 |
+| 图片向量 | `image_embedding.py::ImageEmbedder`（多模态） | **图文双通道**：图像向量存独立 collection，与文本通道融合 |
 
 ### 2.2 为什么这样设计
 
@@ -101,7 +103,7 @@ flowchart TB
 
 ## 3. 分块策略
 
-### 3.1 实现要点（`ingestion.py::split_text`）
+### 3.1 实现要点（`app/rag/chunkers.py::split_text`）
 
 ```
 Markdown（以 # 开头）
@@ -151,12 +153,12 @@ Markdown（以 # 开头）
 source = str(path.resolve())          # 文档唯一标识 = 绝对路径
 chunk_hash = sha256(text).hexdigest() # 块指纹
 
-1) 解析 + 分块成功后才动数据（原子性）
+1) 解析 + 分块成功后才动数据（解析失败不触碰旧数据）
 2) 读该用户已有同 source 的块: hash -> id 映射
 3) 对比:
    - 内容相同的块      → 跳过（不重复嵌入/写入）
-   - 新增/变化块       → 嵌入 + 写入（chunk_index 用原始索引）
-   - 旧文档消失的块    → 从 Postgres + Milvus 双删
+   - 新增/变化块       → 嵌入 + 先写 Postgres（vector_status='pending'）→ 幂等同步 Milvus → 标记 synced
+   - 旧文档消失的块    → 先删 Postgres，再尽力删 Milvus（残留由对账清理）
 4) 全部未变化          → 返回 unchanged=True，零写入、零删除
 5) commit 后 invalidate_docs_signature()（使 BM25 索引重建）
 ```
@@ -169,8 +171,8 @@ chunk_hash = sha256(text).hexdigest() # 块指纹
 
 - **稳定 ID**：`source` = 绝对路径，块 `id` 写入时生成并持久化到 Postgres —— **Postgres 就是 sidecar 映射表**（`Document.user_id/source/chunk_index` → `id`），唯一约束 `(user_id, source, chunk_index)` 保证幂等。
 - **先对比后写入**：避免"删旧增新"在更新场景下把未变化的块也重嵌入（**省 embedding 成本 + 缩短摄入延迟**）。
-- **双写双删**：Postgres 删除 + `vector_store.delete_by_ids(stale_ids)` 精确按主键删向量 —— 两库保持一致，杜绝索引残留。
-- **原子性**：先解析成功再删旧增新；失败时旧数据不受影响。
+- **事实源 + 对账**：Postgres 是唯一事实源（`vector_status` 标记），Milvus 幂等同步（`sync_chunks` 按 `doc_id` 删+插）；删除按 `doc_id` 过滤。**`reconcile_vectors` 对账任务**定期按 `(user, source)` 双向 diff——Milvus 有而 PG 无 → 幽灵清理；PG 有而 Milvus 无 → 补写——即使同步/删除瞬时失败也能自愈，杜绝索引残留。
+- **原子性**：先解析成功再删旧增新；PG 写失败则 Milvus 未动；Milvus 写失败则行保持 pending，由对账补同步，旧数据不受影响。
 - **整篇无变化零写入**：重复上传相同文件零成本（也是对用户重复上传的友好处理）。
 
 ### 4.3 潜在问题与解法
@@ -184,7 +186,7 @@ chunk_hash = sha256(text).hexdigest() # 块指纹
 
 ## 5. Embedding
 
-### 5.1 实现要点（`embedding.py`）
+### 5.1 实现要点（`embedding.py` + `image_embedding.py`）
 
 | Provider | 实现 | 关键细节 |
 |----------|------|---------|
@@ -240,7 +242,7 @@ chunk_hash = sha256(text).hexdigest() # 块指纹
 
 - **标量索引（source/user_id）是生产级检索的隐性关键**：向量库只建向量索引、不建标量索引，`filter` 就退化为全表扫描，数据量大时检索/删除显著变慢。这里与向量索引**一起幂等创建**。
 - **IVF_FLAT + nlist=128**：中小规模数据（数万~百万块）IVF_FLAT 精度高、构建简单；`nprobe=16` 是召回/延迟的常见平衡点。规模更大时可换 HNSW/IVF_PQ。
-- **先取 `top_k*3` 再按阈值过滤**：IP 阈值过滤后实际命中可能不足 `top_k`，先放大召回再过滤，避免"漏返回"。
+- **先取 `max(top_k*4, 32)` 再按阈值过滤**：IP 阈值过滤后实际命中可能不足 `top_k`，先放大召回再过滤，避免"漏返回"。
 - **`_validate_embedding_dim` 维度校验**：换 embedding 模型后维度不匹配会在写入时静默失败/错乱，本项目启动时校验并降级。
 - **度量选择（IP vs COSINE 实证）**：embedding 已归一化（`normalize_embeddings=True`），归一化后内积==余弦，二者检索结果逐条一致（实测 MRR 0.944 / Hit@1 0.900 完全相同）；默认 `IP`（最快）；`MILVUS_METRIC_TYPE=COSINE` 可切——COSINE 内部归一化 query，对「未来漏归一化的模型」更防御，且分数恒在 [-1,1] 更可解释。**切换需重建索引**（metric 是索引参数，不能热改）。
 
@@ -352,12 +354,12 @@ invoke(query)
   候选数 = rerank 开 ? min(top_k*3, rerank_candidate_k) : top_k
   检索   = hybrid.search_hybrid 或 vector_store.search（按 HYBRID_SEARCH 开关）
   精排   = rerank(...) or hits[:top_k]
-  → _dedupe_and_merge(hits, rag_max_per_doc)   # 上下文压缩第一层
+  → _dedupe_and_merge(hits, rag_max_per_doc)   # 上下文压缩第一层（app/rag/postprocess.py）
   → 块长 > rag_max_chunk_chars 截断              # 上下文压缩第二层
   → 转 LangChain Document（metadata 全量透传）
 ```
 
-### 10.2 `_dedupe_and_merge`——上下文压缩的关键
+### 10.2 `_dedupe_and_merge`（`app/rag/postprocess.py`）——上下文压缩的关键
 
 同一 `source` 的命中按分降序排序，核心逻辑:
 
@@ -381,7 +383,7 @@ invoke(query)
 
 ## 11. RAG Agent 集成与用户隔离
 
-### 11.1 `_build_search_knowledge_base_tool`（`tools.py`）
+### 11.1 `_build_search_knowledge_base_tool`（`app/agents/tools/rag_tool.py`）
 
 ```python
 rt = get_runtime()                     # LangGraph 运行时上下文
@@ -462,7 +464,7 @@ GET /api/rag/ingest/{task_id}   # 前端轮询：pending/processing/done/error +
 | 5 | **幻觉（Hallucination）** | 编造引用、错误事实 | 上下文不足/被忽略；prompt 不约束 | 检索结果格式化为 `[i] 来源: xxx` + prompt 约束，前端展示引用溯源 |
 | 6 | **lost in the middle** | 多块上下文中的中间块被 LLM 无视 | 上下文过长 | 上下文压缩控制块数（见 [10](#10-检索器与上下文压缩)）；后续可做相关块前置 |
 | 7 | **读后写竞争（Read-after-write race）** | 引用已删除/已修改的文档 | 检索与生成间的快照不一致；索引延迟删除 | 摄入原子性 + 秒级签名失效；强一致见 13.2 |
-| 8 | **检索级联失效（Ghost embedding）** | 删除文档后仍被检索命中 | 向量与源不一致；无稳定 ID/删除映射 | 稳定 ID + Postgres sidecar + `delete_by_ids` 双删 + 签名失效（见 [4]） |
+| 8 | **检索级联失效（Ghost embedding）** | 删除文档后仍被检索命中 | 向量与源不一致；无稳定 ID/删除映射 | 稳定 ID + Postgres sidecar（`doc_id` 对应）+ `delete_by_ids` 按 doc_id 过滤 + **`reconcile_vectors` 对账** + 签名失效（见 [4]） |
 | 9 | **数据质量虫（脏 chunk / 解析丢内容）** | 召回的片段残破、乱码 | OCR 缺失、编码错误、表格丢数据 | 多格式解析 + 编码检测 + 表格并入（见 [2]） |
 | 10 | **权限 / 隔离泄露** | 用户检索到他人文档 | 过滤被忽略；全局索引 | `user_id` 四层防线（见 [11]） |
 
@@ -479,7 +481,7 @@ GET /api/rag/ingest/{task_id}   # 前端轮询：pending/processing/done/error +
 
 | 招数 | 说明 | 本项目现状 / 接入点 |
 |------|------|---------------------|
-| **Query 改写** | 口语 query → 同义改写 / 多路改写取并集 / 拆子问题 | ✅ 已实现：`rule`（去口语框架词+同义并列，零依赖、CI 可挂）/ `llm`（改写为精炼检索词，失败/拒绝模板回退）；默认关闭，实验结论与 A/B 复现见 [EVALUATION_REPORT](EVALUATION_REPORT.md) |
+| **Query 改写** | 口语 query → 同义改写 / 多路改写取并集 / 拆子问题 | ✅ 已实现：`rule`（去口语框架词+同义并列，零依赖、CI 可挂）/ `llm`（改写为精炼检索词，失败/拒绝模板回退）；默认关闭，实验结论与 A/B 复现见 [EXPERIMENTS](EXPERIMENTS.md) §1 |
 | **HyDE** | LLM 先写"假想答案"再向量化检索，弥合 query-doc 差距 | 未实现；适用领域文档；注意首 token 延迟、事实型查询慎用 |
 | **混合双路 + 精排** | BM25 + Dense + RRF + Cross-Encoder | ✅ 已实现（见 8 / 9） |
 
@@ -528,91 +530,14 @@ GET /api/rag/ingest/{task_id}   # 前端轮询：pending/processing/done/error +
 - **集成测试**：`tests/integration/test_api.py` 覆盖 RAG 上传 / 检索 / 删除（DB 不可达自动跳过）。
 - **检索评估脚本**：`scripts/eval_rag.py` 固定问题集 top-k 命中率。
 
-**差距**：尚无 RAGAS 四指标端到端自动化闭环——是后续提升质量性价比最高的投资方向。
+**现状**：四指标端到端闭环**已实现**——`scripts/eval_quality.py`（LLM-judge，temperature=0）+ CI `rag-quality` job（nightly + push，`--max-cases 10` 限成本，`continue-on-error` 不阻塞主 CI）；检索级回归由 `test_rag_regression.py` 与 `eval_rag.py` 覆盖。见 [EVALUATION](EVALUATION.md) §1。
 
 ---
 
 ## 16. 面试 Q&A
 
-> 视角：**AI 应用开发 / RAG 方向技术面试官**。每题附"考察点 + 回答要点"。
-
-### Q1. 为什么"向量库 + 向量检索"是最优解？直接关键词搜不行吗？
-
-**考察点**：理解向量检索与关键词检索的互补性。
-
-**要点**：(1) 向量把语义映射到向量空间，能抓"语义相同、字面不同"；(2) 但纯向量丢专名/型号/代码等字面精确命中。生产环境几乎都是 **Hybrid（关键词 + 向量）+ 精排**；本项目即 BM25 + Milvus + RRF + Cross-Encoder。
-
-### Q2. 分块怎么选？块太大/太小各有什么问题？
-
-**考察点**：参数敏感性与文档类型差异化。
-
-**要点**：过大 → 噪声淹没、token 浪费、难以命中局部信息；过小 → 语义断裂、上下文不足。本项目用 `RecursiveCharacterTextSplitter` + 中文句号分隔 + 10~20% 重叠，Markdown 加标题层级切分保证块自包含。**分块策略应随文档类型分化**，并用 eval 集调参。
-
-### Q3. 增量摄入怎么实现？摄入时用户正在检索怎么办？
-
-**考察点**：增量成本意识与一致性。
-
-**要点**：(1) 内容 sha256 指纹 → 相同块不重嵌入、消失块双删；(2) Postgres 权威 + 双写；(3) 摄入中检索靠签名 TTL + 主动失效实现秒级最终一致；强一致加块版本号（见 13.2）。
-
-### Q4. rerank 为什么放最后？为什么不用向量分数直接排序？
-
-**考察点**：Bi-Encoder vs Cross-Encoder 的本质差异。
-
-**要点**：Bi-Encoder 独立编码、快但丢交互；Cross-Encoder **拼接联合编码**、精度高但慢。因此生产管线"宽召回 → 少精排"；精排成本 = 候选数 × 单次推理，候选必须限流（本项目 `rerank_candidate_k=6`）。
-
-### Q5. RRF 比加权求和好在哪里？
-
-**考察点**：多源分数的"不可比"问题。
-
-**要点**：(1) BM25 分与向量 IP 分数量纲/分布完全不同，无法直接加权相加；(2) RRF 只看**名次**不看分数，`1/(k+rank)` 无损融合各路的排序信息；(3) 交集项天然加分，实现简单、业界验证有效。
-
-### Q6. 多租户 RAG 怎么按用户隔离？如何防止越权？
-
-**考察点**：多租户安全。
-
-**要点**：贯穿四层——数据模型（`user_id` 字段 + 向量过滤表达式）、检索（BM25 按用户缓存/过滤）、资源访问（预览/下载前归属校验 + `_safe_source_in_uploads` 防任意文件读取）、生成链路（`get_runtime().context.user_id` 每轮传入）。测试：写"用户 A 检索用户 B 文档"的负向用例。
-
-### Q7. 上下文是不是越长越好？做了哪些压缩？
-
-**考察点**：对 LLM 注意力与成本的认知。
-
-**要点**：不是越长越好——噪声多、token 贵、中间内容注意力下降（lost in the middle）。本项目压缩链：rerank 候选裁剪 → 同文档限流（2 条/文档）→ 相邻块合并 → 单块 1500 字符截断，最终喂给 LLM 的是"少而完整的语义单元"。
-
-### Q8. 检索质量差，你怎么排查？
-
-**考察点**：真实调优经验，而非背 Demo。
-
-**要点**：先量化定位：跑 RAGAS，按 15.1 的指标映射表找到图层，再对症下药（Recall 低 → 分块/语料；Precision 低 → rerank/阈值；Faithfulness 低 → prompt/LLM）。**每次只动一个变量，做 A/B**，绝不凭感觉连改多个参数。
-
-### Q9. 换 embedding 模型要注意什么？
-
-**考察点**：模型版本治理。
-
-**要点**：(1) 维度变化要重建集合 + 全量重嵌（项目已有维度校验防静默错配）；(2) 换模型后旧向量与新向量**空间不可比**——新旧混存=垃圾进垃圾出；(3) 需要和 rerank 模型一起重评，避免检索/精排失配。
-
-### Q10. 长文档（100+ 页）怎么办？
-
-**考察点**：分层检索能力。
-
-**要点**：(1) 分层索引：章节摘要中心 → 章节分块 → 叶子块检索，多跳 MRR；(2) 本项目当前单层（标题 + 块），超长文档可升级"章节索引 + 块检索"两级；(3) `RAG_MAX_PER_DOC=3` 已天然防"一章霸榜"。
-
-### Q11. 如果检索结果混入过时/错误信息，你能做哪几层防御？
-
-**考察点**：纵深防御意识。
-
-**要点**：数据层（增量抖动、新鲜度校验、CDC）；检索层（过滤 + 阈值）；生成层（prompt 约束 + 要求给出来源）；展示层（引用溯源可点开原文）；评估层（负向用例捕获过时引用）。单点失效不至于全盘皆错。
-
-### Q12. `doc_id:chunk_index` 为什么偏偏用作融合键？
-
-**考察点**：对全局对齐的"数据契约"意识。
-
-**要点**：两路检索（向量/BM25）各自排序，合并时必须知道"向量第 3 名"和"BM25 第 2 名"是不是同一块。复合键让跨通道对齐退化为 `O(1)` 字典查找，是混合检索正确性的根基。
-
-### Q13. 你自己动手实现了哪些 RAG？踩过最大的坑是什么？
-
-**考察点**：区分"用过"与"做过"。
-
-**要点**（结合本项目）：最大的坑是**两库一致性**——Milvus 与 Postgres 的映射、删除扇出、BM25 缓存失效；用"Postgres 唯一事实源 + doc_id sidecar + 主动失效 + 原子顺序"化解。第二坑是**中文分块**——英文分隔符直接套中文会切碎语义，改为句号级分隔 + 重叠后召回明显改善。
+> 已移至 [interview/rag-qa.md](interview/rag-qa.md)（17 问：向量 vs 关键词 / 分块 / 增量摄入 / rerank /
+> RRF / 多租户隔离 / 上下文压缩 / 排查方法论 / embedding 选型 / 长文档 / 纵深防御 / 融合键 / 实盘经验）。
 
 ---
 

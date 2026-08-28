@@ -1,15 +1,18 @@
 # 系统架构
 
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+
 ## 1. 文档地图（本仓库两个项目）
 
 > 本仓库含**两个独立项目**，共享底层 LLM 工厂 / 工具 / 子 Agent / Checkpointer / 评估 / Langfuse。
+> 完整文档清单、文档状态与**唯一基线数字**见 [docs/README.md](README.md)。
 
 | 项目 | 定位 | 文档 |
 |------|------|------|
-| **项目 1 · Agentchat**（本文档主线） | FastAPI + LangGraph + LangChain 的多 Agent 平台（RAG+MCP+三层记忆+HITL+Time Travel） | [README](../README.md)·[架构](ARCHITECTURE.md)·[EXPLAIN](EXPLAIN.md)·[DEEP_DIVE](DEEP_DIVE.md)·[RAG_DESIGN_ANALYSIS](RAG_DESIGN_ANALYSIS.md)·[评估](EVALUATION.md)·[评估报告](EVALUATION_REPORT.md)·[性能](PERFORMANCE.md)·[Agent评估](AGENT_EVAL.md)·[可观测](OBSERVABILITY.md)·[部署](DEPLOYMENT.md)·[安装](SETUP.md) |
-| **项目 2 · 自主任务 Agent**（`backend/app/task_agent/`） | 接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；复用项目 1 子 Agent | [AGENT_TASK](AGENT_TASK.md) |
+| **项目 1 · Agentchat**（本文档主线） | FastAPI + LangGraph + LangChain 的多 Agent 平台（RAG+MCP+三层记忆+HITL+Time Travel） | [文档地图](README.md) |
+| **项目 2 · 自主任务 Agent**（仓库顶层 `task-agent/` 独立包） | 接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；经宿主适配器注入项目 1 子 Agent | [AGENT_TASK](AGENT_TASK.md) |
 
-- **代码结构**：`backend/app/`（项目 1 主体）+ `backend/app/task_agent/`（项目 2）；前端 `frontend-v2/`。
+- **代码结构**：`backend/app/`（项目 1 主体）+ `task-agent/`（项目 2 独立包）；前端 `frontend-v2/`。
 
 ## 2. 总览
 
@@ -103,7 +106,8 @@ flowchart LR
 
 ### 4.2 动态提示词与开关联动
 
-> **提示词动态化**：supervisor 的 system prompt 由 `_build_supervisor_prompt(use_rag, use_search, use_memory)`
+> **提示词动态化**：supervisor 的 system prompt 由 `build_supervisor_prompt(use_rag, use_search, use_memory)`
+> （定义于 `app/agents/prompts.py`）
 > **按开关动态生成**——关闭知识库/搜索/记忆时，提示词同步移除对应工具描述并明确禁止调用，
 > 避免 LLM 幻觉调用不存在的工具（曾导致"关闭开关仍显示调用 rag_agent"的假象）。
 
@@ -118,7 +122,7 @@ flowchart LR
     classDef rag fill:#fff3e0,stroke:#f57c00
     classDef tool fill:#eceff1,stroke:#455a64
     D[文档]:::rag --> L[加载 txt/pdf/docx/md]:::rag --> C[分块 Markdown按标题/递归]:::rag
-    C --> E[嵌入 bge-small-zh-v1.5]:::rag --> W[写入 Milvus + Postgres 元数据]:::mem
+    C --> E[嵌入 bge-small-zh-v1.5]:::rag --> W[Postgres 事实源 + Milvus 派生索引]:::mem
     C --> U[网页上传: 原始文件持久保存 data/uploads/uuid]:::tool
     Q[查询]:::rag --> H[混合检索<br>向量通道 Milvus + BM25 通道 Postgres<br>RRF 融合 + CrossEncoder rerank]:::api
     H --> CTX[上下文]:::rag --> GEN[LLM 生成]:::agent
@@ -131,6 +135,8 @@ flowchart LR
 - **分块**：Markdown 文档先按标题层级（H1/H2/H3）切分再递归分块，每块携带章节标题元数据；普通文本按段落/句号/感叹号/问号切分。
 - **混合检索**：向量通道（Milvus 语义相似度）+ 关键词通道（Postgres 全文文本上的轻量 BM25，中文字符+英文单词切分），用 RRF（Reciprocal Rank Fusion）融合——交集项获得双路加分，兼顾语义相近与术语精确命中。
 - **rerank**：融合后的 Top-N 候选经 `bge-reranker-base`（CrossEncoder）交叉编码精排，输出最终 top-k。
+- **跨库一致性**：Postgres 为事实源（`vector_status` pending/synced 标记），Milvus 用幂等
+  `sync_chunks`（按 doc_id 删+插）同步；`reconcile_vectors` 对账任务清理幽灵向量/补缺失块。
 
 ## 6. MCP 架构
 
@@ -145,7 +151,7 @@ flowchart LR
 ```
 
 - 自建 MCP 通过 **stdio** 以子进程方式拉起（FastMCP 实现）。
-- 外部 MCP 通过 `EXTERNAL_MCP_SERVERS` 环境变量配置（name=url），用 **streamable http** 连接。
+- 外部 MCP 通过 `EXTERNAL_MCP_SERVERS` 环境变量配置（JSON `{"name": "url"}`，兼容旧 `name=url` 逗号格式），用 **streamable http** 连接。
 - 所有 MCP 工具会被转换为 LangChain `StructuredTool`（工具名加服务器前缀，避免冲突），供 MCP Agent 使用。
 
 ## 7. 记忆架构（三层，LangGraph 官方机制）
@@ -172,7 +178,7 @@ flowchart LR
 ### 7.3 运行时上下文
 
 - **运行时上下文**：`create_agent(..., context_schema=UserContext)` 定义上下文类型，
-  调用时 `context=UserContext(user_id=...)` 传入；**仅当次调用有效、不持久化**。
+  调用时 `context=UserContext(user_id=..., session_id=...)` 传入；**仅当次调用有效、不持久化**。
   节点/工具通过 `Runtime` 对象（工具内 `get_runtime()`）访问 `runtime.context`。
 ### 7.4 长期记忆（Store，含语义检索与去重）
 
@@ -225,7 +231,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 
 基于 LangGraph `interrupt` / `Command(resume)` 官方机制，让用户在关键操作（联网搜索、外部工具、写入等）前拍板：
 
-1. **`confirm_before` 强制确认**（`app/agents/tools.py`）：`agent_to_tool(..., confirm_before=...)` 包装的子 Agent，在真正执行前先 `interrupt({...})` 暂停图，返回 `__interrupt__`；只有用户回 `confirmed` 才继续，否则返回"操作已取消"。
+1. **`confirm_before` 强制确认**（`app/agents/tools/confirmation.py`）：`agent_to_tool(..., confirm_before=...)` 包装的子 Agent，在真正执行前先 `interrupt({...})` 暂停图，返回 `__interrupt__`；只有用户回 `confirmed` 才继续，否则返回"操作已取消"。
    - 配置：`HITL_ENABLED=true`；`HITL_ACTIONS` 为空时默认 **LLM 自主判定**（`request_confirmation`，由模型决定何时请求授权，类似 Claude Code/Codex）；非空（如 `mcp`）时为**强制确认**（调用前无条件 interrupt）。
    - **开关豁免**：强制确认模式下，有前端开关的动作（search/rag/remember）在开关打开时自动豁免（开关即授权）。
 2. **`request_confirmation` 软性确认**：当 `HITL_ACTIONS` 为空时注册，prompt 强约束 supervisor 对联网搜索/外部工具调用**先请求确认**（问题由 supervisor 生成；避免与强制确认叠加成双重确认）。
@@ -237,18 +243,21 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 | 文件 | 职责 |
 |------|------|
 | `app/main.py` | FastAPI 入口：生命周期初始化 + MCP 启动 + 模型预热 + 路由挂载 |
-| `app/config.py` | 配置中心（pydantic-settings，`.env`） |
-| `app/agents/graph.py` | Supervisor 图构建缓存；`run_agent`（非流式）/ `stream_agent`（token 流式） |
-| `app/agents/tools.py` | 子 Agent 构建；remember/recall 工具（语义去重）；`agent_to_tool` 包装 |
+| `app/config.py` + `config_sections.py` | 配置中心（pydantic-settings，字段按域分组，`.env`） |
+| `app/agents/graph.py` | Supervisor 图构建缓存；`run_agent`（非流式）/ `stream_agent`（token 流式）；提示词在 `prompts.py`、流式去重在 `streaming.py` |
+| `app/agents/tools/` | 工具族包：rag_tool / mcp_tool / search_tool / code_tool / memory_tools / confirmation / sources / text |
+| `app/agents/task_agent_adapter.py` | 项目 2 宿主适配器（向独立 task-agent 包注入 LLM / Checkpointer / `run_agent` 执行器） |
 | `app/agents/llm.py` | LLM 工厂（provider 选择 + 超时/重试） |
-| `app/rag/vector_store.py` | MilvusClient 单例：schema/索引/检索/维度校验 |
+| `app/rag/vector_store.py` | MilvusClient 单例：schema/索引/检索/维度校验/`sync_chunks` 幂等同步/`query_source_pairs` 对账查询 |
 | `app/rag/bm25.py` | 轻量 BM25 索引（中英文切分，无第三方依赖） |
 | `app/rag/hybrid.py` | 向量 + BM25 + RRF 混合检索融合 |
 | `app/rag/rerank.py` | CrossEncoder 精排（候选受限 + 输入截断） |
 | `app/rag/query_rewrite.py` | 查询改写（rule/llm + 精确词豁免 + 拒绝词回退，默认关） |
 | `app/rag/prompt_injection.py` | Prompt 注入防护（不可信数据块隔离 / 规则检测剔除 / LLM 复核 / 输出泄露检测） |
 | `app/security.py` | 密码（PBKDF2）/ JWT（HS256） |
-| `app/rag/ingestion.py` | 文档解析 + 分块（Markdown 按标题）+ 原子摄入 |
+| `app/rag/ingestion.py` | 摄入编排（解析在 `extractors/`、分块在 `chunkers.py`；PG 先行 + 状态标记 + 幂等同步） |
+| `app/rag/postprocess.py` | 检索后处理纯函数（去重合并/近似去重/预算/截断，供 retriever 组装） |
+| `app/scheduler.py` | 定时任务调度器（含 `reconcile_vectors` 向量对账任务） |
 | `app/db/postgres.py` | 会话/消息 CRUD + 幂等建索引 |
 | `app/db/memory_store.py` | Checkpointer / Store 全局单例（语义索引自动降级） |
 | `app/api/routes/chat.py` | 非流式 + SSE token 级流式端点 |

@@ -1,6 +1,7 @@
 # 🔬 实现详解（DEEP DIVE）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 > 本文档面向**想读懂每一行代码怎么跑起来**的读者，按「配置 → LLM → Agent 编排 → 子 Agent → RAG → 记忆 → FastAPI → MCP → 前端 → Windows 兼容」逐层拆解真实实现。
 > 与 `EXPLAIN.md`（整体理解，14 章）互补：这里更偏**函数级**调用链与设计取舍。
@@ -76,7 +77,7 @@ flowchart TB
 
 ## 2. 配置中心 `config.py`
 
-`app/config.py` 用 **pydantic-settings** 从环境变量 / `backend/.env` 加载，`extra="ignore"` 容忍多余变量。
+`app/config.py`（字段按域分组声明在 `app/config_sections.py`）用 **pydantic-settings** 从环境变量 / `backend/.env` 加载，`extra="ignore"` 容忍多余变量。
 
 核心属性（属性 = 环境变量同名，如 `AGENT_TIMEOUT` → `agent_timeout`）：
 
@@ -148,9 +149,10 @@ def milvus_connection_uri(self):
 - `create_agent(get_llm(), tools, system_prompt, checkpointer, store, context_schema=UserContext)`。
 - 配置指纹里含 checkpointer/store 就绪状态，**避免状态变化后继续用过期图**。
 
-### 4.2 动态提示词 `_build_supervisor_prompt(use_rag, use_search, use_memory)`
+### 4.2 动态提示词 `build_supervisor_prompt(use_rag, use_search, use_memory)`
 
 > **关键修复**：曾经是静态 `SUPERVISOR_PROMPT`，关闭知识库时 LLM 仍幻觉调用不存在的 `rag_agent`。现在按开关**同步增删工具描述 + 规则**，并显式禁止调用已关闭的 Agent。
+> 函数定义在 `app/agents/prompts.py`（与 RAG/MCP/CODE 系统提示词同源管理）。
 
 - `tool_lines`：仅列出已注册的工具描述（`use_rag` 关则无 `rag_agent` 行；HITL 且 `hitl_actions` 为空时才有 `request_confirmation` 行）。
 - `rules`：编号从 1 到 n+5 动态拼接，含"知识库已关闭禁止调用 rag_agent"、记忆工具强制调用、HITL 确认规则等。
@@ -195,7 +197,7 @@ async for mode, data in graph.astream(
 
 **关键点**：`checkpoint_ns` 用 `"|"` 分隔嵌套任务——顶层形如 `model:<task_id>`，子 Agent 形如 `model:<id>|mcp_agent:<id>`。**只有不含 `|` 的才是 supervisor 的输出**，避免子 Agent 中间文本污染答案流。
 
-**开场白缓冲 + 去重**：工具调用前的 token 先缓冲（`pre_tool_text`），检测到 `tool_call_chunks` 时经 `_emit_tool` **一次性推送完整开场白**（工具执行前显示并点亮轨道光晕）；工具后的答案流经 `_PreludeDedupe` **前缀去重**（LLM 常把开场白连同答案一起重新生成）。统一超时经 `_agent_timeout_scope` 上下文管理器。
+**开场白缓冲 + 去重**：工具调用前的 token 先缓冲（`pre_tool_text`），检测到 `tool_call_chunks` 时经 `_emit_tool` **一次性推送完整开场白**（工具执行前显示并点亮轨道光晕）；工具后的答案流经 `_PreludeDedupe`（`app/agents/streaming.py`）**前缀去重**（LLM 常把开场白连同答案一起重新生成）。统一超时经 `_agent_timeout_scope` 上下文管理器。
 
 ### 4.5 多轮历史（Checkpointer 自动恢复）
 
@@ -214,15 +216,15 @@ async for mode, data in graph.astream(
 
 ---
 
-## 5. 子 Agent 与工具 `tools.py`
+## 5. 子 Agent 与工具 `tools/` 包
 
-`app/agents/tools.py` 定义所有子 Agent 与工具（`app/agents/nodes/` 目录为空，子 Agent 不走手写节点）。
+`app/agents/tools/` 按工具族拆分（rag_tool / mcp_tool / search_tool / code_tool / memory_tools / confirmation / sources / text），`__init__.py` 统一导出；子 Agent 均为 `create_agent` 独立小图，不走手写节点。
 
 ### 5.1 子 Agent 与直接工具
 
 | 构建函数 | 类型 | 工具 | 说明 |
 |----------|------|------|------|
-| `build_rag_agent()` | 子 Agent（`create_agent` 独立小图） | `create_retriever_tool(retriever, "search_knowledge_base", ...)` | 仅基于检索内容回答、不编造、必须调用检索工具 |
+| `build_rag_agent()` | 子 Agent（`create_agent` 独立小图） | 自建 `search_knowledge_base`（StructuredTool 包装 `retriever.invoke`，见 `rag_tool.py`） | 仅基于检索内容回答、不编造、必须调用检索工具 |
 | `build_mcp_agent()` | 子 Agent（`create_agent` 独立小图） | `get_mcp_manager().get_langchain_tools()`（全部已连 MCP 工具） | 数据库只读 SELECT/WITH、整理清晰答案 |
 | `build_search_tool()` | **直接工具**（`StructuredTool`） | `langchain_tavily.TavilySearch`，兜底 `langchain_community.tavily_search` | 单次 Tavily 调用即返回结果，Supervisor 自行总结 |
 | `build_code_agent()` | 子 Agent（受限沙箱） | `execute_python_code` 工具 | 子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断 |
@@ -265,16 +267,16 @@ async def _arun(query: str) -> str:
 
 ### 6.1 摄入 `ingestion.py`
 
-- `split_text`：**Markdown 按标题分块**（`#`/`##`/`###`）+ 长度递归切分，`chunk_size=800` / `chunk_overlap=100`。
-- `ingest_file`：解析（txt/md/pdf/docx/html）→ 分块 → embedding → 写 Milvus → 写 Postgres `documents` 元数据（**原子**：失败清理已写入块）。
+- 解析在 `app/rag/extractors/`（html/docx/pdf/text），分块在 `app/rag/chunkers.py`：**Markdown 按标题分块**（`#`/`##`/`###`）+ 长度递归切分，`chunk_size=800` / `chunk_overlap=100`；另有 `_split_pdf_pages`、表格/OCR/VLM 增强块。
+- `ingest_file`：解析 → 分块 → embedding → **先写 Postgres（`vector_status='pending'`，事务性事实源）→ 幂等同步 Milvus（`sync_chunks` 按 doc_id 删+插）→ 标记 synced**；Milvus 失败保持 pending，由 `reconcile_vectors` 对账任务补同步。
 - 原始文件持久化到 `data/uploads/<uuid>/`（`rag.py` 里 `_safe_source_in_uploads` 用 `is_relative_to` 防目录穿越）。
 
 ### 6.2 向量存储 `vector_store.py`
 
-- `MilvusClient` 单例（pymilvus 3.0 新 API）。
+- `MilvusClient` 单例（pymilvus 2.4+ 的 `MilvusClient` API）。
 - `_ensure_indexes`：embedding 向量建 **IVF_FLAT** 索引 + source / user_id 字段建 **Trie** 索引（支持按来源与用户过滤）。
 - `_validate_embedding_dim`：与 `embedding_dim`（512）校验，防止模型切换后维度不匹配。
-- 提供 `search` / `add_chunks` / `delete_by_source` / `delete_by_ids` / `stats`；`user_filter_expr` 统一生成按用户隔离的过滤表达式。
+- 提供 `search` / `add_chunks` / `sync_chunks`（幂等删+插）/ `delete_by_source` / `delete_by_ids`（按 `doc_id` 过滤）/ `query_source_pairs`（对账 diff）/ `stats`；`user_filter_expr` 统一生成按用户隔离的过滤表达式。
 
 ### 6.3 混合检索 `hybrid.py` + `bm25.py`
 
@@ -292,8 +294,10 @@ flowchart LR
     RR --> OUT[Top-k Document]:::tool
 ```
 
-- **BM25 是纯 Python 实现**（`bm25.py`：中文按字切 + 英文单词，停用词过滤，Okapi 公式）——因为 pymilvus 3.0 没有 `BM25EmbeddingFunction`，所以用 **Python 侧 BM25 + Postgres 文本**做关键词通道。
+- **BM25 是纯 Python 实现**（`bm25.py`：中文按字切 + 英文单词，停用词过滤，Okapi 公式）——pymilvus 2.4+ 未启用稀疏检索，用 **Python 侧 BM25 + Postgres 文本**做关键词通道。
 - **缓存**：`_bm25_index` 按 `(count, max(created_at))` 签名 `lru_cache`——文档变化时签名变化自动失效。
+- **并行与指标**：向量/BM25 两通道在线程池中并行检索（缩短延迟）；`search_hybrid` / `rerank` 调用
+  `record_retrieval_stats` 输出 `RAG_METRIC` 结构化日志（通道命中数/分数/耗时），Langfuse 启用时额外上报 span。
 - **防爆**：文档块数 > `bm25_max_docs`（5000）时跳过 BM25 通道，只走向量。
 - `_rrf`：`1/(k+rank+1)` 累加多路排名，交集项获多路加分，`k=60`。
 
@@ -304,11 +308,11 @@ flowchart LR
 
 ### 6.5 检索器 `retriever.py`
 
-- `MilvusRetriever(BaseRetriever)`：`_get_relevant_documents` 走「混合检索 → 可选 rerank → 封装成带 score 的 `LCDocument`」，供 RAG 子 Agent 的 `create_retriever_tool` 直接用。
+- `MilvusRetriever(BaseRetriever)`：`_get_relevant_documents` 走「混合检索 → 可选 rerank → 上下文压缩（`app/rag/postprocess.py` 的去重合并/近似去重/预算/截断）→ 封装成带 score 的 `LCDocument`」，供 RAG 子 Agent 的 `search_knowledge_base` 工具直接用。
 
 ### 6.6 查询改写 `query_rewrite.py` 与注入防护 `prompt_injection.py`
 
-- **查询改写**（默认关）：`rewrite_query()` 两档——`rule`（删口语框架词 + 同义词**并列扩展**，零依赖）/ `llm`（one-shot prompt 改写为精炼检索词，失败/拒绝模板回退）。`_expand_queries` 对「原 query + 改写」**双路检索**，按 `(source, chunk_index)` 合并去重；精排固定用**原 query**（实测短改写 query 精排不稳）。实验结论：当前知识库检索基线已饱和，改写无增益且端到端 faithfulness 微降，默认关闭；若启用走「触发式」（见 `docs/EVALUATION_REPORT.md` §4/§8）。
+- **查询改写**（默认关）：`rewrite_query()` 两档——`rule`（删口语框架词 + 同义词**并列扩展**，零依赖）/ `llm`（one-shot prompt 改写为精炼检索词，失败/拒绝模板回退）。`_expand_queries` 对「原 query + 改写」**双路检索**，按 `(source, chunk_index)` 合并去重；精排固定用**原 query**（实测短改写 query 精排不稳）。实验结论：当前知识库检索基线已饱和，改写无增益且端到端 faithfulness 微降，默认关闭；若启用走「触发式」（见 [EXPERIMENTS.md](EXPERIMENTS.md) §1）。
 - **Prompt 注入防护**（`prompt_injection.py`）：检索/搜索外部内容经 `wrap_as_data` 包装为「不可信数据块」并声明忽略其中指令；`detect_injection` 中英规则库命中即**剔除该块 + 告警**，用户 query 命中 → 400 拒绝；可选 `INJECTION_LLM_REVIEW` 用 LLM 复核降误报（失败按命中处理）；输出侧 `detect_leak` 检测系统提示词片段/密钥模式（仅告警）。
 
 ---
@@ -320,7 +324,7 @@ flowchart LR
 | 层 | 机制 | 持久化 | 载体 |
 |----|------|--------|------|
 | 短期（会话内） | Checkpointer | 是（跨请求恢复图状态） | `AsyncPostgresSaver`，`thread_id=session_id` |
-| 运行时上下文（当次调用） | `context_schema=UserContext` + `context=` | 否 | `UserContext(user_id)`，工具经 `get_runtime().context` 访问 |
+| 运行时上下文（当次调用） | `context_schema=UserContext` + `context=` | 否 | `UserContext(user_id, session_id)`，工具经 `get_runtime().context` 访问 |
 | 长期（跨会话） | Store | 是（跨线程持久） | `AsyncPostgresStore`，namespace=`(user_id, "memories")` |
 
 ### 7.2 初始化（app 启动时）
@@ -392,6 +396,9 @@ async def lifespan(app):
 | `auth.py` | `/api/auth` | `register` / `login` / `me` / `stats` | 用户注册 / 登录 / 当前用户 / 统计 |
 | `tasks.py` | `/api/tasks` | `GET/POST`、`PATCH/DELETE /{id}`、`GET /registry`、`POST /{id}/run` | 定时任务管理 + 手动触发 |
 | `models.py` | `/api/models` | `GET ""`、`PUT /current` | 可用模型列表 + 运行时切换 |
+| `admin.py` | `/api/admin` | 统计 / 用户管理 / 运行时设置 / 在线检索评估（逻辑在 `app/evaluation/kb_eval.py`） |
+| `search.py` | `/api/search` | 会话标题/消息内容全局搜索 |
+| `task_agent.py` | `/api/agent-tasks` | 项目 2 自主任务（run / confirm / history，经 `task_agent_adapter` 接线） |
 
 ### 8.3 chat 路由（核心）
 
@@ -430,7 +437,7 @@ async def produce():
 
 - `Session`（id 32 位 hex / title / created_at / updated_at **索引**）。
 - `Message`（session_id 外键 CASCADE / role / content）。
-- `Document`（`user_id`+source+chunk_index 唯一约束 / metadata_json / text，向量在 Milvus，id 一致；知识库按用户隔离）。
+- `Document`（`user_id`+source+chunk_index 唯一约束 / metadata_json / text / `vector_status`+`vector_synced_at` 同步标记；Milvus 行经 `doc_id` 字段与 Postgres id 对应，知识库按用户隔离）。
 
 ### 8.6 会话刷新排序（坑与修复）
 
@@ -537,11 +544,11 @@ frontend-v2/src/
 
 | # | 决策/坑 | 方案 |
 |---|---------|------|
-| 1 | 静态 supervisor prompt 导致关闭 RAG 后幻觉调用 rag_agent | `_build_supervisor_prompt(use_rag, use_search, use_memory)` 动态生成，工具描述与规则同步开关 |
+| 1 | 静态 supervisor prompt 导致关闭 RAG 后幻觉调用 rag_agent | `build_supervisor_prompt(use_rag, use_search, use_memory)`（`app/agents/prompts.py`）动态生成，工具描述与规则同步开关 |
 | 2 | 不改 ORM 为异步 | SQLAlchemy 保持同步 + `anyio.to_thread.run_sync` 线程池（热点路由不卡事件循环） |
 | 3 | Windows psycopg 异步事件循环不兼容 | 三层 SelectorEventLoop 保障，统一 `run.py` 启动 |
 | 4 | 会话活跃排序失效（onupdate 不触发） | `add_message` 显式 `s.updated_at = utcnow()` |
-| 5 | pymilvus 3.0 无 BM25EmbeddingFunction | Python 侧 BM25 + Postgres 文本 + RRF 混合 |
+| 5 | pymilvus 2.4+ 未启用稀疏检索 | Python 侧 BM25 + Postgres 文本 + RRF 混合 |
 | 6 | pgvector 缺失导致 Store 无语义索引 | `init_store` 自动降级关键词检索（日志告警），镜像就绪即自动启用 |
 | 7 | HITL 双重确认（主动 request_confirmation + confirm_before 叠加） | `hitl_actions` 非空时不注册 `request_confirmation`，只保留强制确认 |
 | 8 | 中断会话续发新消息触发 LLM 400 | `_check_pending_interrupt` 返回 409 明确提示 |
@@ -584,7 +591,7 @@ graph = create_agent(
 - **已知风险**：工具类问题（搜索/RAG）在数据变化后若被缓存，会返回旧答案——命中率低，风险可控，可关 `AGENT_CACHE_ENABLED=false`。
 - HITL 安全：`Command(resume)` 输入不同，不命中缓存。
 
-### 13.3 子 Agent 调用重试 `tools.py`
+### 13.3 子 Agent 调用重试 `tools/confirmation.py`
 
 `agent_to_tool._arun` 内对 `agent.ainvoke` 按 `subagent_retries`（默认 1）指数退避重试；多次失败返回友好错误串（"子 Agent X 调用失败（已重试 N 次）…"），不向上抛异常中断整轮。
 
@@ -607,11 +614,11 @@ graph = create_agent(
 
 | 文件 | 章节 |
 |------|------|
-| `app/config.py` | 2 |
+| `app/config.py` + `config_sections.py` | 2 |
 | `app/agents/llm.py` | 3 |
 | `app/agents/graph.py` | 4 |
-| `app/agents/tools.py` | 5 |
-| `app/rag/`（ingestion/vector_store/hybrid/bm25/rerank/retriever/embedding） | 6 |
+| `app/agents/tools/`（工具族包） | 5 |
+| `app/rag/`（ingestion/vector_store/hybrid/bm25/rerank/retriever/embedding/image_embedding/extractors/chunkers/postprocess） | 6 |
 | `app/db/memory_store.py` | 7 |
 | `app/db/postgres.py` / `models.py` | 8 |
 | `app/api/routes/` + `schemas/` | 8 |

@@ -1,14 +1,9 @@
-# 📖 Multi-Agent Platform 项目详解
+# 📖 Multi-Agent Platform 项目详解（10 分钟总览）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；函数级细节请读 [DEEP_DIVE](DEEP_DIVE.md)（**唯一深读文档**）。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
-> 从零理解本项目：是什么、怎么组织、怎么跑、核心机制、设计决策。
-> 查看方法：打开本文件后按 `Ctrl+Shift+V`（或右上角 ⧉ 图标）进入 Markdown 预览，mermaid 图即可渲染。
->
-> 📌 **想深入每一行的实现细节**（Agent 编排、记忆、FastAPI、RAG、MCP 的函数级调用链与设计取舍），请看
-> **[《实现详解 DEEP_DIVE》](./DEEP_DIVE.md)**。
-
----
+从零理解本项目：是什么、怎么组织、怎么跑、核心机制、设计决策。
 
 ## 1. 项目定位
 
@@ -20,10 +15,9 @@
 - **code_agent**：受限沙箱执行 Python（计算 / 算法 / 数据处理）
 - **记忆工具**：三层记忆（短期 / 运行时 / 长期）
 
-数据层：**Milvus**（向量库）+ **PostgreSQL**（关系库）。
-前端：**`frontend-v2/`（Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia）**，开发用 Vite dev server（:5173），生产构建产物由 FastAPI 托管。
-
----
+数据层：**Milvus**（向量库，Postgres 为事实源、派生索引由 `reconcile_vectors` 对账）+ **PostgreSQL**（关系库）。
+前端：**`frontend-v2/`（Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia）**，生产构建产物由 FastAPI 托管。
+项目 2：**自主任务 Agent（`task-agent/` 独立包）**，见 [AGENT_TASK](AGENT_TASK.md)。
 
 ## 2. 技术栈
 
@@ -31,76 +25,18 @@
 |------|------|------|
 | Web | FastAPI + Uvicorn + Pydantic v2 | REST API + SSE 流式 + 静态托管 |
 | Agent | LangGraph + LangChain `create_agent` | Supervisor 层级多 Agent |
-| 向量库 | Milvus 2.4 + pymilvus 3.x（MilvusClient 单例）| 文档块向量 + 相似度检索 |
-| 关系库 | PostgreSQL 16 + SQLAlchemy 2.x | 会话 / 消息 / 文档元数据 |
+| 向量库 | Milvus 2.4 + pymilvus 2.4+（MilvusClient 单例）| 文档块向量 + 相似度检索 |
+| 关系库 | PostgreSQL 16 + SQLAlchemy 2.x | 会话 / 消息 / 文档元数据（唯一事实源） |
 | 记忆 | `AsyncPostgresSaver` + `AsyncPostgresStore` | LangGraph 官方三层记忆 |
 | 检索 | 向量 + BM25 + RRF 混合；CrossEncoder rerank | 召回 + 精排 |
-| 嵌入 / rerank | sentence-transformers（bge-small-zh / bge-reranker-base）| 本地模型 |
+| 嵌入 / rerank | sentence-transformers（bge-small-zh / bge-reranker-base）| 本地模型；图像编码见 `image_embedding.py` |
 | 联网搜索 | langchain-tavily `TavilySearch` | |
 | MCP | mcp SDK 1.x（FastMCP + client）| 自建 stdio + 外部 http |
 | LLM | DeepSeek（默认）/ DashScope / OpenAI / Ollama | `llm.py` 工厂 |
 
----
-
-## 3. 目录结构
-
-```
-Agentchat/
-├── docker-compose.yml        # Docker Desktop 一键拉起 Postgres + Milvus
-├── backend/
-│   ├── run.py                # ⭐ 启动入口（Windows 专用 SelectorEventLoop）
-│   ├── requirements.txt      # 依赖（mcp 固定 <2.0）
-│   ├── .env / .env.example   # 配置（真实 key 在 .env，gitignored）
-│   ├── app/
-│   │   ├── main.py           # ⭐ FastAPI 入口 + 生命周期初始化
-│   │   ├── config.py         # ⭐ 配置中心（pydantic-settings）
-│   │   ├── event_loop.py     # Windows SelectorEventLoop factory
-│   │   ├── api/routes/
-│   │   │   ├── chat.py       #   非流式 + SSE token 级流式对话
-│   │   │   ├── sessions.py   #   会话 CRUD + 历史
-│   │   │   ├── rag.py        #   文档上传/列表/预览下载/删除/检索测试
-│   │   │   ├── memory.py     #   长期记忆 CRUD（语义检索）
-│   │   │   └── health.py     #   健康检查
-│   │   ├── agents/
-│   │   │   ├── graph.py      #   Supervisor 图 + run_agent / stream_agent
-│   │   │   ├── tools.py      #   子 Agent 构建 + 记忆工具 + agent_to_tool
-│   │   │   ├── llm.py        #   LLM 工厂（provider + 超时/重试）
-│   │   │   └── context.py    #   UserContext（运行时上下文 schema）
-│   │   ├── rag/
-│   │   │   ├── embedding.py  #   嵌入封装（local / openai）
-│   │   │   ├── vector_store.py # MilvusClient 单例：schema/索引/检索/维度校验
-│   │   │   ├── bm25.py       #   轻量 BM25（自实现，无依赖）
-│   │   │   ├── hybrid.py     #   向量 + BM25 + RRF 融合
-│   │   │   ├── rerank.py     #   CrossEncoder 精排
-│   │   │   ├── retriever.py  #   LangChain 检索器（供 Agent 用；含改写双路）
-│   │   │   ├── query_rewrite.py  #  查询改写（rule/llm，默认关）
-│   │   │   ├── prompt_injection.py  #  Prompt 注入防护（隔离+检测+泄露检测）
-│   │   │   └── ingestion.py  #   文档解析 + 分块 + 原子摄入
-│   │   ├── db/
-│   │   │   ├── models.py     #   SQLAlchemy 模型（Session/Message/Document）
-│   │   │   ├── postgres.py   #   会话/消息 CRUD + 幂等建索引
-│   │   │   └── memory_store.py # ⭐ Checkpointer/Store 全局单例
-│   │   ├── mcp_integration/
-│   │   │   ├── client.py     #   MCP 连接管理器（stdio + http）
-│   │   │   └── servers/
-│   │   │       ├── db_query_server.py # 只读 SQL 查询（安全加固）
-│   │   │       └── time_server.py     # 时间/计算（AST 白名单）
-│   │   └── schemas/chat.py   #   ChatRequest / Response / AgentEvent
-│   ├── tests/                # pytest 测试（单元 + API 集成，DB 不可达自动跳过）
-│   └── scripts/              # init_db / ingest_docs / smoke_test / MCP 入口
-├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
-├── data/
-│   ├── kb/                   # 示例知识库文档
-│   └── uploads/              # 网页上传的原始文件（可下载/预览）
-└── docs/                     # 说明文档（本文档在此）
-```
-
----
-
-## 4. 架构总览
+## 3. 架构总览
 
 ```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 graph TD
     classDef agent fill:#e8f5e9,stroke:#388e3c
     classDef api fill:#ede7f6,stroke:#5e35b1
@@ -128,12 +64,9 @@ graph TD
     end
 ```
 
----
-
-## 5. 启动流程
+## 4. 启动流程
 
 ```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 sequenceDiagram
     participant U as run.py
     participant L as lifespan(main.py)
@@ -142,7 +75,7 @@ sequenceDiagram
     participant M as MCP管理器
     U->>U: Windows 设置 SelectorEventLoop
     U->>L: uvicorn 启动 app.main:app
-    L->>DB: init_db() 建表 + 索引
+    L->>DB: init_db() 建表 + 索引（含 vector_status 迁移）
     L->>MV: ensure_vector_store() 建collection + 索引 + 维度校验
     L->>DB: init_checkpointer() → AsyncPostgresSaver
     L->>DB: init_store() → AsyncPostgresStore（无pgvector则降级）
@@ -152,437 +85,81 @@ sequenceDiagram
     Note over L: 应用就绪 → 监听 http://localhost:8000
 ```
 
-> 关键：Windows 上必须用 `python run.py` 启动（`SelectorEventLoop`），
-> 否则 psycopg 异步（Checkpointer/Store）会因 `ProactorEventLoop` 报错。
+> Windows 上务必用 `python run.py` 启动（`SelectorEventLoop`），否则 psycopg 异步（Checkpointer/Store）会报错。
 
----
-
-## 6. 一次对话的数据流
-
-场景：前端发送"帮我统计数据库有多少个会话"（假设知识库开关关闭）。
+## 5. 一次对话的数据流
 
 ```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
 sequenceDiagram
     participant FE as 前端 (frontend-v2 Vue 3)
     participant C as chat.py (SSE)
     participant G as graph.stream_agent
     participant S as Supervisor图
     participant DB as Postgres
-    FE->>C: POST /api/chat/stream {session_id, message, use_rag=false, use_search}
+    FE->>C: POST /api/chat/stream {session_id, message, use_rag, use_search}
     C->>C: 线程池(to_thread): 保存用户消息
     C->>G: stream_agent(question, use_rag=false...)
-    G->>G: 动态生成 supervisor 提示词（知识库关→禁止rag_agent）
+    G->>G: 动态生成 supervisor 提示词（prompts.py）
     G->>S: graph.astream(stream_mode=["updates","messages"])
     S->>S: LLM 决策
     S-->>FE: updates流 → [工具]/[Agent] 事件
     S-->>FE: messages流 → token 帧（开场白一次性推送 + 答案逐字）
     G-->>C: 返回 answer + used_agents
-    C->>DB: 线程池: 保存 assistant 消息
+    C->>DB: 线程池: 保存 assistant 消息（含引用来源）
     C-->>FE: SSE: message 帧（最终快照 + session_id）
 ```
 
-| 步骤 | 发生什么 | 位置 |
-|------|---------|------|
-| 1 | 前端发起 SSE 请求 | `frontend-v2: api/index.ts streamChat` |
-| 2 | 线程池里保存用户消息（不阻塞事件循环）| `chat.py` |
-| 3 | 按开关动态生成 supervisor 提示词 | `graph.py` |
-| 4 | `astream` 双模式跑 Supervisor 图 | `graph.py` |
-| 5 | Supervisor 调用工具（记忆/数据库/搜索）| `tools.py` |
-| 6 | updates → 事件帧；messages → token 帧 | `graph.py → chat.py` |
-| 7 | 前端实时追加答案 | `frontend-v2: stores/chat.ts + MessageItem` |
-| 8 | 保存回答 + 发最终快照帧 | `chat.py` |
-| 9 | 会话 updated_at 刷新 → 排最前 | `postgres.py` |
+**流式时序要点**：开场白缓冲后一次性推送（检测 `tool_call`）→ 工具执行 → 答案逐 token，
+且经 `streaming.py::_PreludeDedupe` 前缀去重（LLM 常把开场白连同答案重新生成）。
 
-> **流式时序细节**：工具调用前的**开场白**会被缓冲（不立即推送），检测到 `tool_call` 时一次性推送完整开场白
-> （`_emit_tool`），随后工具执行（前端轨道光晕）；工具完成后的答案才逐 token 推送，且经 `_PreludeDedupe`
-> **前缀去重**（LLM 常把开场白连同答案一起重新生成，需跳过重复前缀）。无工具的直接回答在流结束时一次性补推。
+## 6. 核心模块速览（细节见 DEEP_DIVE）
 
----
+| 模块 | 一句话职责 | DEEP_DIVE |
+|------|-----------|-----------|
+| `app/agents/` | Supervisor 图（graph.py）+ 工具族包（tools/）+ LLM 工厂 + prompts/streaming | [§4-§5](DEEP_DIVE.md#4-agent-编排-graphpy) |
+| `app/rag/` | 摄入（ingestion + extractors + chunkers）→ 混合检索（hybrid + bm25 + rerank）→ 后处理（postprocess） | [§6](DEEP_DIVE.md#6-rag-实现链路-rag) |
+| `app/db/` | Postgres CRUD + Checkpointer/Store（三层记忆）+ `vector_status` 对账标记 | [§7](DEEP_DIVE.md#7-记忆实现-dbmemory_storepy) |
+| `app/api/` | chat（SSE）/ sessions / rag / memory / auth / tasks / admin / search / agent-tasks | [§8](DEEP_DIVE.md#8-fastapi-部分-apimainpy) |
+| `app/mcp_integration/` | MCP 连接管理 + 自建 db/time 服务器 | [§9](DEEP_DIVE.md#9-mcp-集成-mcp_integration) |
+| `frontend-v2/` | Vue 3 + SSE 流式渲染 + HITL 确认卡片 + Orbit 轨道 | [§10](DEEP_DIVE.md#10-前端与-sse-交互frontend-v2vue-3) |
+| `task-agent/` | 项目 2 独立包（宿主经 `task_agent_adapter.py` 注入） | [AGENT_TASK](AGENT_TASK.md) |
 
-## 7. 核心模块深入
+## 7. 关键设计决策
 
-### 7.1 配置中心 `config.py`
-- pydantic-settings 从 `.env` 加载
-- 连接：Postgres / Milvus 的 DSN（`postgres_dsn` 供 SQLAlchemy，`postgres_conninfo` 供 psycopg）
-- LLM：`llm_provider`（默认 deepseek）+ 各 provider key/model + `llm_timeout` / `llm_max_retries`
-- 检索：`rag_top_k` / `score_threshold` / `chunk_size` + 混合检索 + rerank
-- 记忆：`memory_semantic_search` / `memory_dedup_threshold`
-- 健壮性：`agent_timeout`（单轮超时）
-- MCP：自建命令 + 外部 `EXTERNAL_MCP_SERVERS`
-- CORS 白名单（localhost:8000）
+1. **同步 ORM + 线程池**：SQLAlchemy 保持同步，热点路由用 `anyio.to_thread`——不改全异步又不阻塞事件循环；
+2. **开关与提示词联动**：工具注册 + system prompt 随 `use_rag/use_search` 动态变化（避免幻觉调用不存在的工具）；
+3. **混合检索不依赖 Milvus sparse**：pymilvus 2.4+ 未启用稀疏检索，Python 侧 BM25 + Postgres 文本 + RRF；
+4. **Postgres 唯一事实源**：Milvus 是派生索引（`vector_status` 标记 + `sync_chunks` 幂等同步 + `reconcile_vectors` 对账）；
+5. **记忆语义检索自动降级**：无 pgvector 时降级关键词检索，服务不中断；
+6. **token 级流式**：`astream(stream_mode=["updates","messages"])`，只流式顶层 supervisor 的 AI token。
 
-### 7.2 数据库 `db/`
-| 文件 | 职责 |
-|------|------|
-| `models.py` | `sessions`（会话）、`messages`（消息）、`documents`（文档块，每块一行）|
-| `postgres.py` | 同步 SQLAlchemy CRUD + `init_db()` 幂等建索引 |
-| `memory_store.py` | `AsyncPostgresSaver`（Checkpointer）+ `AsyncPostgresStore`（Store）全局单例 |
+完整 14 项决策/坑见 [DEEP_DIVE §12](DEEP_DIVE.md#12-关键设计决策与坑)。
 
-> 同步引擎 + `anyio.to_thread`：不改 ORM 为异步，热点路由也不阻塞事件循环。
+## 8. 常用命令
 
-### 7.3 Agent 编排 `agents/`
-- `graph.py`：`get_supervisor_graph()`（构建+缓存）、`_build_supervisor_prompt()`（动态提示词）、`_prepare_run()`（输入组装/Time Travel 分叉）、`run_agent()`（非流式）、`stream_agent()`（token 流式）
-- `tools.py`：构建子 Agent（rag/mcp/code）、web_search 直接搜索工具、记忆工具（remember 带语义去重）、`request_confirmation` 确认工具、`agent_to_tool()` 包装
-- `llm.py`：LLM 工厂（provider 选择 + 统一超时/重试）
-- `context.py`：`UserContext(user_id)` 运行时上下文
-
-### 7.4 RAG 链路 `rag/`
-```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
-flowchart LR
-    classDef agent fill:#e8f5e9,stroke:#388e3c
-    classDef mem fill:#fce4ec,stroke:#c2185b
-    classDef rag fill:#fff3e0,stroke:#f57c00
-    classDef tool fill:#eceff1,stroke:#455a64
-    A["上传/摄入"]:::rag --> B["Postgres documents + Milvus 向量"]:::mem
-    Q["查询"]:::rag --> C["retriever(原 query + 改写双路)"]:::rag
-    C --> D["hybrid.search_hybrid"]:::rag
-    D --> E["向量通道 vector_store.search"]:::rag
-    D --> F["BM25 通道 bm25.py"]:::rag
-    E --> G["RRF 融合"]:::tool
-    F --> G
-    G --> H["rerank.py 精排"]:::rag
-    H --> I["LLM 生成"]:::agent
+```powershell
+docker compose up -d                 # 启动数据库
+cd backend; python run.py            # 启动后端（Windows）
+python scripts/ingest_docs.py D:\your_docs_folder   # 摄入文档
+python scripts/smoke_test.py         # 冒烟（健康 / RAG / MCP / 搜索）
+python -m pytest tests/unit -q       # 单元测试
+python -m pytest tests/integration -v  # 集成测试（需 DB）
+python ../task-agent -m pytest ../task-agent/tests -q  # 项目2 测试
 ```
 
-> 检索块/搜索块在喂给 LLM 前经 `prompt_injection.py` 处理：不可信数据块隔离 + 注入指令检测剔除（用户 query 注入直接 400，详见 `app/rag/prompt_injection.py`）。
-
-### 7.5 记忆机制（三层）
-| 层 | 机制 | 作用域 | 实现 |
-|----|------|--------|------|
-| 短期 | Checkpointer | 会话内（`thread_id=session_id`）| 图状态跨请求持久 |
-| 运行时 | `context_schema=UserContext` | 单次调用 | `context=` 传入，工具经 `get_runtime()` 访问 |
-| 长期 | Store `namespace=(user_id,"memories")` | 跨会话 | `remember/recall` 工具 + `/api/memory` 面板 |
-
-### 7.6 MCP 集成
-- `client.py`：`AsyncExitStack` 管理连接；自建走 stdio（子进程），外部走 streamable http
-- 工具转 `StructuredTool` 并加 `{server}_` 前缀防冲突
-- 自建服务器：`db_query_server.py`（只读 SQL 加固）+ `time_server.py`（AST 白名单）
-
-### 7.7 API 路由
-| 路由 | 端点 | 职责 |
-|------|------|------|
-| chat | `/api/chat`、`/api/chat/stream` | 非流式 / SSE token 流式 |
-| sessions | `/api/sessions` CRUD + `/batch-delete` + `GET /{id}/stats` + `GET /{id}/export` + `GET /{id}/checkpoints` | 会话管理 + 历史 + 批量删除 + 数据分析 + 导出 Markdown + 版本历史（Time Travel） |
-| rag | `/upload`、`/documents`、`/documents/file`、`/search` | 上传/列表/预览下载/删除/检索 |
-| memory | `/api/memory` | 长期记忆 CRUD（`?query=` 语义检索）|
-| auth | `/api/auth/register`、`/login`、`/me`、`/stats` | 注册 / 登录 / 当前用户 / 统计 |
-| tasks | `/api/tasks` CRUD + `/registry` + `/{id}/run` | 定时任务管理 + 手动触发 |
-| models | `/api/models`、`/api/models/current` | 可用模型列表 + 运行时切换 |
-| health | `/api/health` | Postgres / Milvus / MCP 健康 |
-
-### 7.8 前端 `frontend-v2/`（Vue 3 + Vite + TypeScript）
-- `api/`：统一 HTTP 层（`client.ts` + `token.ts` + `index.ts`，含 `streamChat` SSE）
-- `utils/sse.ts`：SSE 流式解析（`ReadableStream` 按 `\n\n` 分帧 → JSON → onEvent）
-- `utils/markdown.ts`：marked 单例 + highlight.js 高亮 + DOMPurify 消毒
-- `stores/chat.ts`：流式状态机（token 累积 / interrupt→HITL 同气泡 resume / orbit 轨道）
-- `components/`：侧边栏（会话/文档/记忆）、聊天区、弹窗（用量/任务/版本历史）、暗/亮主题切换
-- Vitest 单测：`src/**/*.{test,spec}.ts`（SSE 解析 / markdown / chat store）
-
----
-
-## 8. 关键设计决策
-
-1. **同步 ORM + 线程池**：SQLAlchemy 保持同步，热点路由用 `anyio.to_thread`——避免全异步大改，又不阻塞事件循环
-2. **开关与提示词联动**：工具注册 + system prompt 都随 `use_rag/use_search` 动态变化（避免 LLM 幻觉调用不存在的工具）
-3. **混合检索不依赖 Milvus sparse**：pymilvus 3.0 无 `pymilvus.model`，改用 Python 侧 BM25 + Postgres 文本 + RRF，避免 collection 迁移
-4. **记忆语义检索自动降级**：无 pgvector 时降级关键词检索，服务不中断
-5. **原始文件持久化**：上传文档存 `data/uploads/`，可下载/预览，删除时清理
-6. **token 级流式**：`graph.astream(stream_mode=["updates","messages"])`，只流式顶层 supervisor 的 AI token（`checkpoint_ns` 不含 `|`）
-
----
-
-## 9. 常见坑与经验
+## 9. 常见坑
 
 | 问题 | 原因 / 处理 |
 |------|------------|
 | Windows 下 Checkpointer 报错 | 必须用 `python run.py`（SelectorEventLoop）|
 | `extension "vector" is not available` | Postgres 非 pgvector 镜像；重建容器即可（见 SETUP）|
 | 关闭知识库开关仍"查到"知识库 | 曾是静态 prompt 导致 LLM 幻觉；已改为动态 prompt |
-| 模型缓存占 C 盘 | 已迁移到 `D:\HuggingFaceCache`（Junction + `HF_HOME`）|
 | MCP 服务器启动失败 | 用 `python run.py` 从 backend 启动（脚本路径相对 backend）|
 
----
-
-## 10. 常用命令速查
-
-```powershell
-# 启动数据库
-docker compose up -d
-
-# 启动后端（Windows）
-cd backend; python run.py
-
-# 摄入文档
-python scripts/ingest_docs.py D:\your_docs_folder
-
-# 冒烟测试（健康 / RAG / MCP / 搜索）
-python scripts/smoke_test.py
-
-# 单元测试（纯逻辑，不依赖外部服务）
-pip install -r requirements-dev.txt
-python -m pytest tests/unit -q
-
-# API 集成测试（需 Docker 依赖运行中；覆盖会话/记忆/RAG/chat/HITL，DB 不可达自动跳过）
-python -m pytest tests/integration -v
-```
-
----
-
-## 11. MCP 深入
-
-### 11.1 MCP 是什么
-
-**MCP（Model Context Protocol，模型上下文协议）**：一种让 LLM 应用接入外部工具/数据的标准协议。
-本项目把它当作"Agent 的工具总线"——通过 MCP 服务器暴露数据库查询、时间计算、外部 API 等能力。
-
-### 11.2 架构
-
-```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
-graph TD
-    classDef agent fill:#e8f5e9,stroke:#388e3c
-    classDef mcp fill:#e0f7fa,stroke:#00838f
-    subgraph 主进程 backend
-        AGENT[MCP Agent 子Agent]:::agent --> CLIENT[McpClientManager client.py]:::mcp
-        CLIENT -->|stdio 子进程| DB[自建 db_query_server]:::mcp
-        CLIENT -->|stdio 子进程| TIME[自建 time_server]:::mcp
-        CLIENT -->|streamable http| EXT[外部 MCP 服务器 可选]:::mcp
-    end
-```
-
-`app/mcp_integration/client.py` 统一管理两类连接：
-
-| 类型 | 传输 | 启动方式 | 说明 |
-|------|------|---------|------|
-| 自建 | **stdio** | 子进程拉起（FastMCP 实现）| `db_query_server.py` / `time_server.py` |
-| 外部 | **streamable http** | `EXTERNAL_MCP_SERVERS` 配置（name=url）| 可选 |
-
-### 11.3 工具转换链路
-
-```
-MCP 服务器 → 工具列表(tool.name/description/inputSchema)
-          → client.py 转 StructuredTool（工具名加 {server}_ 前缀防冲突）
-          → build_mcp_agent() 把工具绑定给 MCP 子 Agent
-          → supervisor 通过 mcp_agent 调用
-```
-
-关键代码（`client.py`）：
-
-```python
-# 1. 建立连接
-ctx = stdio_client(StdioServerParameters(command=cmd, args=args))
-read, write = await stack.enter_async_context(ctx)
-session = await stack.enter_async_context(ClientSession(read, write))
-await session.initialize()
-tools = (await session.list_tools()).tools
-
-# 2. 转成 LangChain 工具（名称加前缀）
-name = f"{server_name}_{mcp_tool.name}"   # 例如 db_query_postgres
-args_schema = json_schema_to_pydantic(mcp_tool.inputSchema)
-return StructuredTool(name=name, description=..., args_schema=args_schema, coroutine=_arun)
-```
-
-### 11.4 自建服务器与安全加固
-
-| 服务器 | 能力 | 安全设计 |
-|--------|------|---------|
-| `db_query_server.py` | 只读 SQL 查询 / 列表 / 统计 | 连接层 `default_transaction_read_only=on` + `statement_timeout=30s`（终极防护）+ sqlparse 校验（禁分号/DML/pg_ 系统目录）|
-| `time_server.py` | 时间 / 计算 | `calculate` 用 **AST 白名单**替代 eval（防任意代码执行）|
-
-### 11.5 如何新增一个 MCP 服务器
-
-**自建**（简单场景）：在 `app/mcp_integration/servers/` 新建脚本，用 FastMCP 暴露工具，
-然后到 `client.py` 的 `_builtin_servers()` 注册命令即可。
-
-**外部**（已有服务）：`.env` 配置一行：
-```
-EXTERNAL_MCP_SERVERS=github=http://localhost:8080/mcp,weather=http://localhost:8081/mcp
-```
-
-> 生命周期：应用启动 `start_all()` 拉起全部，关闭 `stop_all()` 用 `AsyncExitStack` 统一清理。
-
----
-
-## 12. 记忆机制原理
-
-### 12.1 三层记忆总览
-
-```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
-graph TB
-    classDef mcp fill:#e0f7fa,stroke:#00838f
-    classDef mem fill:#fce4ec,stroke:#c2185b
-    classDef tool fill:#eceff1,stroke:#455a64
-    subgraph 短期[短期记忆 Checkpointer]
-        A[AsyncPostgresSaver]:::mem -->|thread_id=session_id| B[checkpoints 表]:::tool
-    end
-    subgraph 运行时[运行时上下文 context_schema]
-        C[UserContext user_id]:::tool -->|context= 传入| D[工具经 get_runtime 访问]:::mcp
-    end
-    subgraph 长期[长期记忆 Store]
-        E[AsyncPostgresStore]:::mem -->|namespace user_id,memories| F[store 表]:::mem
-    end
-```
-
-| 层 | 机制 | 作用域 | 持久化 |
-|----|------|--------|--------|
-| 短期 | `AsyncPostgresSaver`（Checkpointer）| 会话内 | ✅ 图状态跨请求 |
-| 运行时 | `context_schema=UserContext` | 单次调用 | ❌ 仅当次 |
-| 长期 | `AsyncPostgresStore`（Store）| 跨会话 | ✅ namespace 隔离 |
-
-### 12.2 短期记忆（Checkpointer）原理
-
-- 图编译时传 `checkpointer=AsyncPostgresSaver`
-- 每次调用带 `config={"configurable": {"thread_id": session_id}}`
-- LangGraph 自动把图的**状态**（含 messages 历史）存到 Postgres `checkpoints` 表
-- 效果：同一 `thread_id` 的下一轮，图自动恢复历史 → 多轮对话连续
-
-```python
-graph = create_agent(..., checkpointer=AsyncPostgresSaver)
-await graph.ainvoke({"messages": [...]},
-                    config={"configurable": {"thread_id": session_id}})
-```
-
-### 12.3 长期记忆（Store）原理
-
-- 图编译时传 `store=AsyncPostgresStore`
-- 工具通过 `runtime.store` 读写，namespace 形如 `(user_id, "memories")`
-- `aput` 写入 / `asearch` 检索 / `adelete` 删除（跨会话、跨线程持久）
-
-```python
-async def _arun(content: str) -> str:
-    rt = get_runtime()                 # 工具内获取 Runtime
-    user = getattr(rt.context, "user_id", "default")
-    await rt.store.aput((user, "memories"), uuid4().hex, {"content": content})
-```
-
-**语义检索**：Store 初始化时挂 `IndexConfig`（复用 bge embedding）→ `asearch(query=...)`
-按语义相似度召回。需要 Postgres 启用 **pgvector**；无扩展时**自动降级**为关键词检索。
-
-**写入去重**：`remember_memory` 先 `asearch(query=content)` 找相似记忆，
-余弦相似度 ≥ `memory_dedup_threshold`（0.86）时**更新该条**而非新增，避免重复。
-
-### 12.4 与 LangGraph 官方机制对齐
-
-项目使用的三层记忆均为 LangGraph **官方机制**（`create_agent` 的参数）：
-
-- Checkpointer → `AsyncPostgresSaver`（官方 `langgraph-checkpoint-postgres`）
-- Store → `AsyncPostgresStore` + `IndexConfig`（官方 `langgraph.store`）
-- 运行时上下文 → `context_schema` + `get_runtime()`（官方 `langgraph.runtime`）
-
-> 工具的 `get_runtime()` 是 LangGraph 官方公开 API；官方更推荐声明式 `InjectedStore` 参数注入，
-> 两者功能等价，本项目用 `get_runtime()` 已实测可用。
-
-### 12.5 完整记忆读写链路
-
-```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
-sequenceDiagram
-    participant U as 用户
-    participant S as Supervisor
-    participant T as 工具 remember/recall
-    participant ST as Store(Postgres)
-    U->>S: "记住我是后端工程师"
-    S->>T: 调用 remember_memory
-    T->>T: 语义检索去重(asearch query=content)
-    T->>ST: 相似则 aput 更新 / 否则新建
-    S-->>U: "已保存到长期记忆"
-```
-
-### 12.6 Time Travel（版本历史 / 分叉）
-
-Checkpointer 每执行一步都会落一个 checkpoint，`parent_checkpoint_id` 串成**版本链**。基于它可实现 **Time Travel**：查看会话每一步的历史状态，并**从任意历史点分叉重新生成**。
-
-- **机制**：`config = {"configurable": {"thread_id": sid, "checkpoint_id": cid}}` 时，LangGraph 会从该历史 checkpoint 的状态**继续执行**（即在该点 fork 新分支，不覆盖原历史）。
-- **后端**：`graph.py::list_checkpoint_history()` 用 `aget_state_history` 列出快照（checkpoint_id / parent / 时间 / next / 最后AI消息摘要 / 是否中断）；`_prepare_run(..., checkpoint_id)` 在 config 注入分叉点。
-- **API**：`GET /api/sessions/{id}/checkpoints` 拉时间线；`/api/chat(/stream)` 请求体 `checkpoint_id` 触发分叉；`resume` 与 `checkpoint_id` 互斥（400）。
-- **前端**：会话头部「⏪ 版本历史」→ modal 时间线（#1 最新），每条可「🔄 从这步重跑」→ 输入新消息程序化发送。
-- **验证**：多轮对话产生多个 checkpoint；从历史点 fork 后 checkpoint 数量增加（新分支）；无 LLM 时的空历史/冲突校验也有单测覆盖。
-
-## 13. 人工确认（HITL，Human-in-the-Loop）
-
-让 Agent 在执行**有副作用/外部影响**的操作（联网搜索、数据库写入、外部工具）前，暂停等待用户在界面上确认——本质是 LangGraph 官方的 `interrupt` / `Command(resume)` 机制。
-
-### 13.1 机制原理
-
-- **`interrupt(...)`**：在工具内部调用会**暂停图的执行**，返回 `__interrupt__`；当前状态（含未完成的 tool_calls）由 Checkpointer 持久化到 Postgres。
-- **`Command(resume=...)`**：带上用户的选择（`confirmed` / `cancelled`）从**同一 `thread_id`** 恢复执行，`interrupt()` 的返回值即 resume 传入的值。
-- **状态不丢失**：恢复时 Checkpointer 把整个图状态（历史消息、中断点）装回来，Agent 无缝继续。
-
-### 13.2 一次确认的完整时序
-
-> 注：下图描述的是**强制确认模式**（`HITL_ACTIONS` 非空，工具设 `confirm_before`）。默认 **LLM 自主判定**（`HITL_ACTIONS=[]`）时，supervisor 改为主动调用 `request_confirmation` 工具请求授权，机制（`interrupt` + `Command(resume)`）相同。
-
-```mermaid
-%%{init: {"theme":"base", "themeVariables": {"primaryColor":"#ecf3ff", "primaryBorderColor":"#3b6fd4", "primaryTextColor":"#111", "lineColor":"#7a7a7a", "fontSize":"14px", "clusterBkg":"#f7f8fa", "clusterBorder":"#c4c9d2", "secondaryColor":"#fef9ef", "tertiaryColor":"#f2f7f2", "actorBkg":"#ecf3ff", "actorBorder":"#3b6fd4", "noteBkg":"#fef9ef"}}}%%
-sequenceDiagram
-    participant U as 前端
-    participant API as FastAPI
-    participant G as LangGraph 图
-    participant DB as Checkpointer(Postgres)
-    U->>API: POST /stream {message:"搜索最新AI新闻"}
-    API->>G: stream_agent(resume=None)
-    G->>G: supervisor 决策 → 调 web_search(confirm_before)
-    G->>G: 工具内 interrupt({type:"confirmation", question})
-    G->>DB: 保存中断点(thread_id=session_id)
-    G-->>API: __interrupt__ → 事件 interrupt(question+session_id)
-    API-->>U: SSE: interrupt 帧 → 弹确认卡片
-    U->>API: POST /stream {resume:"confirmed", session_id}
-    API->>G: stream_agent(resume="confirmed") → Command(resume)
-    G->>DB: 读取中断点，恢复执行
-    G->>G: 真正调用 web_search → Tavily 搜索
-    G-->>API: token 帧 + end 事件
-    API-->>U: SSE: token 流 → message 帧(最终答案)
-```
-
-### 13.3 代码实现（三个层面）
-
-**1) 强制确认（`app/agents/tools.py`）**
-```python
-# 子 Agent 工具（rag/mcp）：agent_to_tool._arun（经共享帮助函数 _confirm_or_cancel）
-async def _arun(query: str) -> str:
-    if confirm_before:
-        # _confirm_or_cancel 内部 interrupt 并校验返回是否为 confirmed
-        if not await _confirm_or_cancel(question, data):
-            return f"操作已取消：用户未确认调用 {name}。"  # 不执行子 Agent
-    result = await agent.ainvoke({"messages": [("user", query)]})
-    ...
-```
-搜索（`build_search_tool`）是**直接 Tavily 工具**，同样支持工具内部 `interrupt` 确认
-（`_make_search_arun`，经同一 `_confirm_or_cancel`）。
-`graph.py` 里 `_needs_confirm(action)` 按 `settings.hitl_actions` 决定哪些子 Agent/工具加 `confirm_before=True`。
-**HITL 两种模式**：默认 `HITL_ACTIONS=[]` 为 **LLM 自主判定**（注册 `request_confirmation` 工具，由模型判断
-何时请求授权，类似 Claude Code/Codex）；配置非空时为**强制确认**，且有前端开关的动作
-（search/rag/remember）在开关打开时自动豁免（开关即授权）。
-
-**2) 软性确认（`build_confirmation_tool`）**
-当 `HITL_ACTIONS` 为空时注册 `request_confirmation` 工具，supervisor 主动请求确认。
-> 设计取舍：`HITL_ACTIONS` 非空时**不注册**该工具——否则 LLM 可能"先 request_confirmation 再触发 confirm_before"造成双重确认。强制确认更可靠。
->
-> **开关即授权**：`_build_supervisor_prompt` 的 LLM 自主判定分支明确约束——**开关已开启的能力（联网 / 知识库 / 记忆）视为已授权，直接执行、绝不请求确认**；`request_confirmation` **仅**用于没有开关控制的高风险 / 外部操作（数据库写入、外部 MCP 调用、不可逆操作等），或用户明确要求确认时。
-
-**3) 恢复链路（`app/api/routes/chat.py` + `graph.py`）**
-- `ChatRequest.resume` 透传到 `run_agent`/`stream_agent`；非空时用 `Command(resume=resume)`，**跳过**保存用户消息（消息已在历史中）。
-- `run_agent`/`stream_agent` 检测 `__interrupt__` → `hitl_pending`，SSE 推 `interrupt` 事件（`chat.py` 补充 `session_id` 供前端 resume 复用同一线程）。
-- HITL 等待确认时**不保存空 assistant 消息、不推 `message` 帧**，避免污染会话历史。
-
-### 13.4 前端（`frontend-v2/`）
-
-- `stores/chat.ts::_handleEvent` 统一处理 `token`/`message`/`interrupt`/`start`/`tool`/`end`/`error`；收到 `interrupt` 记录 `hitlMsgId`，气泡内渲染确认卡片（问题 + 确认/取消）。
-- 点击后 `resume(choice, sessionId)` 复用**同一消息**（`hitlMsgId`）以 `resume=confirmed|cancelled` + 原 `session_id` 重发 `/api/chat/stream`，轨道在同一气泡内继续（不新建气泡）。
-
-### 13.5 配置（`backend/.env`）
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `HITL_ENABLED` | `true` | 总开关 |
-| `HITL_ACTIONS` | `[]` | 空=LLM 自主判定（默认）；非空（如 `mcp`）=强制确认（逗号分隔：`search`/`rag`/`mcp`/`remember`；有开关的动作开关打开时自动豁免） |
-
-### 13.6 常见坑
-
-- **中断会话勿直接续发新问题**：中断点含"未完成的 tool_calls"消息，若在同一会话直接发新消息（不先确认/取消），把该历史发给 LLM 会触发 400（tool_calls 无对应 tool 消息）。**防护**：`chat.py` 的 `_check_pending_interrupt` 在复用会话发普通新消息前用 `graph.aget_state` 检查是否有 pending interrupt，有则返回 **409 明确提示**（"请先点击上一条的【确认执行/取消】按钮，或新建会话继续"）。应先点确认/取消，或另开新会话。
-- **双重确认**：`HITL_ACTIONS` 非空时不要同时期望 supervisor 主动 request_confirmation（本实现已避免注册）。
-- **thread_id 一致性**：resume 必须用**同一** `session_id`（= Checkpointer `thread_id`），否则找不到中断点。
-
+## 10. 深读指引
+
+- 函数级实现：**[DEEP_DIVE.md](DEEP_DIVE.md)**（配置 → LLM → Agent → RAG → 记忆 → API → MCP → 前端 → Windows 兼容）；
+- RAG 设计决策与失败模式：**[RAG_DESIGN_ANALYSIS.md](RAG_DESIGN_ANALYSIS.md)**；
+- 评估与基线：**[EVALUATION.md](EVALUATION.md)** + [docs/README.md 唯一基线](README.md)；
+- 历史实验：**[EXPERIMENTS.md](EXPERIMENTS.md)**；面试素材：**[interview/](interview/)**；
+- 项目 2：**[AGENT_TASK.md](AGENT_TASK.md)** + [task-agent/README](../task-agent/README.md)。

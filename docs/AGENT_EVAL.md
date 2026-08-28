@@ -1,6 +1,7 @@
 # Agent 编排质量评估（eval_agent.py）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
+> 最后校验：2026-08-29（结果与 `data/eval/agent/agent_eval.json` 快照一致；复现见 §4）
 
 > 目的：量化 supervisor 的**路由决策质量**——该用 RAG 的用对了吗？危险操作拒绝了吗？
 > 这是评估体系的补盲：RAG 评估管「检索+生成质量」，Agent 评估管「编排是否正确」。

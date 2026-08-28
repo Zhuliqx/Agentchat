@@ -1,6 +1,7 @@
 # 环境搭建（Setup）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 本文档说明如何在 Windows（Docker Desktop 运行数据库）上把项目跑起来。
 
@@ -56,6 +57,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+`requirements.txt` 含本地路径依赖 `-e ../task-agent`（项目 2 独立包，随主项目一起安装）。
 首次安装 `sentence-transformers` 会自动下载 torch，体积较大，请耐心等待。
 （如网络受限，可考虑只用 OpenAI 的 embedding：见第 3 步。）
 
@@ -87,7 +89,7 @@ Copy-Item .env.example .env
 - **容错**：`AGENT_CACHE_ENABLED=true`（图执行/LLM 提示缓存）、`SUBAGENT_RETRIES=1`（子 Agent 重试）。模型调用超时/重试由 LLM 客户端（`LLM_TIMEOUT`/`LLM_MAX_RETRIES`）与统一 middleware（超时 + 日志）负责。
 - **模型离线加载**：`HF_OFFLINE=true`（默认）——embedding/rerank 已本地缓存时直接离线加载，避免 HF 网络不可达时启动/首次请求联网 HEAD 卡住重试；需下载新模型时临时设 `false`。
 - **日志与上传**：`LOG_LEVEL=INFO`（DEBUG/INFO/WARNING/ERROR）、`MAX_UPLOAD_MB=50`（上传文档大小上限）。
-- **外部 MCP**（可选）：`EXTERNAL_MCP_SERVERS=github=http://localhost:8080/mcp`
+- **外部 MCP**（可选）：`EXTERNAL_MCP_SERVERS={"github": "http://localhost:8080/mcp"}`（JSON；兼容旧 `name=url` 逗号格式）
 
 ## 4. 初始化数据库
 
@@ -198,7 +200,8 @@ pip install -r requirements-dev.txt
 .\venv\Scripts\python.exe -m pytest tests/unit -q
 ```
 
-覆盖：BM25 索引、SQL 只读校验、文档分块、RRF 融合。
+覆盖：BM25、SQL 只读校验、分块/解析、RRF、混合检索后处理、查询改写、Prompt 注入、Agent 流式/路由、
+图文双通道、配置、向量库一致性等；另有顶层 `task-agent/` 独立包测试（`pytest task-agent/tests -q`）。
 
 **API 集成测试**（需运行中的 Postgres/Milvus/MCP 依赖，即 Docker 服务已启动）：
 

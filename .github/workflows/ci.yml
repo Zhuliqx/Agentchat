@@ -22,7 +22,13 @@ jobs:
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
       - name: "Ruff lint (errors only: F - undefined / unused)"
-        run: ruff check backend/app --select F
+        run: |
+          ruff check backend/app --select F
+          ruff check task-agent/src --select F
+
+      - name: "Docs stale-symbol check"
+        working-directory: backend
+        run: python scripts/check_docs_stale.py
 
       # Pyright 类型检查：报告但不阻塞（项目含大量第三方库类型噪音，
       # 见 docs/EXPLAIN.md；待 langchain 1.x 升级后收紧）
@@ -34,6 +40,9 @@ jobs:
       # 集成测试（tests/integration）需 Docker 依赖，由 rag-regression job 跑。
       - name: "Unit tests (no external services)"
         run: pytest backend/tests/unit -q
+
+      - name: "task-agent package tests"
+        run: pytest task-agent/tests -q
 
   frontend:
     name: Frontend

@@ -1,6 +1,8 @@
 # 性能压测报告（benchmark.py）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 本文数字为 **2026-08 实验快照**，复现方法见 §5。
 
 > 目的：量化检索链路与完整对话的真实性能，为扩展决策（单 worker 何时不够、rerank 是否值得、GPU 必要性）提供数据依据。
 
@@ -18,7 +20,7 @@
 - 脚本 `scripts/benchmark.py`：asyncio + httpx 并发，固定请求数（c1=60、c4/c8=200），warmup 3 次避模型首加载；
 - 检索链路：`POST /api/rag/search`（与 RAG Agent 同路径：混合检索 → rerank → 去重合并）；
 - 完整对话：`POST /api/chat/stream`（SSE），测 **TTFB（首 data 帧）** 与总耗时；
-- rerank A/B：同一端口重启服务，进程内 `os.environ["RERANK_ENABLED"]="false"` 确保生效。
+- rerank A/B：在 `backend/.env` 设 `RERANK_ENABLED=false` 后重启服务（配置在启动时读取），各跑一轮再对比。
 
 ## 3. 结果
 
@@ -63,11 +65,11 @@ rerank on/off 同并发延迟差异 <5%（c1: 82 vs 83ms；c8: 487 vs 507ms）�
 检索 83ms vs 完整对话 4986ms（p50）：LLM 生成占 ~98%。
 SSE TTFB 仅 ~19ms（首事件即时），用户感知瓶颈在模型生成速度，不在服务端链路。
 
-### 4.4 测量教训：`rerank_score` 是 Milvus 残留字段
+### 4.4 测量要点：用 `rerank_score` 验证精排生效
 
-`/api/rag/search` 返回的 hit 里 `rerank_score` 来自**摄入时写入 Milvus 的 metadata**
-（连同 `H1/H2/chunk`），不是本次请求 rerank 执行的证据——判断 rerank 是否生效
-必须看 `settings.rerank_enabled`，不能看响应字段。
+`/api/rag/search` 返回的 hit 里 `rerank_score` 由**本次请求** `retriever._finalize`
+中的 rerank 步骤写入（`rerank.py` 给候选打分后回填），是 rerank 确实执行的证据；
+同时可结合 `settings.rerank_enabled` 确认开关状态（CI 关闭 rerank 时该字段为 `null`）。
 
 ## 5. 复现
 

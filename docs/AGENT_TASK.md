@@ -1,8 +1,11 @@
-# 自主任务 Agent（task_agent/）
+# 自主任务 Agent（task-agent/ 独立包）
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；独立包 README 见 [task-agent/README](../task-agent/README.md)。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 > 区别于主项目（Agentchat 的知识库问答/单轮路由）。这是一个**自主任务执行器**：
-> 接收模糊目标 → LLM 分解/每步重规划 → 循环执行（复用现有子 Agent）→ 结构化交付。
+> 接收模糊目标 → LLM 分解/每步重规划 → 循环执行（宿主注入执行器，复用现有子 Agent）→ 结构化交付。
+> 引擎本体是仓库顶层 `task-agent/` 的独立 Python 包（零 `app.*` 依赖），主项目通过
+> `backend/app/agents/task_agent_adapter.py` 注入 LLM / Checkpointer / `run_agent` 执行器。
 
 ## 1. 与主项目的区别
 
@@ -57,7 +60,7 @@ flowchart TB
 - **confirm_node（节点级 HITL）**：replan 产出下一步后 `interrupt` 让用户确认（proceed/edit/skip）；依赖 Postgres checkpointer，未连库自动降级全自主；`TASK_AGENT_HITL=false` 也可关；
 - **execute_action_node**：按 `expected_source` 收紧开关 + 前缀引导（设计 A）；失败返回 finding（不计重试次数），重试计数保留；
 - **verify_node（自检重试）**：子任务失败(失败/无输出)后 LLM 判是否值得重试，未达 `TASK_AGENT_MAX_RETRIES` 则回 execute（不计步数），否则放弃进 check；
-- **check_node**：判定是否充分达成 + `MAX_STEPS` 规则兜底防循环；
+- **check_node**：判定是否充分达成 + `config.max_steps` 规则兜底防循环；
 - **final_node**：整合所有 findings 输出交付。
 
 ### 节点级 fault tolerance（LLM 节点）
@@ -66,10 +69,13 @@ flowchart TB
 - **`error_handler`**：重试耗尽后降级，返回 **`Command(update, goto)`** 才能续跑；每节点最多一个。
 - 例外：`execute`/`execute_action` 是“业务子任务”（失败标记 finding → 交 verify 语义重试），**不参与**上述 retry/timeout/error_handler。
 
-## 3. 复用现有能力（零改造）
-- LLM 工厂 `get_llm`、工具/子 Agent（rag/mcp/web_search/code）作执行器；
-- **Checkpointer**（长任务可中断/恢复 + HITL + Time Travel）；
-- 可观测（Langfuse）；评估基建（FakeLLM 单测 + judge）。
+## 3. 接口缝与宿主注入
+- 包内定义 `TaskAgentConfig` / `LLMFactory` / `CheckpointerProvider` / `Executor(ExecuteRequest -> StepResult)`
+  四个接口缝，`build_agent(...)` 注入后返回编译图；
+- 宿主适配器：LLM 工厂 `get_llm("light")`、工具/子 Agent（rag/mcp/web_search/code）作执行器
+  （`run_agent` 包装，按 `expected_source` 收紧开关）；
+- **Checkpointer**（长任务可中断/恢复 + HITL + Time Travel）；无 checkpointer 自动降级无状态；
+- 可观测（Langfuse）与评估基建（FakeLLM 单测 + judge）由宿主提供。
 
 ## 4. API 与关键配置
 - `POST /api/agent-tasks/run`：`{goal, session_id?, checkpoint_id?, checkpoint_ns?}`——新建任务，或带 `checkpoint_id` 分叉(带 goal)/重放(无 goal)；
@@ -83,11 +89,12 @@ flowchart TB
 - **verify 自检重试**：子任务失败 → verify 判重试 → 重试成功（findings 同时留失败+成功记录）；
 - **Time Travel 分叉**：从历史 checkpoint 改用新 goal → `update_state` → 续跑新分支；
 - **fault tolerance**：LLM 网络错误被 `_is_transient` 重试，error_handler 降级收敛兜底；
-- 单元测试 `tests/unit/test_task_agent.py`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级），全量单测通过 + Ruff 干净。
+- 单元测试 `task-agent/tests/`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级 + demo 离线全流程），
+  另有宿主适配器单测（source→开关映射 / 图缓存）；全量单测通过 + Ruff 干净。
 
 ## 6. 分期
 - ✅ **一期**：`fixed` Plan → Execute → Final + API；`TASK_AGENT_MODE=fixed`；
-- ✅ **二期**：`replan` 每步动态重规划 + 独立 `check` 判完成 + `MAX_STEPS` 防循环；
+- ✅ **二期**：`replan` 每步动态重规划 + 独立 `check` 判完成 + `max_steps` 防循环；
 - ✅ **信息源感知（L1+L2）**：replan 标注 `expected_source`，执行按源收紧开关 + 前缀引导——公司/产品优先知识库；
 - ✅ **三期**：节点级 HITL（confirm_node）+ 节点容错（verify_node）+ 状态 reducer；
 - ✅ **节点级 fault tolerance**：`retry_policy` + `timeout` + `error_handler`(Command) + 自定义 `retry_on`；

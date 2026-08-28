@@ -1,6 +1,7 @@
 # 部署与扩展性指南
 
-> 相关文档：[README](../README.md) · [架构文档地图](ARCHITECTURE.md) · [项目2·自主任务Agent](AGENT_TASK.md)
+> 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
+> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 > 目的：说明本项目当前的**单机部署模型**、为什么这么选（取舍）、以及在何时、如何演进到
 > 多 worker / 多副本。这是架构决策文档，面向面试沟通与运维排障。
@@ -38,7 +39,8 @@ flowchart TB
 | `_graph_cache`（supervisor 图） | `app/agents/graph.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
 | `_bm25_index` / `_signature_cache` | `app/rag/hybrid.py` | 每 worker 各一份内存索引 | 内存翻倍 |
 | `_INGEST_TASKS`（摄入任务表） | `app/api/routes/rag.py` | A worker 上传，B worker 查不到任务 | **功能错误** |
-| `_RAG_SOURCES`（引用溯源） | `app/agents/tools.py` | 溯源丢失 | 功能降级 |
+| `_RAG_SOURCES`（引用溯源） | `app/agents/tools/sources.py` | 溯源丢失 | 功能降级 |
+| `_host_agent_cache`（任务 Agent 图） | `app/agents/task_agent_adapter.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
 | `lru_cache`（embedder/reranker） | `app/rag/*` | 每 worker 一份模型实例 | 内存翻倍（~2GB） |
 
 > 关键认知：**当前架构 = "进程内缓存换零外部依赖"**。数据一致性靠"单进程持有全部状态"保证，
@@ -76,13 +78,8 @@ flowchart TB
 
 ## 4. 决策记录（面试可讲）
 
-**为什么一开始不直接分布式？**
-1. **复杂度 vs 收益**：项目定位是中小规模知识库问答，单机完全够用；分布式引入 Redis/队列/一致性，
-   运维成本远超收益；
-2. **BM25 内存化的性能收益**：单 worker 时 BM25 索引在进程内，检索 O(1) 命中，无网络往返；
-3. **一致性简单**：单进程天然无"缓存一致性"问题，不需要额外协调。
-
-**何时必须升级？** 见 §3 的触发信号——量化阈值出现时，按阶段 2 → 3 渐进，每步都有明确改动点。
+> 完整决策记录已移至 [interview/deployment.md](interview/deployment.md)（面试素材）。
+> 一句话版本：**单机 = 复杂度 / 性能 / 一致性的三权衡**；升级触发信号见 §3。
 
 ## 5. 生产部署建议（单机即可用）
 
@@ -90,6 +87,9 @@ flowchart TB
 # 构建前端 + 启动全部服务
 cd frontend-v2 && npm run build && cd ..
 docker compose up -d
+
+# 构建后端镜像（Dockerfile 以仓库根为上下文，含 task-agent/ 独立包）
+docker build -t agentchat-backend -f backend/Dockerfile .
 
 # 后端（生产建议：关 Debug、开日志级别）
 # backend/.env: LOG_LEVEL=INFO, HF_OFFLINE=true
