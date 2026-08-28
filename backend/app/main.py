@@ -35,10 +35,8 @@ logging.getLogger().setLevel(
     getattr(logging, settings.log_level.upper(), logging.INFO)
 )
 
-# 模型离线加载：HF 网络不可达时避免 huggingface_hub 联网 HEAD 检查卡住重试。
-# 注意：huggingface_hub 的 HF_HUB_OFFLINE 常量在 import 时读取并缓存，
-# 若其他模块（如 langchain/ingestion）先于本文件 import 了它，仅设置 env 不生效，
-# 因此这里同时强制覆盖 env 与已缓存的常量，并在加载模型时传 local_files_only=True。
+# 模型离线加载：HF_HUB_OFFLINE 常量在 import 时被读取缓存，仅设 env 不生效，
+# 这里同时覆盖 env 与已缓存常量，并在加载模型时传 local_files_only=True。
 if settings.hf_offline:
     os.environ["HF_HUB_OFFLINE"] = "1"
     try:

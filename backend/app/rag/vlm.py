@@ -5,7 +5,6 @@
 
 - 默认 provider=deepseek
 - 任意失败降级返回 ""（不中断摄入，等效关闭该图描述）。
-
 """
 from __future__ import annotations
 

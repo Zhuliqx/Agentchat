@@ -103,10 +103,9 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
             db.commit()
 
 
-# ---- 多块部分更新：未变块保留 doc_id，变更块必须写原始 chunk_index ----
-# 每节内容 > chunk_size=800（句句唯一编号），保证每节独立拆成多个块；
-# B1/B2 句式与长度完全一致 → A/C 各块文本在 v1/v2 间逐字节相同（块边界一致），
-# 只有 B 的块产生增量写入，且其原始 chunk_index > 0（能抓住"写批内位置"的回归）。
+# ---- 多块部分更新：未变块保留 doc_id，变更块写原始 chunk_index ----
+# 每节 > chunk_size 独立成块，A/C 块 v1/v2 逐字节相同，仅 B 增量写入
+# 且原始 chunk_index > 0（抓住"写批内位置"的回归）。
 _PARTIAL_A = "第一章 公司概况\n" + " ".join(
     f"量子计算公司第{i}项业务是量子芯片设计与低温控制，覆盖研发、生产与测试全流程。" for i in range(1, 40)
 )

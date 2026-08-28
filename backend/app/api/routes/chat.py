@@ -36,10 +36,8 @@ from app.rag.prompt_injection import detect_injection, detect_leak
 
 router = APIRouter()
 
-# HITL 检查结果短路缓存：同一会话短时间内已确认无 pending interrupt 则跳过，
-# 避免每个普通请求都 aget_state 恢复完整图状态（隐藏开销）。
-# 安全性：interrupt 只在上轮工具调用时产生且需用户处理；5s 内重复新消息基本不会携带新中断，
-# 而中断产生后的下一次请求（用户操作后）TTL 已过，仍会重新检查。
+# HITL 检查短路缓存：短时间内已确认无 pending interrupt 则跳过（隐藏开销）。
+# 安全性：中断产生后的下一次请求（用户操作后）TTL 已过，仍会重新检查。
 _HITL_CHECK_TTL = 5.0
 _hitl_checked: dict[str, float] = {}  # session_id -> monotonic ts
 
@@ -66,12 +64,8 @@ def _prepare_session(session_id: str | None, user_id: str) -> str:
 
 
 async def _check_pending_interrupt(session_id: str, use_rag: bool, use_search: bool) -> None:
-    """HITL 防护：复用已有会话发普通新消息时，若 Checkpointer 中存在未完成的人工确认
-    （pending interrupt），直接拒绝并给出明确提示——否则把含"未完成 tool_calls"的
-    历史发给 LLM 会触发 400（tool_calls 缺少对应 tool 消息）。
-
-    带 TTL 短路缓存：短时间重复请求同一会话时跳过图状态恢复（提速）。
-    """
+    """HITL 防护：存在未完成的人工确认（pending interrupt）时拒绝新消息，
+    避免把"未完成 tool_calls"的历史发给 LLM 触发 400；带 TTL 短路缓存提速。"""
     now = time.monotonic()
     last = _hitl_checked.get(session_id)
     if last is not None and now - last < _HITL_CHECK_TTL:

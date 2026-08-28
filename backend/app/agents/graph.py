@@ -98,10 +98,8 @@ def get_supervisor_graph(
 
     from langchain.agents import create_agent
 
-    # HITL：哪些子 Agent 需要调用前人工确认（search/rag/mcp）。
-    # 有前端开关控制的动作（rag/search/remember）在对应开关打开时自动豁免——
-    # 开关即用户授权，不再逐次确认；HITL 仅对无开关的外部操作（如 mcp）按
-    # hitl_actions 配置生效。
+    # HITL：有开关控制的动作（rag/search/remember）视为已授权豁免；
+    # 仅无开关的外部操作（如 mcp）按 hitl_actions 逐次确认。
     _switch_open = {
         "rag": use_rag,
         "search": use_search,
@@ -407,11 +405,8 @@ async def stream_agent(
     used_agents: list[str] = []
     tool_calls_log: list[str] = []
     hitl_pending = None
-    # 开场白处理：工具调用前的短文本（如“我来帮您”）缓冲后不逐字显示（避免
-    # “只出现几个不完整字”的碎片感），待工具触发时直接丢弃；一旦缓冲超过阈值即
-    # 判定为直接回答，此后逐字平滑流式（打字机效果，避免攒一段推一段的卡顿）。
-    # prelude_total 累积全部开场白用于工具后的去重（LLM 常把开场白连同最终答案
-    # 一起重新生成）。
+    # 开场白缓冲：工具触发前不逐字显示，超过阈值判定为直接回答后平滑流式；
+    # prelude_total 保留全部开场白，供工具后去重（LLM 常连同答案重新生成）。
     PRELUDE_FLUSH = 40  # 超过该长度判定为直接回答，开始逐字流式
     prelude_total: list[str] = []  # 全部开场白（含已流式部分），供工具后去重
     prelude_buf: list[str] = []    # 尚未判定是否直接回答的缓冲文本
@@ -419,9 +414,8 @@ async def stream_agent(
     saw_tool_call = False
     dedupe: _PreludeDedupe | None = None  # 工具后答案流式去重（跳过重复开场白前缀）
     pending_tool_name: str | None = None  # 最近已发出 tool 事件的工具名（避免重复）
-    # 本次运行实际注册的工具名集合（按开关）。过滤模型幻觉调用的未注册工具
-    # （如开关关闭时仍吐 web_search chunk），避免误发 phantom tool 事件让用户
-    # 误以为真的联网了。
+    # 本次实际注册的工具名集合（按开关）：过滤模型幻觉调用的未注册工具，
+    # 避免误发 phantom tool 事件让用户误以为真的联网了。
     registered_tools: set[str] = {"mcp_agent"}
     if use_rag:
         registered_tools.add("rag_agent")
