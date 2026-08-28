@@ -28,32 +28,32 @@ JUDGE_MODEL = "deepseek-chat"  # 评审固定模型（DeepSeek 直连）
 EVAL_TEMPERATURE = 0.0
 
 
+def _build_eval_llm(model: str, temperature: float, json_mode: bool = False) -> ChatOpenAI:
+    """按评估参数构造 DeepSeek 直连 ChatOpenAI（统一超时/重试/JSON mode）。"""
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": settings.deepseek_api_key,
+        "base_url": settings.deepseek_base_url,
+        "temperature": temperature,
+        "timeout": settings.llm_timeout,
+        "max_retries": settings.llm_max_retries,
+    }
+    if json_mode:
+        kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
+    return ChatOpenAI(**kwargs)
+
+
 @lru_cache(maxsize=1)
 def get_judge_llm() -> ChatOpenAI:
     """评审 LLM：确定性打分（独立实例，lru_cache 复用，避免每次调用新建）。"""
-    return ChatOpenAI(
-        model=JUDGE_MODEL,
-        api_key=settings.deepseek_api_key,
-        base_url=settings.deepseek_base_url,
-        temperature=EVAL_TEMPERATURE,
-        timeout=settings.llm_timeout,
-        max_retries=settings.llm_max_retries,
-        model_kwargs={"response_format": {"type": "json_object"}},
-    )
+    return _build_eval_llm(JUDGE_MODEL, EVAL_TEMPERATURE, json_mode=True)
 
 
 @lru_cache(maxsize=1)
 def get_eval_generator() -> ChatOpenAI:
     """评估用答案生成 LLM（与主对话同模型；temperature 0.2 贴近生产）。"""
     model = settings.deepseek_model or settings.llm_model or JUDGE_MODEL
-    return ChatOpenAI(
-        model=model,
-        api_key=settings.deepseek_api_key,
-        base_url=settings.deepseek_base_url,
-        temperature=0.2,
-        timeout=settings.llm_timeout,
-        max_retries=settings.llm_max_retries,
-    )
+    return _build_eval_llm(model, 0.2)
 
 
 # ---------------- prompt 构建（纯函数，便于单测） ----------------

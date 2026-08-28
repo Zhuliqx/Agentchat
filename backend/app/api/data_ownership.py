@@ -24,19 +24,7 @@ def _delete_user_vectors(user_id: str) -> None:
     """删除该用户在 Milvus 中的全部向量（按 source 去重逐个清理）。"""
     from app.rag import vector_store
 
-    client = vector_store._client()
-    rows = client.query(
-        vector_store.settings.milvus_collection,
-        filter=f'user_id == "{user_id}"',
-        output_fields=["source"],
-        limit=16384,
-    )
-    seen: set[str] = set()
-    for r in rows:
-        src = r.get("source")
-        if src and src not in seen:
-            seen.add(src)
-            vector_store.delete_by_source(src, user_id=user_id)
+    vector_store.delete_by_user(user_id)
 
 
 async def _delete_user_memories(user_id: str) -> None:

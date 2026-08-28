@@ -78,15 +78,11 @@ def _doc_sources(user_id: str) -> list[str]:
         return [r[0] for r in rows]
 
 
-def _escape_milvus(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _chunk_texts(source: str, limit: int = 4) -> list[str]:
     """取某个文档（source）的前若干块文本（Milvus 按 source 过滤）。"""
     try:
         client = vector_store._client()
-        expr = f'source == "{_escape_milvus(source)}"'
+        expr = vector_store.source_filter_expr(source)
         res = client.query(
             settings.milvus_collection,
             filter=expr,

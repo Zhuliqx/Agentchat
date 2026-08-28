@@ -132,26 +132,15 @@ def milvus_source_rows(source: str) -> list[tuple[str, int]]:
     """查询 Milvus 中某 source 的全部 (doc_id, chunk_index)。"""
     from app.rag import vector_store
 
-    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
-    res = vector_store._client().query(
-        vector_store.settings.milvus_collection,
-        filter=f'source == "{escaped}"',
-        output_fields=["doc_id", "chunk_index"],
-    )
-    return [(r.get("doc_id"), int(r.get("chunk_index"))) for r in res]
+    return vector_store.query_source_pairs(source)
 
 
 def milvus_source_texts(source: str) -> list[str]:
     """查询 Milvus 中某 source 的全部块文本。"""
     from app.rag import vector_store
 
-    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
-    res = vector_store._client().query(
-        vector_store.settings.milvus_collection,
-        filter=f'source == "{escaped}"',
-        output_fields=["text"],
-    )
-    return [str(r.get("text") or "") for r in res]
+    rows = vector_store.query_source(source, output_fields=["text"])
+    return [str(r.get("text") or "") for r in rows]
 
 
 def wait_milvus_visible(

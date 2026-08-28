@@ -33,6 +33,20 @@ def user_filter_expr(user_id: str | None) -> str:
     return f'user_id == "{uid}"'
 
 
+def escape_source(source: str) -> str:
+    """Milvus 过滤表达式中 source 字符串转义（反斜杠 + 双引号）。"""
+    return source.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def source_filter_expr(source: str, user_id: str | None = None) -> str:
+    """Milvus 过滤表达式：source（含转义），可选叠加 user_id 隔离。"""
+    expr = f'source == "{escape_source(source)}"'
+    uf = user_filter_expr(user_id)
+    if uf:
+        expr += f" and {uf}"
+    return expr
+
+
 def _build_schema() -> CollectionSchema:
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=32),
@@ -197,12 +211,7 @@ def delete_by_source(source: str, user_id: str | None = None) -> None:
     注意：Milvus 表达式语法中反斜杠与双引号需转义（Windows 路径含 \\）。
     user_id 为 None 时删除全部用户的该 source（兼容旧调用）。
     """
-    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
-    expr = f'source == "{escaped}"'
-    uf = user_filter_expr(user_id)
-    if uf:
-        expr += f" and {uf}"
-    _client().delete(settings.milvus_collection, filter=expr)
+    _client().delete(settings.milvus_collection, filter=source_filter_expr(source, user_id))
 
 
 def delete_by_ids(ids: list[str]) -> None:
@@ -218,6 +227,39 @@ def delete_by_ids(ids: list[str]) -> None:
     _client().delete(settings.milvus_collection, filter=f"doc_id in [{quoted}]")
 
 
+def delete_by_user(user_id: str) -> None:
+    """删除该用户在 Milvus 主集合中的全部向量（按 source 去重后逐个清理）。"""
+    if not user_id:
+        return
+    rows = _client().query(
+        settings.milvus_collection,
+        filter=user_filter_expr(user_id),
+        output_fields=["source"],
+        limit=16384,
+    )
+    seen: set[str] = set()
+    for r in rows:
+        src = r.get("source")
+        if src and src not in seen:
+            seen.add(src)
+            delete_by_source(src, user_id=user_id)
+
+
+def query_source(
+    source: str,
+    user_id: str | None = None,
+    output_fields: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """按 source（可选用户隔离）查询 Milvus 命中行，返回原始 dict 列表。
+
+    未传 output_fields 时返回全部字段；供对账任务与集成测试复用。
+    """
+    kwargs: dict[str, Any] = {"filter": source_filter_expr(source, user_id)}
+    if output_fields:
+        kwargs["output_fields"] = output_fields
+    return _client().query(settings.milvus_collection, **kwargs)
+
+
 def query_source_pairs(
     source: str, user_id: str | None = None
 ) -> list[tuple[str, int]]:
@@ -225,17 +267,12 @@ def query_source_pairs(
 
     供对账任务与集成测试使用：与 Postgres documents 行做双向 diff。
     """
-    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
-    expr = f'source == "{escaped}"'
-    uf = user_filter_expr(user_id)
-    if uf:
-        expr += f" and {uf}"
-    res = _client().query(
-        settings.milvus_collection,
-        filter=expr,
+    rows = query_source(
+        source,
+        user_id=user_id,
         output_fields=["doc_id", "chunk_index"],
     )
-    return [(r.get("doc_id"), int(r.get("chunk_index"))) for r in res]
+    return [(r.get("doc_id"), int(r.get("chunk_index"))) for r in rows]
 
 
 def search(
@@ -372,16 +409,11 @@ def add_image_vectors(records: list[dict[str, Any]]) -> list[str]:
 
 def delete_image_by_source(source: str, user_id: str | None = None) -> None:
     """按 source（可限定用户）删除该文档的所有图片向量（与 delete_by_source 配套）。"""
-    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
-    expr = f'source == "{escaped}"'
-    uf = user_filter_expr(user_id)
-    if uf:
-        expr += f" and {uf}"
     try:
         ensure_image_collection()
     except Exception:
         return
-    _client().delete(IMAGE_COLLECTION, filter=expr)
+    _client().delete(IMAGE_COLLECTION, filter=source_filter_expr(source, user_id))
 
 
 def search_image(

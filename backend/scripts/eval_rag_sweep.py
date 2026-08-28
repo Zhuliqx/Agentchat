@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -16,12 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings
 
-# 加载 eval_rag 模块（复用其 load_cases / _collect_docs_retriever / _eval_case / _summarize）
-_SPEC = importlib.util.spec_from_file_location(
-    "erag", Path(__file__).resolve().parent / "eval_rag.py"
-)
-erag = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(erag)
+# 复用同级 eval_rag 的检索级评估函数（脚本直接运行时 scripts/ 在 sys.path）
+from eval_rag import _collect_docs_retriever, _eval_case, _summarize, load_cases
 
 EVAL = Path("data/eval")
 
@@ -30,15 +25,15 @@ def bench(dataset: str, overrides: dict, label: str) -> dict:
     """在给定 GT 上跑检索级命中评估，覆盖若干配置，返回聚合指标。"""
     for k, v in overrides.items():
         setattr(settings, k, v)
-    cases, mode = erag.load_cases(str(EVAL / dataset))
-    hits = erag._collect_docs_retriever(cases, 4)
+    cases, mode = load_cases(str(EVAL / dataset))
+    hits = _collect_docs_retriever(cases, 4)
     results = [
-        erag._eval_case(
+        _eval_case(
             c["question"], c["expected"], mode, h, c.get("top_k") or 4, c.get("expected_images")
         )
         for c, h in zip(cases, hits)
     ]
-    s = erag._summarize(results)
+    s = _summarize(results)
     print(f"{label:26s} MRR={s['mrr']:.3f}  Hit@1={s['hit@1']:.3f}  Hit@3={s['hit@3']:.3f}")
     return {"label": label, "mrr": s["mrr"], "hit@1": s["hit@1"], "hit@3": s["hit@3"]}
 
