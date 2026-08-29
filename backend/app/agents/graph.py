@@ -185,7 +185,7 @@ def _prepare_run(
     use_memory: bool = True,
     checkpoint_id: str | None = None,
 ) -> tuple[Any, Any, dict | None]:
-    """run_agent / stream_agent 公共准备：构建图、组装输入与 config。
+    """stream_agent 准备：构建图、组装输入与 config。
 
     返回 (graph, input_data, config)。resume 非空时输入为 Command(resume)；
     否则只传当前消息——历史由 Checkpointer 从 thread_id（或 checkpoint_id）自动恢复。
@@ -263,20 +263,6 @@ async def list_checkpoint_history(
     return result
 
 
-def _analyze_result(msgs: list) -> tuple[list[str], list[str], str]:
-    """从最终消息列表提取 used_agents / tool_calls / 最终答案。"""
-    used_agents: list[str] = []
-    tool_calls_log: list[str] = []
-    for m in msgs:
-        if getattr(m, "type", "") == "tool":
-            name = getattr(m, "name", "")
-            if name in AGENT_TOOL_NAMES:
-                used_agents.append(name)
-            tool_calls_log.append(name)
-    # 最终答案：逆序找最后一条 AI 消息（避免工具末轮取到原始输出）
-    return list(dict.fromkeys(used_agents)), list(dict.fromkeys(tool_calls_log)), last_ai_text(msgs)
-
-
 def _extract_hitl(result: dict) -> Any:
     """从图执行结果提取 HITL 待确认内容（无则 None）。"""
     interrupts = result.get("__interrupt__")
@@ -334,42 +320,23 @@ async def run_agent(
     checkpoint_id: str | None = None,
     on_event: Callable[[dict], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
-    """运行多 Agent 编排，返回答案与执行信息。
+    """非流式运行多 Agent：`stream_agent` 的薄封装。
 
-    - session_id: 作为 Checkpointer 的 thread_id，实现会话状态持久化。
-    - user_id: 长期记忆归属用户。
-    - resume: 若非空，表示这是 HITL 恢复调用——用 Command(resume=...) 从
-      上次 interrupt 处继续（同一 thread_id），不再重新传入问题。
-    - checkpoint_id: Time Travel——非空时从指定历史 checkpoint 继续（分叉新分支）。
-    - on_event: 可选回调，收到 {"type": ..., "content": ...} 事件。
+    同一张图、同一套超时 / HITL / Time Travel 语义；答案由 stream_agent
+    拼接（工具后自动去重重复开场白），事件经 on_event 收集。保留此入口
+    供非流式接口 / 子任务执行器使用，避免调用方各自组装收集逻辑。
     """
-    graph, input_data, config = _prepare_run(
-        question, resume, session_id, use_rag, use_search, use_memory, checkpoint_id
+    return await stream_agent(
+        question=question,
+        use_rag=use_rag,
+        use_search=use_search,
+        use_memory=use_memory,
+        session_id=session_id,
+        user_id=user_id,
+        resume=resume,
+        checkpoint_id=checkpoint_id,
+        on_event=on_event,
     )
-
-    if on_event:
-        await on_event({"type": "start", "content": "Supervisor 开始调度..."})
-
-    async with _agent_timeout_scope(on_event):
-        result = await graph.ainvoke(
-            input_data,
-            config=config,
-            context=UserContext(user_id=user_id or "default", session_id=session_id or ""),
-        )
-    msgs = result["messages"]
-
-    hitl_pending = _extract_hitl(result)
-    used_agents, tool_calls_log, answer = _analyze_result(msgs)
-
-    await _emit_final_events(on_event, used_agents, tool_calls_log, hitl_pending)
-
-    return {
-        "answer": answer,
-        "used_agents": used_agents,
-        "tool_calls": tool_calls_log,
-        "message_count": len(msgs),
-        "hitl_pending": hitl_pending,
-    }
 
 
 async def stream_agent(

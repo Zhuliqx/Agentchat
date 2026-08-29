@@ -157,24 +157,14 @@ def milvus_connection_uri(self):
 - `tool_lines`：仅列出已注册的工具描述（`use_rag` 关则无 `rag_agent` 行；HITL 且 `hitl_actions` 为空时才有 `request_confirmation` 行）。
 - `rules`：编号从 1 到 n+5 动态拼接，含"知识库已关闭禁止调用 rag_agent"、记忆工具强制调用、HITL 确认规则等。
 
-### 4.3 `run_agent()`（非流式）
+### 4.3 `run_agent()`（非流式，`stream_agent` 的薄封装）
 
-```python
-# 有 Checkpointer：只传当前消息，历史由 thread_id 自动恢复
-messages = [("user", question)]
-result = await graph.ainvoke(
-    {"messages": messages},
-    config={"configurable": {"thread_id": session_id}},
-    context=UserContext(user_id=...),
-)
-```
-
-- 外层 `asyncio.timeout(settings.agent_timeout)` 兜底，超时抛 `AgentTimeoutError` → 路由返回 504。
-- `resume` 非空时改走 `graph.ainvoke(Command(resume=resume), ...)`（HITL 断点恢复）。
-- `checkpoint_id` 非空时（Time Travel）config 里带上 `"checkpoint_id"`，LangGraph 据此从该历史点**分叉新分支**继续（见 4.6）。
-- 检测 `result.get("__interrupt__")` → `hitl_pending`（HITL）。
-- 经 `last_ai_text()` 逆序取最后一条 AI 消息作为答案（复用 `extract_text`，兼容 content blocks）。
-- 通过 `on_event` 回调发出 `start` / `agent` / `tool` / `interrupt` / `end` / `error` 事件。
+`run_agent` 不维护独立的 `ainvoke` 路径，而是**直接委托 `stream_agent`**（不传 `on_token`）：
+同一张图、同一套超时（`_agent_timeout_scope` → 抛 `AgentTimeoutError` → 路由 504）、
+`resume`（HITL 断点恢复）与 `checkpoint_id`（Time Travel 分叉，见 4.6）语义完全一致。
+答案由 `stream_agent` 内部拼接（工具后自动去重重复开场白），事件经 `on_event` 收集
+`start / agent / tool / interrupt / end / error`。非流式接口（`POST /api/chat`）与
+task-agent 子任务执行器（`task_agent_adapter.py`）共用此入口。
 
 ### 4.4 `stream_agent()`（token 级流式，SSE 用）
 

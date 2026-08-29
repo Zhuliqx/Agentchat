@@ -96,4 +96,3 @@ def record_retrieval_stats(name: str, stats: dict, elapsed_ms: float) -> None:
             pass  # 耗时与入参已记录；上下文管理器退出时自动 end
     except Exception:  # noqa: BLE001 - 观测失败不影响检索
         pass
-
