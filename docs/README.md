@@ -9,15 +9,10 @@
 |------|------|------|
 | 入口 | [README](../README.md)（仓库根） | 简历速览 + 量化成果 + 目录结构 |
 | 架构 | [ARCHITECTURE](ARCHITECTURE.md) | 系统架构总览（组件 / 流程 / 记忆 / HITL / 文件映射） |
-| 入门 | [EXPLAIN](EXPLAIN.md) | 10 分钟总览（已瘦身；细节指向 DEEP_DIVE） |
-| 深读 | [DEEP_DIVE](DEEP_DIVE.md) | **唯一**函数级详解（配置 → LLM → Agent → RAG → 记忆 → API → MCP → 前端） |
-| RAG 设计 | [RAG_DESIGN_ANALYSIS](RAG_DESIGN_ANALYSIS.md) | 设计决策与失败模式（工程版；面试 Q&A 在 interview/） |
-| 评估 | [EVALUATION](EVALUATION.md) | 评估指南 + **当前基线** |
-| 实验记录 | [EXPERIMENTS](EXPERIMENTS.md) | 历史实验快照（查询改写 / VLM / 图文双通道 / RAG 优化 A/B / 评估体系迭代） |
+| 入门 | [EXPLAIN](EXPLAIN.md) | 10 分钟总览（实现细节以代码注释与 [ARCHITECTURE](ARCHITECTURE.md) 为准） |
 | 可复现评估 | [REPRODUCIBLE_EVAL](REPRODUCIBLE_EVAL.md) | 公开示例语料 + 14 问评估集，检索级 MRR/Hit@1 可复现（含步骤） |
-| Agent 评估 | [AGENT_EVAL](AGENT_EVAL.md) | Agent 路由评估结果（快照，数据见 `data/eval/agent/`） |
 | 部署 / 安装 | [DEPLOYMENT](DEPLOYMENT.md) · [SETUP](SETUP.md) | 部署扩展与演进 / 环境搭建 |
-| 运维 | [OBSERVABILITY](OBSERVABILITY.md) · [PERFORMANCE](PERFORMANCE.md) | Langfuse 可观测 / 性能压测（快照） |
+| 运维 | [OBSERVABILITY](OBSERVABILITY.md) | Langfuse 可观测性接入 |
 | 项目 2 | [AGENT_TASK](AGENT_TASK.md) + [task-agent/README](../task-agent/README.md) | 宿主集成 / 独立包 |
 | 面试素材 | [docs/interview/](interview/) | One-pager / STAR 故事 / 系统设计话术 / 成本 / RAG Q&A / 评估话术 / 部署决策 |
 

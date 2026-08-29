@@ -10,7 +10,7 @@
         --concurrency 2 --total 6 --query "公司成立于哪一年？"
 
 rerank 开关是服务端配置（RERANK_ENABLED env），A/B 对比时用不同 env 起服务再各跑一轮，
-用 --label 区分。结果只打印到 stdout，便于贴进 docs/PERFORMANCE.md。
+用 --label 区分。结果只打印到 stdout，便于整理进 README 量化成果表。
 """
 from __future__ import annotations
 

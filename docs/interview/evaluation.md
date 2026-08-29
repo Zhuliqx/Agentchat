@@ -1,6 +1,6 @@
 # 评估体系面试话术
 
-> 来源：EVALUATION §9.2（已抽出）。与 [docs/README.md 唯一基线](../README.md)、EVALUATION §9.3 速查配合使用。
+> 与 [docs/README.md 唯一基线](../README.md) 配合使用。
 
 > "我自建了 LLM-as-judge 的 RAG 评估体系，40 条真实难例（含对比/计算/多跳/否定型）
 > 上检索 Hit@1=100%、四指标 0.9+。过程中对评估体系本身做了三轮校准：

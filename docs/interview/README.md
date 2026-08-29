@@ -9,8 +9,8 @@
 | 项目难点与决策（STAR 故事 ×5） | [star-stories](star-stories.md) | 项目复盘 |
 | 系统设计面试话术（从零设计 RAG 客服系统） | [system-design](system-design.md) | 项目沉淀 |
 | 成本模型与估算 | [cost](cost.md) | 项目实测口径 |
-| RAG 面试 Q&A（17 问） | [rag-qa](rag-qa.md) | RAG_DESIGN_ANALYSIS §16 |
-| 评估体系面试话术 | [evaluation](evaluation.md) | EVALUATION §9.2 |
+| RAG 面试 Q&A（17 问） | [rag-qa](rag-qa.md) | 设计文档提炼 |
+| 评估体系面试话术 | [evaluation](evaluation.md) | 评估体系提炼 |
 | 部署架构决策记录 | [deployment](deployment.md) | DEPLOYMENT §4 |
 
 > 提示：面试前建议同时过一遍 [docs/README.md 唯一基线](../README.md)，数字是表达重点。

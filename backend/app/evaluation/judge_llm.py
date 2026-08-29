@@ -7,7 +7,7 @@
 - `response_format={"type": "json_object"}`：DeepSeek 兼容 OpenAI JSON mode，
   简化解析；每个指标 prompt 显式给出输出字段。
 - 独立实例：不进 `get_llm()` 缓存、不受运行时模型切换影响，与图缓存隔离。
-- 局限（写入 docs/EVALUATION.md）：judge 与生成器同为 DeepSeek，可能整体高估
+- 局限（口径见 docs/REPRODUCIBLE_EVAL.md）：judge 与生成器同为 DeepSeek，可能整体高估
   （同源偏好）；指标绝对值仅供参考，A/B 相对变化更可信。
 """
 from __future__ import annotations

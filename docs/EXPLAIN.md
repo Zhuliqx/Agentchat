@@ -1,6 +1,6 @@
 # 📖 Multi-Agent Platform 项目详解（10 分钟总览）
 
-> 相关文档：见 [文档地图](README.md)；函数级细节请读 [DEEP_DIVE](DEEP_DIVE.md)（**唯一深读文档**）。
+> 相关文档：见 [文档地图](README.md)；实现细节以代码注释与 [ARCHITECTURE](ARCHITECTURE.md) 为准。
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 从零理解本项目：是什么、怎么组织、怎么跑、核心机制、设计决策。
@@ -112,17 +112,17 @@ sequenceDiagram
 **流式时序要点**：开场白缓冲后一次性推送（检测 `tool_call`）→ 工具执行 → 答案逐 token，
 且经 `streaming.py::_PreludeDedupe` 前缀去重（LLM 常把开场白连同答案重新生成）。
 
-## 6. 核心模块速览（细节见 DEEP_DIVE）
+## 6. 核心模块速览
 
-| 模块 | 一句话职责 | DEEP_DIVE |
-|------|-----------|-----------|
-| `app/agents/` | Supervisor 图（graph.py）+ 工具族包（tools/）+ LLM 工厂 + prompts/streaming | [§4-§5](DEEP_DIVE.md#4-agent-编排-graphpy) |
-| `app/rag/` | 摄入（ingestion + extractors + chunkers）→ 混合检索（hybrid + bm25 + rerank）→ 后处理（postprocess） | [§6](DEEP_DIVE.md#6-rag-实现链路-rag) |
-| `app/db/` | Postgres CRUD + Checkpointer/Store（三层记忆）+ `vector_status` 对账标记 | [§7](DEEP_DIVE.md#7-记忆实现-dbmemory_storepy) |
-| `app/api/` | chat（SSE）/ sessions / rag / memory / auth / tasks / admin / search / agent-tasks | [§8](DEEP_DIVE.md#8-fastapi-部分-apimainpy) |
-| `app/mcp_integration/` | MCP 连接管理 + 自建 db/time 服务器 | [§9](DEEP_DIVE.md#9-mcp-集成-mcp_integration) |
-| `frontend-v2/` | Vue 3 + SSE 流式渲染 + HITL 确认卡片 + Orbit 轨道 | [§10](DEEP_DIVE.md#10-前端与-sse-交互frontend-v2vue-3) |
-| `task-agent/` | 项目 2 独立包（宿主经 `task_agent_adapter.py` 注入） | [AGENT_TASK](AGENT_TASK.md) |
+| 模块 | 一句话职责 |
+|------|-----------|
+| `app/agents/` | Supervisor 图（graph.py）+ 工具族包（tools/）+ LLM 工厂 + prompts/streaming |
+| `app/rag/` | 摄入（ingestion + extractors + chunkers）→ 混合检索（hybrid + bm25 + rerank）→ 后处理（postprocess） |
+| `app/db/` | Postgres CRUD + Checkpointer/Store（三层记忆）+ `vector_status` 对账标记 |
+| `app/api/` | chat（SSE）/ sessions / rag / memory / auth / tasks / admin / search / agent-tasks |
+| `app/mcp_integration/` | MCP 连接管理 + 自建 db/time 服务器 |
+| `frontend-v2/` | Vue 3 + SSE 流式渲染 + HITL 确认卡片 + Orbit 轨道 |
+| `task-agent/` | 项目 2 独立包（宿主经 `task_agent_adapter.py` 注入），见 [AGENT_TASK](AGENT_TASK.md) |
 
 ## 7. 关键设计决策
 
@@ -133,7 +133,7 @@ sequenceDiagram
 5. **记忆语义检索自动降级**：无 pgvector 时降级关键词检索，服务不中断；
 6. **token 级流式**：`astream(stream_mode=["updates","messages"])`，只流式顶层 supervisor 的 AI token。
 
-完整 14 项决策/坑见 [DEEP_DIVE §12](DEEP_DIVE.md#12-关键设计决策与坑)。
+关键设计决策与踩坑散见于上文各节与代码注释；面试角度浓缩版见 [interview/star-stories](interview/star-stories.md)。
 
 ## 8. 常用命令
 
@@ -158,8 +158,7 @@ python ../task-agent -m pytest ../task-agent/tests -q  # 项目2 测试
 
 ## 10. 深读指引
 
-- 函数级实现：**[DEEP_DIVE.md](DEEP_DIVE.md)**（配置 → LLM → Agent → RAG → 记忆 → API → MCP → 前端 → Windows 兼容）；
-- RAG 设计决策与失败模式：**[RAG_DESIGN_ANALYSIS.md](RAG_DESIGN_ANALYSIS.md)**；
-- 评估与基线：**[EVALUATION.md](EVALUATION.md)** + [docs/README.md 唯一基线](README.md)；
-- 历史实验：**[EXPERIMENTS.md](EXPERIMENTS.md)**；面试素材：**[interview/](interview/)**；
+- 架构总览：**[ARCHITECTURE.md](ARCHITECTURE.md)**；部署/安装：**[SETUP.md](SETUP.md)** · **[DEPLOYMENT.md](DEPLOYMENT.md)**；
+- 可复现评估：**[REPRODUCIBLE_EVAL.md](REPRODUCIBLE_EVAL.md)**；唯一基线见 [docs/README.md](README.md)；
+- 面试素材：**[interview/](interview/)**；
 - 项目 2：**[AGENT_TASK.md](AGENT_TASK.md)** + [task-agent/README](../task-agent/README.md)。

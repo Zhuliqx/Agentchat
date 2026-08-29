@@ -13,7 +13,7 @@
 - 检索与生产完全同路径（混合检索 + rerank + 上下文压缩），见 app.rag.retriever。
 - judge 固定 DeepSeek、temperature=0；生成器为对话主模型。
 - Ground truth 默认读取 data/eval/ground_truth.json（--dataset 覆盖）。
-- 指标定义见 app/evaluation/metrics.py 与 docs/EVALUATION.md。
+- 指标定义见 app/evaluation/metrics.py 与 docs/REPRODUCIBLE_EVAL.md。
 """
 from __future__ import annotations
 

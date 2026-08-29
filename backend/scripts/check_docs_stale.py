@@ -20,10 +20,10 @@ TARGETS = sorted((REPO / "docs").glob("*.md")) + [
     REPO / "task-agent" / "README.md",
 ]
 
-# 重构后必须存在的文档（文档地图 / 实验记录 / 面试素材）
+# 重构后必须存在的文档（文档地图 / 复现评估 / 面试素材）
 REQUIRED = [
     REPO / "docs" / "README.md",
-    REPO / "docs" / "EXPERIMENTS.md",
+    REPO / "docs" / "REPRODUCIBLE_EVAL.md",
     REPO / "docs" / "interview" / "README.md",
     REPO / "docs" / "interview" / "rag-qa.md",
     REPO / "docs" / "interview" / "evaluation.md",
@@ -50,11 +50,9 @@ _RULES: list[tuple[str, str]] = [
     ("PERFORMANCE rerank_score 解释已修正（本次请求写入，非摄入残留）", r"rerank_score 来自摄入"),
     ("Milvus 主键与 Postgres id 的对应关系在 doc_id 字段（非主键一致）", r"向量在 Milvus，id 一致|documents\.id` 一一对应|documents\.id 一一对应"),
     ("文档头部应指向 docs/README.md 文档地图", r"架构文档地图\]\(ARCHITECTURE\.md\) §1"),
-    ("EVALUATION_REPORT.md 已并入 EXPERIMENTS.md", r"\]\(EVALUATION_REPORT\.md\)|docs/EVALUATION_REPORT\.md"),
-    ("EVALUATION 迭代史已移至 EXPERIMENTS.md", r"### 8\.1 校准一"),
     ("RAG 面试 Q&A 已移至 docs/interview/rag-qa.md", r"### Q1\."),
     ("部署决策记录已移至 docs/interview/deployment.md", r"为什么一开始不直接分布式"),
-    ("EXPLAIN 已瘦身为总览（细节在 DEEP_DIVE）", r"## 11\. MCP 深入|## 12\. 记忆机制原理"),
+    ("EXPLAIN 已瘦身为总览（细节以代码注释与 ARCHITECTURE 为准）", r"## 11\. MCP 深入|## 12\. 记忆机制原理"),
 ]
 
 

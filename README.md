@@ -10,14 +10,14 @@
 
 | 领域 | 关键指标 | 结果 | 一句话结论 |
 |------|---------|------|-----------|
-| 检索质量（GT 40 条） | MRR / Hit@1 | **0.963 / 0.925** | 混合检索 + rerank，来源级命中（最终基线 [RAG_OPTIMIZATION](docs/RAG_OPTIMIZATION.md)；EVALUATION 早期口径 0.944/0.900 为演进快照） |
-| 生成质量 | Faithfulness / Relevancy | **0.923 / 1.0** | LLM-judge 四指标，低幻觉（[评估](docs/EVALUATION.md)） |
-| 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益（[评估 §7.3](docs/EVALUATION.md)） |
-| Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝（[AGENT_EVAL](docs/AGENT_EVAL.md)） |
-| 性能（单 worker） | 检索 p50 / 吞吐 | 82ms / ~16 QPS | 单机满足小团队，扩展触发信号明确（[PERFORMANCE](docs/PERFORMANCE.md)） |
-| 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成（[PERFORMANCE](docs/PERFORMANCE.md)） |
-| Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
-| 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[实验记录](docs/EXPERIMENTS.md)） |
+| 检索质量（GT 40 条） | MRR / Hit@1 | **0.963 / 0.925** | 混合检索 + rerank，来源级命中（唯一基线见 [docs/README](docs/README.md)） |
+| 生成质量 | Faithfulness / Relevancy | **0.923 / 1.0** | LLM-judge 四指标，低幻觉（[唯一基线](docs/README.md)） |
+| 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益（[唯一基线](docs/README.md)） |
+| Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝（[唯一基线](docs/README.md)） |
+| 性能（单 worker） | 检索 p50 / 吞吐 | 82ms / ~16 QPS | 单机满足小团队，扩展触发信号明确 |
+| 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
+| Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
+| 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
 | 工程质量 | 单测 / 集成 | **180 / 22**（另有 task-agent 独立包 50） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
@@ -29,7 +29,7 @@
 - **定位**：FastAPI + LangGraph + LangChain 的多 Agent 平台，融合 **RAG + MCP + 三层记忆 + HITL + Time Travel**，前端 Vue3 深色主题。
 - **技术栈**：FastAPI / LangGraph（Supervisor·Checkpointer·Store·interrupt）/ Milvus（向量）/ Postgres+pgvector（关系·长期记忆语义检索）/ DeepSeek 多模型 / Vue3+TS+Tailwind4。
 - **核心亮点**：
-  - **检索链路**：混合检索（向量+BM25+RRF）+ rerank 精排 + 中文 embedding 选型 —— Hit@1 **0.975**、检索 MRR **0.963**、Faithfulness **0.923**（LLM-judge 四指标、GT 40 条，最终基线见 [RAG_OPTIMIZATION](docs/RAG_OPTIMIZATION.md)）；
+  - **检索链路**：混合检索（向量+BM25+RRF）+ rerank 精排 + 中文 embedding 选型 —— Hit@1 **0.975**、检索 MRR **0.963**、Faithfulness **0.923**（LLM-judge 四指标、GT 40 条，唯一基线见 [docs/README](docs/README.md)）；
   - **消融实证**：纯向量→混合→+rerank = 0.894→0.931→**0.963**，每层都有量化收益；
   - **Agent**：Supervisor 层级路由（rag/web_search/mcp/code），危险操作全 HITL/拒绝（route@1、拒绝率 **1.0**）；代码 Agent 受限沙箱；
   - **记忆**：短期 Checkpointer / 长期 Store+语义检索+写入去重（LangGraph 原生三层记忆）；
@@ -59,7 +59,7 @@
 ## ✨ 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
-- **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）。**解析增强**：PDF 用 `pdfplumber→pymupdf→pypdf` 回退、Markdown 去标题（默认开）；**图片能力**：可选 **图片语义描述**（VLM 转图内容为文本）与 **图文双通道**（多模态向量 + 文本融合，见 [RAG_DESIGN_ANALYSIS](docs/RAG_DESIGN_ANALYSIS.md)）
+- **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）。**解析增强**：PDF 用 `pdfplumber→pymupdf→pypdf` 回退、Markdown 去标题（默认开）；**图片能力**：可选 **图片语义描述**（VLM 转图内容为文本）与 **图文双通道**（多模态向量 + 文本融合，见 [ARCHITECTURE](docs/ARCHITECTURE.md)）
 - **联网搜索**：Tavily 直接搜索工具（`web_search`），实时获取最新网络资讯（LangChain 官方推荐工具）
 - **代码 Agent**：受限沙箱执行 Python（子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断），需要实际计算/验证算法/数据处理时由 Supervisor 自动调度；`CODE_AGENT_ENABLED` / `CODE_EXEC_TIMEOUT` 可配置
 - **MCP**：
@@ -145,14 +145,9 @@ Agentchat/
     ├── SETUP.md              # 环境搭建指南
     ├── DEPLOYMENT.md         # 部署与扩展（单机取舍 / 演进）
     ├── OBSERVABILITY.md      # Langfuse 可观测性
-    ├── PERFORMANCE.md        # 性能压测报告
+    ├── REPRODUCIBLE_EVAL.md  # 可复现评估（示例语料 + 步骤）
     ├── EXPLAIN.md            # 项目详解（10 分钟总览）
-    ├── DEEP_DIVE.md          # 实现详解（Agent 编排 / 记忆 / FastAPI / RAG / MCP）
-    ├── RAG_DESIGN_ANALYSIS.md # RAG 设计分析
-    ├── EVALUATION.md         # 评估方法与指标
-    ├── EXPERIMENTS.md        # 历史实验快照（改写 / VLM / 图文 / RAG 优化 / 评估迭代）
     ├── interview/            # 面试素材（One-pager / STAR / 系统设计 / 成本 / RAG Q&A / 评估 / 部署）
-    ├── AGENT_EVAL.md         # Agent 编排质量评估
     └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```
 
@@ -222,7 +217,7 @@ python run.py
 | `LLM_PROVIDER` | `deepseek` | deepseek / dashscope / openai / ollama |
 | `TAVILY_API_KEY` | - | 联网搜索（为空则 `web_search` 工具不可用） |
 | `RERANK_ENABLED` | `true` | 检索后 rerank 精排（首次下载约 1.1GB 模型） |
-| `QUERY_REWRITE_ENABLED` | `false` | 查询改写总开关（rule 零依赖 / llm 需 LLM；实验见 `docs/EXPERIMENTS.md`） |
+| `QUERY_REWRITE_ENABLED` | `false` | 查询改写总开关（rule 零依赖 / llm 需 LLM；A/B 实证默认关） |
 | `QUERY_REWRITE_MODE` | `rule` | 改写档位：`none` / `rule` / `llm` |
 | `HYBRID_SEARCH` | `true` | 混合检索（向量 + BM25 + RRF） |
 | `AGENT_TIMEOUT` | `120` | 单轮对话超时（秒） |
@@ -277,14 +272,14 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 .\venv\Scripts\python.exe scripts/eval_rag.py
 ```
 
-性能压测（检索链路/完整对话，结果见 `docs/PERFORMANCE.md`）：
+性能压测（检索链路/完整对话）：
 
 ```powershell
 .\venv\Scripts\python.exe scripts/benchmark.py --endpoint search --concurrency 4 --total 200
 .\venv\Scripts\python.exe scripts/benchmark.py --endpoint chat --concurrency 2 --total 6
 ```
 
-查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照），完整实验记录见 `docs/EXPERIMENTS.md`。
+查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照）。
 
 CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类型检查（非阻塞）→ 单元测试。
 

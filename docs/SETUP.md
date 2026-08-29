@@ -84,7 +84,7 @@ Copy-Item .env.example .env
     ```powershell
     huggingface-cli download OFA-Sys/chinese-clip-vit-base-patch16
     ```
-  -  **推荐**：图片能力建议 **图片语义描述+图文双通道 同时开启**（`IMAGE_VLM_ENABLED=true` + `IMAGE_DUAL_CHANNEL=true`）——实测在含图 GT 达 MRR 1.000（见 [RAG_OPTIMIZATION](RAG_OPTIMIZATION.md) §7.2），优于仅图文双通道。
+  -  **推荐**：图片能力建议 **图片语义描述+图文双通道 同时开启**（`IMAGE_VLM_ENABLED=true` + `IMAGE_DUAL_CHANNEL=true`）——实测在含图 GT 达 MRR 1.000，优于仅图文双通道。
 - **人工确认（HITL）**：默认 **LLM 自主判定**（`HITL_ACTIONS=[]`，类似 Claude Code/Codex）——注册 `request_confirmation` 工具，由模型根据操作影响自主决定是否请求用户授权；低风险/只读操作直接执行。需要**强制确认**时设 `HITL_ACTIONS=["mcp"]`（调用前无条件中断；有开关的动作如 search/rag 开关打开时自动豁免）。设 `HITL_ENABLED=false` 完全关闭。
 - **容错**：`AGENT_CACHE_ENABLED=true`（图执行/LLM 提示缓存）、`SUBAGENT_RETRIES=1`（子 Agent 重试）。模型调用超时/重试由 LLM 客户端（`LLM_TIMEOUT`/`LLM_MAX_RETRIES`）与统一 middleware（超时 + 日志）负责。
 - **模型离线加载**：`HF_OFFLINE=true`（默认）——embedding/rerank 已本地缓存时直接离线加载，避免 HF 网络不可达时启动/首次请求联网 HEAD 卡住重试；需下载新模型时临时设 `false`。
