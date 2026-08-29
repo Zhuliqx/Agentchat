@@ -49,3 +49,12 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 本地保留、不进公开仓库的文档（依赖私有语料 / 内部复盘 / 含真实公司案例）
+docs/EVALUATION.md
+docs/EXPERIMENTS.md
+docs/AGENT_EVAL.md
+docs/DEEP_DIVE.md
+docs/RAG_DESIGN_ANALYSIS.md
+docs/RAG_OPTIMIZATION.md
+docs/PERFORMANCE.md
