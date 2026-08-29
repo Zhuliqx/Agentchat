@@ -14,6 +14,7 @@
 | RAG 设计 | [RAG_DESIGN_ANALYSIS](RAG_DESIGN_ANALYSIS.md) | 设计决策与失败模式（工程版；面试 Q&A 在 interview/） |
 | 评估 | [EVALUATION](EVALUATION.md) | 评估指南 + **当前基线** |
 | 实验记录 | [EXPERIMENTS](EXPERIMENTS.md) | 历史实验快照（查询改写 / VLM / 图文双通道 / RAG 优化 A/B / 评估体系迭代） |
+| 可复现评估 | [REPRODUCIBLE_EVAL](REPRODUCIBLE_EVAL.md) | 公开示例语料 + 14 问评估集，检索级 MRR/Hit@1 可复现（含步骤） |
 | Agent 评估 | [AGENT_EVAL](AGENT_EVAL.md) | Agent 路由评估结果（快照，数据见 `data/eval/agent/`） |
 | 部署 / 安装 | [DEPLOYMENT](DEPLOYMENT.md) · [SETUP](SETUP.md) | 部署扩展与演进 / 环境搭建 |
 | 运维 | [OBSERVABILITY](OBSERVABILITY.md) · [PERFORMANCE](PERFORMANCE.md) | Langfuse 可观测 / 性能压测（快照） |

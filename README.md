@@ -19,6 +19,8 @@
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[评估 §7.4](docs/EVALUATION.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用（[实验记录](docs/EXPERIMENTS.md)） |
 | 工程质量 | 单测 / 集成 | **180 / 22**（另有 task-agent 独立包 50） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
+
 ## 🧑‍💻 简历速览
 
 > 面向简历/面试的精选版。本文档对应**项目 1 · Agentchat**；另一个独立项目**· 自主任务 Agent（仓库顶层 `task-agent/` 独立包）详见 [其独立 README](task-agent/README.md)**。

@@ -1,0 +1,104 @@
+{
+  "name": "agentchat-repro-v1",
+  "note": "公开示例语料（data/kb/）的可复现检索评估集。检索级指标无 LLM、确定性可复现；端到端四指标需 LLM key，结果受生成随机性影响。",
+  "cases": [
+    {
+      "id": "r01",
+      "question": "公司成立于哪一年？",
+      "answer": "示例科技有限公司成立于 2020 年。",
+      "expected_sources": ["company.md"],
+      "notes": "事实型：成立年份"
+    },
+    {
+      "id": "r02",
+      "question": "公司有多少名员工？",
+      "answer": "公司目前拥有员工 120 人。",
+      "expected_sources": ["company.md"],
+      "notes": "事实型：员工数"
+    },
+    {
+      "id": "r03",
+      "question": "公司的旗舰产品是什么？",
+      "answer": "旗舰产品是多 Agent 协作平台。",
+      "expected_sources": ["company.md"],
+      "notes": "事实型：旗舰产品"
+    },
+    {
+      "id": "r04",
+      "question": "标准版一个月多少钱？",
+      "answer": "标准版 299 元/月。",
+      "expected_sources": ["products.md"],
+      "notes": "表格检索：价格"
+    },
+    {
+      "id": "r05",
+      "question": "企业版一个月的价格是多少？",
+      "answer": "企业版 3999 元/月。",
+      "expected_sources": ["products.md"],
+      "notes": "表格检索：价格"
+    },
+    {
+      "id": "r06",
+      "question": "专业版和企业版有什么区别？",
+      "answer": "专业版不支持私有化部署，企业版支持私有化部署；企业版提供专属集群与数据隔离，专业版为独立数据。",
+      "expected_sources": ["products.md"],
+      "notes": "对比型：套餐差异"
+    },
+    {
+      "id": "r07",
+      "question": "平台有哪些产品套餐？",
+      "answer": "平台提供标准版、专业版、企业版三档套餐。",
+      "expected_sources": ["products.md"],
+      "notes": "列举型：产品线"
+    },
+    {
+      "id": "r08",
+      "question": "可以免费试用多久？",
+      "answer": "所有套餐均支持 14 天免费试用。",
+      "expected_sources": ["faq.md"],
+      "notes": "口语型：试用"
+    },
+    {
+      "id": "r09",
+      "question": "退款政策是怎样的？",
+      "answer": "正式付费后 7 天内可无条件退款；企业版私有化部署服务不支持退款。",
+      "expected_sources": ["faq.md"],
+      "notes": "口语型：退款"
+    },
+    {
+      "id": "r10",
+      "question": "标准版支持离线部署吗？",
+      "answer": "不支持。标准版为云端 SaaS，离线部署需选择企业版私有化部署或联系销售定制。",
+      "expected_sources": ["faq.md"],
+      "notes": "否定型：离线部署"
+    },
+    {
+      "id": "r11",
+      "question": "API 接口的鉴权方式是什么？",
+      "answer": "使用请求头 Authorization: Bearer <token> 进行鉴权。",
+      "expected_sources": ["api.md"],
+      "notes": "规格型：API 鉴权"
+    },
+    {
+      "id": "r12",
+      "question": "用户数据存储在哪个国家？",
+      "answer": "用户数据存储在中国境内的云服务器上。",
+      "expected_sources": ["policies.md"],
+      "notes": "政策型：数据本地化"
+    },
+    {
+      "id": "r13",
+      "question": "注销账号后数据多久会彻底清除？",
+      "answer": "注销后知识库文档与相关数据在 30 天内彻底清除。",
+      "expected_sources": ["policies.md"],
+      "notes": "政策型：数据保留期"
+    },
+    {
+      "id": "r14",
+      "question": "企业版私有化部署对服务器有什么要求？",
+      "answer": "最低要求 8 核 CPU、16GB 内存、200GB 磁盘，支持 Ubuntu 20.04 或 CentOS 7.9。",
+      "expected_sources": ["products.md"],
+      "notes": "规格型：部署要求"
+    }
+  ]
+}
