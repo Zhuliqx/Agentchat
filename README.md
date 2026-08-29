@@ -33,7 +33,7 @@
   - **记忆**：短期 Checkpointer / 长期 Store+语义检索+写入去重（LangGraph 原生三层记忆）；
   - **安全**：Prompt 注入防护（不可信数据隔离+规则+可选 LLM 复核）、SQL 只读沙箱、输出泄露检测；
   - **体验**：SSE token 级流式（首 token ~19ms）、会话/记忆/知识库按用户隔离、JWT 认证、会话统计；
-  - **工程**：单测 **217** + 集成 **19**、CI（Ruff+Pyright+检索回归 + LLM-judge 质量评估）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
+  - **工程**：单测 **180** + 集成 **22**（另有 task-agent 独立包 **50**）、CI（Ruff+Pyright+检索回归 + LLM-judge 质量评估 + 文档漂移检查）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
 - **一句话**：检索质量、Agent 安全、可观测全闭环，用**真实评估数据**驱动每一个取舍（非拍脑袋）。
 
 ### 项目 2 · 自主任务 Agent（仓库顶层 `task-agent/` 独立包）—— 长任务自主执行器
@@ -48,6 +48,11 @@
   - **Time Travel 长任务恢复**：`list_task_history` + `run` 支持 `checkpoint_id`（分叉 / 重放）；
   - **验证**：独立包单测（`task-agent/tests/`）全绿；真实 LLM 跑通（目标→信息源感知→结构化交付），HITL/verify/分叉真实链路均验证。
 - **一句话**：把 LangGraph 的 **交互式 HITL / 容错 / 时间旅行 / 状态管理**组合成一整套面向"模糊长目标"的 Agentic 引擎。
+
+## 🎬 演示与面试素材
+
+- **一键录屏演示**：`python backend/scripts/demo_showcase.py`（后端运行中）依次展示 RAG 多轮问答+引用溯源 / HITL 确认恢复 / task-agent 长任务 / Time Travel 历史，输出适合直接录屏。
+- **简历/面试素材**（`docs/interview/`）：[One-pager（两项目速览 + 电梯演讲）](docs/interview/one-pager.md)、[STAR 难点故事](docs/interview/star-stories.md)、[系统设计话术](docs/interview/system-design.md)、[成本模型](docs/interview/cost.md)、[RAG 面试 Q&A](docs/interview/rag-qa.md)。
 
 ## ✨ 特性
 
@@ -144,7 +149,7 @@ Agentchat/
     ├── RAG_DESIGN_ANALYSIS.md # RAG 设计分析
     ├── EVALUATION.md         # 评估方法与指标
     ├── EXPERIMENTS.md        # 历史实验快照（改写 / VLM / 图文 / RAG 优化 / 评估迭代）
-    ├── interview/            # 面试素材（RAG Q&A / 评估话术 / 部署决策）
+    ├── interview/            # 面试素材（One-pager / STAR / 系统设计 / 成本 / RAG Q&A / 评估 / 部署）
     ├── AGENT_EVAL.md         # Agent 编排质量评估
     └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```

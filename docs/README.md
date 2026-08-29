@@ -18,7 +18,7 @@
 | 部署 / 安装 | [DEPLOYMENT](DEPLOYMENT.md) · [SETUP](SETUP.md) | 部署扩展与演进 / 环境搭建 |
 | 运维 | [OBSERVABILITY](OBSERVABILITY.md) · [PERFORMANCE](PERFORMANCE.md) | Langfuse 可观测 / 性能压测（快照） |
 | 项目 2 | [AGENT_TASK](AGENT_TASK.md) + [task-agent/README](../task-agent/README.md) | 宿主集成 / 独立包 |
-| 面试素材 | [docs/interview/](interview/) | RAG Q&A / 评估话术 / 部署决策 |
+| 面试素材 | [docs/interview/](interview/) | One-pager / STAR 故事 / 系统设计话术 / 成本 / RAG Q&A / 评估话术 / 部署决策 |
 
 ## 唯一基线（当前，2026-08）
 
