@@ -96,6 +96,7 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
     finally:
         # 清理，避免污染其他检索回归用例
         vector_store.delete_by_source(source, user_id="default")
+        wait_milvus_converged(source, [])  # 等删除收敛，防止幽灵向量累积挤占 top-K
         with SessionLocal() as db:
             db.query(Document).filter(Document.source == source).delete(
                 synchronize_session=False
@@ -183,6 +184,7 @@ def test_incremental_partial_update_preserves_chunk_indexes(tmp_path: Path) -> N
         )
     finally:
         vector_store.delete_by_source(source, user_id="default")
+        wait_milvus_converged(source, [])  # 等删除收敛，防止幽灵向量累积挤占 top-K
         with SessionLocal() as db:
             db.query(Document).filter(Document.source == source).delete(
                 synchronize_session=False
