@@ -24,6 +24,7 @@ backend/data/
 node_modules/
 frontend-v2/dist/
 dist/
+build/
 
 # 静态分析 / 测试缓存
 .ruff_cache/
@@ -59,3 +60,4 @@ docs/RAG_DESIGN_ANALYSIS.md
 docs/RAG_OPTIMIZATION.md
 docs/PERFORMANCE.md
 docs/interview/
+task-agent/results/
