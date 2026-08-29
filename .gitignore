@@ -36,6 +36,13 @@ coverage.xml
 .idea/
 *.code-workspace
 
+# AI 工具 / 本地配置（不入库）
+.claude/
+.codex/
+.agents/
+.playwright-cli/
+.dbclient/
+
 # OS
 Thumbs.db
 .DS_Store

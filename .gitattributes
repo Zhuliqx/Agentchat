@@ -1,0 +1,20 @@
+# 统一文本换行为 LF（Windows 检出时按需转 CRLF）
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+
+# 二进制文件不做行尾处理
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ttf binary
+*.pdf binary
+*.onnx binary
+*.bin binary
+*.tar.gz binary
