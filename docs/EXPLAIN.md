@@ -1,4 +1,4 @@
-# 📖 Multi-Agent Platform 项目详解（10 分钟总览）
+# Multi-Agent Platform 项目详解（10 分钟总览）
 
 > 相关文档：见 [文档地图](README.md)；实现细节以代码注释与 [ARCHITECTURE](ARCHITECTURE.md) 为准。
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）

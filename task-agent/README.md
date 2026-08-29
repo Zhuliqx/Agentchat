@@ -1,4 +1,4 @@
-# 🎯 自主任务 Agent（task-agent）
+# 自主任务 Agent（task-agent）
 
 > 最后校验：2026-08-29（独立包实现；宿主集成见 [docs/AGENT_TASK.md](../docs/AGENT_TASK.md)）
 

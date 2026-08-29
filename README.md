@@ -1,10 +1,10 @@
-# 🤖 Multi-Agent Platform
+# Multi-Agent Platform
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
-## 📊 评估与质量
+## 评估与质量
 
 > 全部数字来自真实评估（GT 40 条 / LLM-judge / 压测 / 多采样）；完整语料为私有，
 > 公开示例语料的可复现基线见 [docs/REPRODUCIBLE_EVAL.md](docs/REPRODUCIBLE_EVAL.md)。
@@ -22,7 +22,7 @@
 | 工程质量 | 单测 / 集成 | **180 / 22**（另有 task-agent 独立包 50） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
-## 🧩 项目构成
+## 项目构成
 
 本仓库包含两个可独立使用的部分：
 
@@ -34,11 +34,11 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 
 把长任务 Agent 能力抽成的**独立 Python 包**（`task-agent/`，src 布局、零业务依赖）：接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；通过依赖注入接入 LLM / Checkpointer / 执行器，自带离线 demo（`python -m task_agent.demo`）。设计见 [docs/AGENT_TASK.md](docs/AGENT_TASK.md)，独立包说明见 [task-agent/README](task-agent/README.md)。
 
-## 🎬 演示
+## 演示
 
 后端运行中执行 `python backend/scripts/demo_showcase.py`，依次展示：RAG 多轮问答 + 引用溯源 / HITL 人工确认恢复 / task-agent 长任务执行 / Time Travel checkpoint 历史。
 
-## ✨ 特性
+## 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
 - **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）。**解析增强**：PDF 用 `pdfplumber→pymupdf→pypdf` 回退、Markdown 去标题（默认开）；**图片能力**：可选 **图片语义描述**（VLM 转图内容为文本）与 **图文双通道**（多模态向量 + 文本融合，见 [ARCHITECTURE](docs/ARCHITECTURE.md)）
@@ -70,7 +70,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **容错**：模型调用统一 `middleware`（超时 + 耗时日志）、LLM 客户端网络重试（`LLM_MAX_RETRIES`）、子 Agent 调用自动重试（`SUBAGENT_RETRIES`）、图执行/LLM 提示缓存（`AGENT_CACHE_ENABLED`）、模型**离线加载**（`HF_OFFLINE=true`，HF 网络不可达时直接走本地缓存不联网检查）
 - **现代前端（frontend-v2）**：Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia；marked 官方 highlight 集成（marked-highlight + highlight.js 按需注册）+ DOMPurify 消毒；SSE 流式渲染、Agent 编排轨道（Orbit）、HITL 确认卡片、Time Travel 分叉；Vitest 单元测试。构建产物由 FastAPI 托管
 
-## 🏗 技术栈
+## 技术栈
 
 | 领域 | 技术 |
 |------|------|
@@ -87,7 +87,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 | 认证 | 自实现 JWT（HS256）+ PBKDF2 密码哈希（stdlib，零依赖） |
 | 可观测 | Langfuse 自托管（trace `supervisor→子Agent→工具→LLM`，三配置齐全即启用，fail-open） |
 
-## 📁 目录结构
+## 目录结构
 
 ```
 Agentchat/
@@ -132,7 +132,7 @@ Agentchat/
     └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 完整步骤见 [docs/SETUP.md](docs/SETUP.md)，核心五步：
 
@@ -161,7 +161,7 @@ python run.py
 
 打开 <http://localhost:8000> 即可开始对话。API 文档在 <http://localhost:8000/docs>。
 
-## 🔌 API 端点速查
+## API 端点速查
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -191,7 +191,7 @@ python run.py
 | DELETE | `/api/memory/{id}` | 删除单条记忆 |
 | GET | `/api/health` | 健康检查（Postgres / Milvus / MCP） |
 
-## ⚙️ 关键配置项（`backend/.env`）
+## 关键配置项（`backend/.env`）
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
@@ -215,7 +215,7 @@ python run.py
 | `AUTH_SECRET` | 开发默认值 | JWT 签名密钥（**生产务必改为强随机值**） |
 | `LLM_LIGHT_MODEL` | 空 | 子 Agent 轻量模型（配置后 Supervisor 用主模型、子 Agent 用轻量模型） |
 
-## ✅ 冒烟测试与单元测试
+## 冒烟测试与单元测试
 
 服务启动后，可一键验证三类 Agent 是否正常：
 
@@ -264,13 +264,13 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 
 CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类型检查（非阻塞）→ 单元测试。
 
-## 🧩 其他建议（后续可扩展）
+## 其他建议（后续可扩展）
 
 - **更多 Agent**：注册新工具即可扩展（现有 rag / mcp / code / web_search / 记忆工具，见 `backend/app/agents/tools/` 包）
 - **可观测性（已实现）**：已接入自托管 **Langfuse**，trace `supervisor→子Agent→工具→LLM`（见 [OBSERVABILITY](docs/OBSERVABILITY.md)）；LangSmith 可作未来云端选项
 - **记忆语义检索**：`docker-compose.yml` 已用 pgvector 镜像；若你仍在使用旧的 `postgres:16` 容器，重建（`docker compose down && up -d`，数据卷保留）即可启用长期记忆语义检索（当前自动降级为关键词检索）
 - **认证加固**：接入 OAuth / 企业 SSO；为 `default` 访客用户设置密码；给 API 加速率限制
 
-## 📄 License
+## License
 
 MIT
