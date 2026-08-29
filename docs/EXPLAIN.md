@@ -133,7 +133,7 @@ sequenceDiagram
 5. **记忆语义检索自动降级**：无 pgvector 时降级关键词检索，服务不中断；
 6. **token 级流式**：`astream(stream_mode=["updates","messages"])`，只流式顶层 supervisor 的 AI token。
 
-关键设计决策与踩坑散见于上文各节与代码注释；面试角度浓缩版见 [interview/star-stories](interview/star-stories.md)。
+关键设计决策与踩坑散见于上文各节与代码注释。
 
 ## 8. 常用命令
 
@@ -160,5 +160,4 @@ python ../task-agent -m pytest ../task-agent/tests -q  # 项目2 测试
 
 - 架构总览：**[ARCHITECTURE.md](ARCHITECTURE.md)**；部署/安装：**[SETUP.md](SETUP.md)** · **[DEPLOYMENT.md](DEPLOYMENT.md)**；
 - 可复现评估：**[REPRODUCIBLE_EVAL.md](REPRODUCIBLE_EVAL.md)**；唯一基线见 [docs/README.md](README.md)；
-- 面试素材：**[interview/](interview/)**；
 - 项目 2：**[AGENT_TASK.md](AGENT_TASK.md)** + [task-agent/README](../task-agent/README.md)。

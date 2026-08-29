@@ -4,9 +4,10 @@
 
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
-## 📊 量化成果速览
+## 📊 评估与质量
 
-> 全部数字来自真实评估（GT 40 条 / LLM-judge / 压测 / 多采样），方法、条件与复现见各文档。
+> 全部数字来自真实评估（GT 40 条 / LLM-judge / 压测 / 多采样）；完整语料为私有，
+> 公开示例语料的可复现基线见 [docs/REPRODUCIBLE_EVAL.md](docs/REPRODUCIBLE_EVAL.md)。
 
 | 领域 | 关键指标 | 结果 | 一句话结论 |
 |------|---------|------|-----------|
@@ -21,40 +22,21 @@
 | 工程质量 | 单测 / 集成 | **180 / 22**（另有 task-agent 独立包 50） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
-## 🧑‍💻 简历速览
+## 🧩 项目构成
 
-> 面向简历/面试的精选版。本文档对应**项目 1 · Agentchat**；另一个独立项目**· 自主任务 Agent（仓库顶层 `task-agent/` 独立包）详见 [其独立 README](task-agent/README.md)**。
+本仓库包含两个可独立使用的部分：
 
-### 项目 1 · Agentchat —— 企业级多 Agent 知识问答平台
-- **定位**：FastAPI + LangGraph + LangChain 的多 Agent 平台，融合 **RAG + MCP + 三层记忆 + HITL + Time Travel**，前端 Vue3 深色主题。
-- **技术栈**：FastAPI / LangGraph（Supervisor·Checkpointer·Store·interrupt）/ Milvus（向量）/ Postgres+pgvector（关系·长期记忆语义检索）/ DeepSeek 多模型 / Vue3+TS+Tailwind4。
-- **核心亮点**：
-  - **检索链路**：混合检索（向量+BM25+RRF）+ rerank 精排 + 中文 embedding 选型 —— Hit@1 **0.975**、检索 MRR **0.963**、Faithfulness **0.923**（LLM-judge 四指标、GT 40 条，唯一基线见 [docs/README](docs/README.md)）；
-  - **消融实证**：纯向量→混合→+rerank = 0.894→0.931→**0.963**，每层都有量化收益；
-  - **Agent**：Supervisor 层级路由（rag/web_search/mcp/code），危险操作全 HITL/拒绝（route@1、拒绝率 **1.0**）；代码 Agent 受限沙箱；
-  - **记忆**：短期 Checkpointer / 长期 Store+语义检索+写入去重（LangGraph 原生三层记忆）；
-  - **安全**：Prompt 注入防护（不可信数据隔离+规则+可选 LLM 复核）、SQL 只读沙箱、输出泄露检测；
-  - **体验**：SSE token 级流式（首 token ~19ms）、会话/记忆/知识库按用户隔离、JWT 认证、会话统计；
-  - **工程**：单测 **180** + 集成 **22**（另有 task-agent 独立包 **50**）、CI（Ruff+Pyright+检索回归 + LLM-judge 质量评估 + 文档漂移检查）、查询改写经 A/B 实证**默认关**（数据驱动决策）。
-- **一句话**：检索质量、Agent 安全、可观测全闭环，用**真实评估数据**驱动每一个取舍（非拍脑袋）。
+### 1. Agentchat —— 多 Agent 知识问答平台
 
-### 项目 2 · 自主任务 Agent（仓库顶层 `task-agent/` 独立包）—— 长任务自主执行器
-- **定位**：接收**模糊复杂目标** → LLM 分解/每步重规划 → 循环执行 → 结构化交付；零业务依赖的独立 Python 包，宿主经适配器注入 LLM/Checkpointer/执行器。详见 [`docs/AGENT_TASK.md`](docs/AGENT_TASK.md)。
-- **技术栈**：LangGraph（StateGraph·interrupt·Command·retry_policy·timeout·error_handler·time-travel）/ DeepSeek / 宿主注入 rag·mcp·web_search·code 执行器。
-- **核心亮点**：
-  - **每步动态重规划**（`replan`）+ 独立 **`check`** 判完成 + **`MAX_STEPS`** 防循环；`TASK_AGENT_MODE=fixed|replan` 可切；
-  - **信息源感知（L1+L2）**：replan 标注 `expected_source`(kb/db/web/code)，执行按源收紧开关+前缀引导——公司/产品**优先知识库**，不再误联网查真实企业；
-  - **节点级 HITL**：`interrupt`/`Command(resume)`，proceed/edit/skip；无 Postgres 自动降级全自主；
-  - **verify 自检重试**：子任务失败 → LLM 判是否值得重试（不计步数，`MAX_RETRIES` 上限）；
-  - **节点级 fault tolerance**：`retry_policy` + `timeout` + `error_handler`（返回 `Command`）+ 自定义 `retry_on`（网络/超时/5xx 重试、确定性错误不重试）；
-  - **Time Travel 长任务恢复**：`list_task_history` + `run` 支持 `checkpoint_id`（分叉 / 重放）；
-  - **验证**：独立包单测（`task-agent/tests/`）全绿；真实 LLM 跑通（目标→信息源感知→结构化交付），HITL/verify/分叉真实链路均验证。
-- **一句话**：把 LangGraph 的 **交互式 HITL / 容错 / 时间旅行 / 状态管理**组合成一整套面向"模糊长目标"的 Agentic 引擎。
+FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检索 + rerank）+ MCP 工具 + 三层记忆 + HITL 人工确认 + Time Travel**，前端 Vue3 深色主题。架构与设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-## 🎬 演示与面试素材
+### 2. task-agent —— 自主任务 Agent 独立包
 
-- **一键录屏演示**：`python backend/scripts/demo_showcase.py`（后端运行中）依次展示 RAG 多轮问答+引用溯源 / HITL 确认恢复 / task-agent 长任务 / Time Travel 历史，输出适合直接录屏。
-- **简历/面试素材**（`docs/interview/`）：[One-pager（两项目速览 + 电梯演讲）](docs/interview/one-pager.md)、[STAR 难点故事](docs/interview/star-stories.md)、[系统设计话术](docs/interview/system-design.md)、[成本模型](docs/interview/cost.md)、[RAG 面试 Q&A](docs/interview/rag-qa.md)。
+把长任务 Agent 能力抽成的**独立 Python 包**（`task-agent/`，src 布局、零业务依赖）：接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；通过依赖注入接入 LLM / Checkpointer / 执行器，自带离线 demo（`python -m task_agent.demo`）。设计见 [docs/AGENT_TASK.md](docs/AGENT_TASK.md)，独立包说明见 [task-agent/README](task-agent/README.md)。
+
+## 🎬 演示
+
+后端运行中执行 `python backend/scripts/demo_showcase.py`，依次展示：RAG 多轮问答 + 引用溯源 / HITL 人工确认恢复 / task-agent 长任务执行 / Time Travel checkpoint 历史。
 
 ## ✨ 特性
 
@@ -147,7 +129,6 @@ Agentchat/
     ├── OBSERVABILITY.md      # Langfuse 可观测性
     ├── REPRODUCIBLE_EVAL.md  # 可复现评估（示例语料 + 步骤）
     ├── EXPLAIN.md            # 项目详解（10 分钟总览）
-    ├── interview/            # 面试素材（One-pager / STAR / 系统设计 / 成本 / RAG Q&A / 评估 / 部署）
     └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```
 
