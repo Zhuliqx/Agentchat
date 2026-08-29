@@ -48,6 +48,10 @@ class _ScriptedLLM:
             return SimpleNamespace(
                 content="已完成目标：公司成立于 2020 年；1 到 100 质数和为 1060。"
             )
+        if "可用工具" in prompt:  # TOOLCALL_PROMPT 特征 → 直接回答
+            return SimpleNamespace(
+                content='{"answer": "根据知识库，公司成立于 2020 年；质数和为 1060。"}'
+            )
         # 执行步（DefaultExecutor 直答）
         return SimpleNamespace(content="根据知识库，公司成立于 2020 年；质数和为 1060。")
 
@@ -79,7 +83,9 @@ def _openai_llm() -> _OpenAICompatLLM:
     return _OpenAICompatLLM()
 
 
-async def run_demo_flow(goal: str = DEMO_GOAL) -> dict:
+async def run_demo_flow(
+    goal: str = DEMO_GOAL, on_event=None
+) -> dict:
     """跑一遍完整 replan 流程（无 checkpointer → 无 HITL）。返回图执行结果。"""
     scripted = _ScriptedLLM()
 
@@ -92,6 +98,7 @@ async def run_demo_flow(goal: str = DEMO_GOAL) -> dict:
         config=TaskAgentConfig(mode="replan", hitl=False),
         llm_factory=_factory,
         checkpointer_provider=lambda: None,
+        on_event=on_event,
     )
     return await agent.ainvoke({"goal": goal})
 
@@ -107,7 +114,12 @@ def main() -> None:
         print("LLM: OpenAI 兼容端点（TASK_AGENT_OPENAI_*）")
     else:
         print("LLM: 脚本化 FakeLLM（离线，无需 key）")
-    result = asyncio.run(run_demo_flow())
+    def _on_event(kind: str, data: dict) -> None:
+        payload = " ".join(f"{k}={v}" for k, v in data.items())
+        print(f"  [event] {kind}: {payload}")
+
+    print("\n执行过程：")
+    result = asyncio.run(run_demo_flow(on_event=_on_event))
     print("\nfindings:")
     for i, f in enumerate(result.get("findings") or [], 1):
         print(f"  [{i}] {f}")

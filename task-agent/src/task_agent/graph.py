@@ -11,6 +11,7 @@ from langgraph.types import Command, RetryPolicy
 from task_agent.config import TaskAgentConfig
 from task_agent.executor import DefaultExecutor, Executor
 from task_agent.llm import LLMFactory
+from task_agent.memory import TaskMemory
 from task_agent.nodes import Runtime, _is_failed_finding, make_nodes
 from task_agent.state import TaskState
 
@@ -155,6 +156,8 @@ def build_agent(
     llm_factory: LLMFactory,
     checkpointer_provider: Callable[[], Any | None] = lambda: None,
     executor: Executor | None = None,
+    on_event: Callable[[str, dict], None] | None = None,
+    memory: TaskMemory | None = None,
 ) -> Any:
     """构建编译后的 LangGraph。
 
@@ -162,6 +165,8 @@ def build_agent(
     - llm_factory：每次 LLM 调用时调用（返回带 async ainvoke 的对象）；
     - checkpointer_provider：返回 LangGraph checkpointer 或 None（无状态/HITL 降级）；
     - executor：每步执行器，缺省为纯 LLM 直答（DefaultExecutor）。
+    - on_event：可选回调，收到 (kind, data) 事件（plan/replan/execute/check/verify/hitl/final）。
+    - memory：可选跨任务记忆（任务开始召回历史结论，结束沉淀 final_answer）。
     """
     if executor is None:
         executor = DefaultExecutor(llm_factory)
@@ -170,6 +175,8 @@ def build_agent(
         llm_factory=llm_factory,
         executor=executor,
         checkpointer_provider=checkpointer_provider,
+        on_event=on_event,
+        memory=memory,
     )
     nodes = make_nodes(runtime)
     checkpointer = checkpointer_provider()

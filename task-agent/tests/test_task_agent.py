@@ -25,7 +25,7 @@ from task_agent.graph import (
     build_agent,
     list_task_history,
 )
-from task_agent.nodes import Runtime, _apply_confirm, make_nodes
+from task_agent.nodes import Runtime, make_nodes
 
 
 class _LLM:

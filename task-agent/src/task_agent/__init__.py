@@ -23,6 +23,9 @@ from task_agent.executor import (
     StepResult,
 )
 from task_agent.graph import build_agent, list_task_history
+from task_agent.judge import judge_task
+from task_agent.memory import InMemoryMemory
+from task_agent.tools import Tool, ToolCallingExecutor, builtin_tools
 
 __all__ = [
     "TaskAgentConfig",
@@ -33,4 +36,9 @@ __all__ = [
     "Executor",
     "DefaultExecutor",
     "SOURCE_KEYS",
+    "Tool",
+    "ToolCallingExecutor",
+    "builtin_tools",
+    "InMemoryMemory",
+    "judge_task",
 ]

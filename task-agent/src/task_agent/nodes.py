@@ -20,8 +20,10 @@ from langgraph.types import interrupt
 from task_agent.config import TaskAgentConfig
 from task_agent.executor import SOURCE_KEYS, ExecuteRequest, Executor
 from task_agent.llm import LLMFactory, llm_text
+from task_agent.memory import TaskMemory
 from task_agent.prompts import (
     CHECK_PROMPT,
+    COMPRESS_PROMPT,
     FINAL_PROMPT,
     PLAN_PROMPT,
     REPLAN_PROMPT,
@@ -31,12 +33,19 @@ from task_agent.prompts import (
 
 @dataclass(frozen=True)
 class Runtime:
-    """构建图时注入的运行上下文（配置 + LLM 工厂 + 执行器 + checkpointer 提供者）。"""
+    """构建图时注入的运行上下文（配置 + LLM 工厂 + 执行器 + checkpointer 提供者 + 事件回调）。"""
 
     config: TaskAgentConfig
     llm_factory: LLMFactory
     executor: Executor
     checkpointer_provider: Callable[[], Any | None] = lambda: None
+    on_event: Callable[[str, dict], None] | None = None
+    memory: TaskMemory | None = None
+
+    def emit(self, kind: str, data: dict | None = None) -> None:
+        """发事件（如 plan/replan/execute/check/verify/final/hitl），供宿主/日志观测。"""
+        if self.on_event is not None:
+            self.on_event(kind, data or {})
 
 
 Node = Callable[[dict], Awaitable[dict]]
@@ -47,10 +56,16 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
     config = runtime.config
 
     async def plan_node(state: dict) -> dict:
+        mem = await _memory_ctx(runtime, state["goal"])
         plan = _parse_plan(
-            await llm_text(runtime.llm_factory(), PLAN_PROMPT.format(goal=state["goal"]))
+            await llm_text(
+                runtime.llm_factory(),
+                PLAN_PROMPT.format(goal=state["goal"], memory=mem),
+            )
         )
+        fallback = False
         if not plan:
+            fallback = True
             plan = [
                 {
                     "id": "1",
@@ -59,6 +74,7 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
                     "result": "",
                 }
             ]
+        runtime.emit("plan", {"subtasks": len(plan), "fallback": fallback})
         return {"plan": plan, "current_idx": 0, "findings": []}
 
     async def execute_node(state: dict) -> dict:
@@ -73,11 +89,16 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
             )
             finding = (result.answer or "（子任务无输出）")[:800]
             plan[idx]["status"] = "done"
+            ok = True
         except Exception as exc:  # noqa: BLE001 - 单子任务失败不中断整个任务
             finding = f"子任务失败：{exc}"
             plan[idx]["status"] = "failed"
+            ok = False
         plan[idx]["result"] = finding
-        return {"plan": plan, "findings": [finding], "current_idx": idx + 1}
+        runtime.emit("execute", {"subtask": task["desc"], "ok": ok})
+        out: dict = {"plan": plan, "current_idx": idx + 1}
+        out.update(await _append_finding(runtime, state, finding))
+        return out
 
     async def final_node(state: dict) -> dict:
         goal = state["goal"]
@@ -85,28 +106,42 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
             f"[{i + 1}] {f[:400]}"
             for i, f in enumerate(state.get("findings", []))
         )
+        summary = state.get("findings_summary") or ""
+        if summary:
+            findings = f"历史摘要：{summary}\n\n{findings}"
         final = (
             await llm_text(
                 runtime.llm_factory(),
                 FINAL_PROMPT.format(goal=goal, findings=findings or "（无）"),
             )
         ).strip()
+        if runtime.memory is not None:
+            try:
+                await runtime.memory.remember(goal, final)
+            except Exception:  # noqa: BLE001 - 记忆失败不影响交付
+                pass
+        runtime.emit("final", {"answer": final})
         return {"final_answer": final}
 
     async def replan_node(state: dict) -> dict:
         goal = state["goal"]
         findings = state.get("findings") or []
+        mem = await _memory_ctx(runtime, goal)
         action, source = _parse_next_action(
             await llm_text(
                 runtime.llm_factory(),
                 REPLAN_PROMPT.format(
-                    goal=goal, findings=_fmt_findings(findings) or "（尚无）"
+                    goal=goal,
+                    findings=_fmt_findings(findings) or "（尚无）",
+                    memory=mem,
                 ),
             )
         )
         if not action:
             # 无下一步 → 视为可完成
+            runtime.emit("replan", {"action": "", "source": source})
             return {"current_action": "", "done": True, "retries": 0}
+        runtime.emit("replan", {"action": action, "source": source})
         return {"current_action": action, "expected_source": source, "retries": 0}
 
     async def execute_action_node(state: dict) -> dict:
@@ -125,11 +160,16 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
             )
             finding = (result.answer or "（子任务无输出）")[:800]
             new_retries = 0  # 成功 → 重试计数归零
+            ok = True
         except Exception as exc:  # noqa: BLE001 - 单步失败不中断
             finding = f"子任务失败：{exc}"
             new_retries = retries  # 失败 → 保留计数(由 verify 决定是否 +1 / 放弃)
+            ok = False
         step = int(state.get("step") or 0) + (0 if is_retry else 1)
-        return {"findings": [finding], "step": step, "retries": new_retries}
+        runtime.emit("execute", {"action": action, "source": state.get("expected_source") or "default", "ok": ok})
+        out: dict = {"step": step, "retries": new_retries}
+        out.update(await _append_finding(runtime, state, finding))
+        return out
 
     async def check_node(state: dict) -> dict:
         step = int(state.get("step") or 0)
@@ -145,6 +185,7 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
                 ),
             )
         )
+        runtime.emit("check", {"done": done, "step": step})
         return {"done": done}
 
     async def verify_node(state: dict) -> dict:
@@ -167,6 +208,7 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
             )
         )
         retry = bool(data.get("retry", False))
+        runtime.emit("verify", {"retry": retry, "retries": retries + 1 if retry else retries})
         if retry:
             return {"should_retry": True, "retries": retries + 1}
         return {"should_retry": False, "retries": 0}
@@ -183,6 +225,14 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
             return {"_confirm_verb": "proceed"}
         if runtime.checkpointer_provider() is None:
             return {"_confirm_verb": "proceed"}
+        runtime.emit(
+            "hitl",
+            {
+                "next_action": state.get("current_action") or "",
+                "expected_source": state.get("expected_source") or "default",
+                "step": state.get("step") or 0,
+            },
+        )
         decision = interrupt(
             {
                 "type": "task_confirm",
@@ -241,6 +291,56 @@ def _fmt_findings(findings: list[str]) -> str:
     return "\n\n".join(
         f"[{i + 1}] {f[:400]}" for i, f in enumerate(findings or [])
     )
+
+
+async def _compress_findings(
+    runtime: Runtime, findings: list[str], summary: str
+) -> tuple[list[str], str]:
+    """超预算压缩：保留最新一条，历史交给 LLM 压缩进 findings_summary。
+
+    LLM 失败时退化为截断拼接（不中断执行）。返回 (保留的 findings, 新摘要)。
+    """
+    keep = findings[-1:]
+    older = findings[:-1]
+    try:
+        text = (
+            await llm_text(
+                runtime.llm_factory(),
+                COMPRESS_PROMPT.format(
+                    summary=summary or "（无）",
+                    findings=_fmt_findings(older),
+                ),
+            )
+        ).strip()
+    except Exception:  # noqa: BLE001 - 压缩失败降级为截断
+        text = ""
+    if not text:
+        text = "；".join(older)[:500]
+    new_summary = f"{summary}；{text}" if summary else text
+    return keep, new_summary[:1500]
+
+
+async def _append_finding(runtime: Runtime, state: dict, finding: str) -> dict:
+    """构造 findings 增量：未超预算 → 普通追加；超预算 → 整体替换 + 压缩摘要。"""
+    budget = runtime.config.findings_budget
+    existing = list(state.get("findings") or [])
+    if budget is None or len(existing) + 1 <= budget:
+        return {"findings": [finding]}
+    keep, summary = await _compress_findings(
+        runtime, existing + [finding], str(state.get("findings_summary") or "")
+    )
+    return {"findings": {"_replace": keep}, "findings_summary": summary}
+
+
+async def _memory_ctx(runtime: Runtime, goal: str) -> str:
+    """把跨任务记忆召回结果格式化为提示词上下文（无记忆/失败 → （无））。"""
+    if runtime.memory is None:
+        return "（无）"
+    try:
+        items = await runtime.memory.recall(goal)
+    except Exception:  # noqa: BLE001 - 记忆不可用不影响执行
+        return "（无）"
+    return "\n".join(f"- {s}" for s in items) or "（无）"
 
 
 def _jump_json(text: str) -> dict:

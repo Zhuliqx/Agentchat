@@ -4,19 +4,24 @@ from __future__ import annotations
 from typing import Annotated, Optional, TypedDict
 
 
-def _append_findings(a: Optional[list[str]], b: Optional[list[str]]) -> list[str]:
-    """findings 的 reducer：以增量方式合并状态（节点返回新增片段，而非每次回写全量）。"""
-    return (a or []) + (b or [])
+def _append_findings(a: Optional[list[str]], b: object) -> list[str]:
+    """findings 的 reducer：以增量方式合并状态（节点返回新增片段，而非每次回写全量）。
+
+    特殊值 `{"_replace": [...]}`：超预算压缩时整体替换（见 nodes._append_finding）。
+    """
+    if isinstance(b, dict) and b.get("_replace") is not None:
+        return list(b["_replace"])
+    return (a or []) + (b if isinstance(b, list) else [])
 
 
 class TaskState(TypedDict):
-    """Plan→Execute→Final(一期) 与 Replan→Execute→Check(二期) 循环的共享状态。"""
+    """Plan→Execute→Final 与 Replan→Execute→Check 循环的共享状态。"""
 
     goal: str                              # 用户目标
-    # [fixed 一期] 一次性计划：子任务列表 + 当前索引
+    # [fixed] 一次性计划：子任务列表 + 当前索引
     plan: Optional[list[dict]]             # [{id, desc, status, result}]
     current_idx: Optional[int]             # 当前子任务索引(fixed 用)
-    # [replan 二期] 每步动态：当前动作 + 步数
+    # [replan] 每步动态：当前动作 + 步数
     current_action: Optional[str]          # 下一步执行的动作(replan 用)
     step: Optional[int]                    # 已完成步数(replan 用)
     done: Optional[bool]                   # check/replan 判定是否完成
@@ -27,4 +32,5 @@ class TaskState(TypedDict):
     _confirm_verb: Optional[str]
     # 共有
     findings: Annotated[list[str], _append_findings]  # 已完成结果(节点只回增量,reducer 拼接)
+    findings_summary: Optional[str]                   # 超预算压缩后的历史摘要(默认空)
     final_answer: Optional[str]            # 最终交付
