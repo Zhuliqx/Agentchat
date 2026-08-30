@@ -1,5 +1,9 @@
 # Multi-Agent Platform
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Zhuliqx/Agentchat/ci.yml?branch=main&label=CI)](https://github.com/Zhuliqx/Agentchat/actions)
+[![License](https://img.shields.io/github/license/Zhuliqx/Agentchat)](https://github.com/Zhuliqx/Agentchat/blob/main/LICENSE)
+[![PyPI - task-agent](https://img.shields.io/pypi/v/agentchat-task-agent?label=PyPI%20-%20task-agent)](https://pypi.org/project/agentchat-task-agent/)
+
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
