@@ -18,6 +18,8 @@ from task_agent.config import TaskAgentConfig
 from task_agent.executor import ExecuteRequest, StepResult
 from task_agent.graph import build_agent, list_task_history  # noqa: F401 - 供路由统一导入
 
+from langchain_core.messages import HumanMessage
+
 from app.agents.graph import run_agent
 from app.agents.llm import get_llm
 from app.config import settings
@@ -31,6 +33,20 @@ _SOURCE_ROUTE: dict[str, dict] = {
     "code": {"use_rag": False, "use_search": False, "prefix": "请用代码计算："},
     "default": {"use_rag": True, "use_search": True, "prefix": ""},
 }
+
+
+class LangChainLLM:
+    """把宿主 LangChain ChatModel 适配为 task_agent.LLM 协议（`ainvoke(prompt: str)`）。
+
+    BaseChatModel.ainvoke 参数名为 `input`（运行时接受 str，但类型不兼容 LLM 协议），
+    这里显式包装并转成 HumanMessage，保证类型与运行时语义一致。
+    """
+
+    def __init__(self, model: Any) -> None:
+        self._model = model
+
+    async def ainvoke(self, prompt: str) -> Any:
+        return await self._model.ainvoke([HumanMessage(content=prompt)])
 
 
 class _HostExecutor:
@@ -153,7 +169,7 @@ def build_host_task_agent(
     )
     agent = build_agent(
         config=config,
-        llm_factory=lambda: get_llm("light"),
+        llm_factory=lambda: LangChainLLM(get_llm("light")),
         checkpointer_provider=get_checkpointer,
         executor=_HostExecutor(),
         on_event=on_event,

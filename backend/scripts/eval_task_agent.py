@@ -19,7 +19,7 @@ from task_agent.judge import judge_task  # noqa: E402
 
 from app import observability  # noqa: E402
 from app.agents.llm import get_llm  # noqa: E402
-from app.agents.task_agent_adapter import build_host_task_agent  # noqa: E402
+from app.agents.task_agent_adapter import LangChainLLM, build_host_task_agent  # noqa: E402
 from app.evaluation import setup_utf8_stdio  # noqa: E402
 
 setup_utf8_stdio()
@@ -49,7 +49,7 @@ async def _run_once(graph, case: dict) -> dict:
     elapsed = round(time.perf_counter() - t0, 1)
     answer = str(result.get("final_answer") or "")
     judge = await judge_task(
-        get_llm("light"),
+        LangChainLLM(get_llm("light")),
         case["goal"],
         list(result.get("findings") or []),
         answer,
