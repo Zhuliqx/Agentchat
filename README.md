@@ -267,13 +267,6 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 
 CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类型检查（非阻塞）→ 单元测试。
 
-## 其他建议（后续可扩展）
-
-- **更多 Agent**：注册新工具即可扩展（现有 rag / mcp / code / web_search / 记忆工具，见 `backend/app/agents/tools/` 包）
-- **可观测性（已实现）**：已接入自托管 **Langfuse**，trace `supervisor→子Agent→工具→LLM`（见 [OBSERVABILITY](docs/OBSERVABILITY.md)）；LangSmith 可作未来云端选项
-- **记忆语义检索**：`docker-compose.yml` 已用 pgvector 镜像；若你仍在使用旧的 `postgres:16` 容器，重建（`docker compose down && up -d`，数据卷保留）即可启用长期记忆语义检索（当前自动降级为关键词检索）
-- **认证加固**：接入 OAuth / 企业 SSO；为 `default` 访客用户设置密码；给 API 加速率限制
-
 ## License
 
 MIT
