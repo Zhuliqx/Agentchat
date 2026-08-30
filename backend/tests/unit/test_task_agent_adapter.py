@@ -42,3 +42,43 @@ def test_build_host_task_agent_caches_by_config(monkeypatch):
     monkeypatch.setattr("app.config.settings.task_agent_mode", "fixed")
     c = adapter.build_host_task_agent()
     assert c is not a  # 模式变化 → 重建
+
+
+def test_build_host_task_agent_with_on_event_bypasses_cache(monkeypatch):
+    """传入 on_event 时绕过图缓存（事件 sink 不跨请求共享）。"""
+    monkeypatch.setattr(adapter, "get_store", lambda: None)
+    a = adapter.build_host_task_agent(on_event=lambda k, d: None)
+    b = adapter.build_host_task_agent(on_event=lambda k, d: None)
+    assert a is not b
+    c = adapter.build_host_task_agent()  # 无 sink → 仍命中缓存
+    assert c is adapter.build_host_task_agent()
+
+
+def test_host_memory_degrades_without_store(monkeypatch):
+    """Store 不可用 → recall 空、remember 无操作，不抛错。"""
+    monkeypatch.setattr(adapter, "get_store", lambda: None)
+    mem = adapter._HostMemory("default")
+    import asyncio
+
+    assert asyncio.run(mem.recall("目标")) == []
+    asyncio.run(mem.remember("目标", "结论"))  # 不抛错即可
+
+
+def test_host_memory_recall_falls_back_to_scan(monkeypatch):
+    """语义检索失败 → 降级全量扫描 + 中文二元组命中。"""
+    import asyncio
+
+    class _Item:
+        value = {"summary": "公司成立于 2020 年"}
+
+    class _FakeStore:
+        async def asearch(self, *a, **kw):
+            raise RuntimeError("no index")
+
+        async def alist(self, *a, **kw):
+            return [_Item()]
+
+    monkeypatch.setattr(adapter, "get_store", lambda: _FakeStore())
+    mem = adapter._HostMemory("default")
+    hits = asyncio.run(mem.recall("公司成立于哪一年"))
+    assert hits == ["公司成立于 2020 年"]
