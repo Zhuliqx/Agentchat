@@ -156,6 +156,7 @@ npm install
 npm run build
 
 # 5. 启动（Windows 用 run.py，保证 Checkpointer 正常工作）
+cd ..\backend
 python run.py
 ```
 
