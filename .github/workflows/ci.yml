@@ -10,9 +10,9 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -31,8 +31,7 @@ jobs:
       # Pyright 类型检查：报告但不阻塞（项目含大量第三方库类型噪音，
       # 见 docs/EXPLAIN.md；待 langchain 1.x 升级后收紧）
       - name: "Type check (Pyright, non-blocking)"
-        run: pyright backend/app
-        continue-on-error: true
+        run: pyright backend/app || true
 
       # 单元测试：纯逻辑，不依赖 Postgres/Milvus/LLM。
       # 集成测试（tests/integration）需 Docker 依赖，由 rag-regression job 跑。
@@ -46,9 +45,9 @@ jobs:
       run:
         working-directory: frontend-v2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -74,9 +73,9 @@ jobs:
       # 允许从 HF 下载 bge-small-zh-v1.5（~100MB，首次拉取）
       HF_OFFLINE: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -133,9 +132,9 @@ jobs:
       RERANK_ENABLED: "false"
       HF_OFFLINE: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -176,8 +175,8 @@ jobs:
           python scripts/eval_quality.py --dataset tests/fixtures/rag_ground_truth.example.json --max-cases 10 --out data/eval/ci_quality.json --report
 
       - name: "Upload quality report"
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('backend/data/eval/ci_quality*') != ''
+        uses: actions/upload-artifact@v5
         with:
           name: rag-quality-report
           path: backend/data/eval/ci_quality*
