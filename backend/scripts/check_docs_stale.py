@@ -17,7 +17,6 @@ REPO = Path(__file__).resolve().parent.parent.parent  # 项目根
 
 TARGETS = sorted((REPO / "docs").glob("*.md")) + [
     REPO / "README.md",
-    REPO / "task-agent" / "README.md",
 ]
 
 # 重构后必须存在的文档（文档地图 / 复现评估）
@@ -29,7 +28,7 @@ REQUIRED = [
 # (说明, 正则)。命中即视为过时表述。
 _RULES: list[tuple[str, str]] = [
     ("supervisor 提示词已迁移到 app/agents/prompts.py（build_supervisor_prompt）", r"_build_supervisor_prompt"),
-    ("task_agent 已拆为仓库顶层 task-agent/ 独立包", r"backend/app/task_agent/"),
+    ("task_agent 已拆为独立仓库（agentchat-task-agent）", r"backend/app/task_agent/"),
     ("agents/tools.py 已拆为 app/agents/tools/ 包", r"app/agents/tools\.py"),
     ("pymilvus 版本口径为 2.4+（MilvusClient API）", r"pymilvus 3"),
     ("ingestion.py 中的解析/分块函数已迁移到 extractors|chunkers", r"ingestion\.py::(?:split_text|_pdf_extract|load_document|load_text|_html_to_text|_docx_to_text|_read_text_auto|_base_splitter|_build_table_chunks|_build_image_chunks|_build_vlm_chunks|_split_pdf_pages|_chunk_hash)"),

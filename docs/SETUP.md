@@ -57,7 +57,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-`requirements.txt` 含本地路径依赖 `-e ../task-agent`（项目 2 独立包，随主项目一起安装）。
+`requirements.txt` 含项目 2 独立包依赖 `agentchat-task-agent`（当前经 GitHub git URL 安装，随主项目一起安装）。
 首次安装 `sentence-transformers` 会自动下载 torch，体积较大，请耐心等待。
 （如网络受限，可考虑只用 OpenAI 的 embedding：见第 3 步。）
 
@@ -201,7 +201,7 @@ pip install -r requirements-dev.txt
 ```
 
 覆盖：BM25、SQL 只读校验、分块/解析、RRF、混合检索后处理、查询改写、Prompt 注入、Agent 流式/路由、
-图文双通道、配置、向量库一致性等；另有顶层 `task-agent/` 独立包测试（`pytest task-agent/tests -q`）。
+图文双通道、配置、向量库一致性等；另有独立仓库包测试（在独立仓库内执行 `pytest tests -q`，见 [AGENT_TASK](AGENT_TASK.md)）。
 
 **API 集成测试**（需运行中的 Postgres/Milvus/MCP 依赖，即 Docker 服务已启动）：
 

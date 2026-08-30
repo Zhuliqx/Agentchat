@@ -94,7 +94,7 @@ flowchart TB
 - **verify 自检重试**：子任务失败 → verify 判重试 → 重试成功（findings 同时留失败+成功记录）；
 - **Time Travel 分叉**：从历史 checkpoint 改用新 goal → `update_state` → 续跑新分支；
 - **fault tolerance**：LLM 网络错误被 `_is_transient` 重试，error_handler 降级收敛兜底；
-- 单元测试位于独立仓库 `task-agent/tests/`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级 + demo 离线全流程），
+- 单元测试位于独立仓库 `tests/`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级 + demo 离线全流程），
   另有宿主适配器单测（source→开关映射 / 图缓存 / on_event 绕过缓存 / 记忆降级）；全量单测通过 + Ruff 干净。
 
 ## 5.1 深度 / 广度扩展（2026-08）
