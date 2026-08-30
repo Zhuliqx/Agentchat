@@ -1,6 +1,6 @@
 # 自主任务 Agent（独立仓库 agentchat-task-agent）
 
-> 相关文档：见 [文档地图](README.md)；独立仓库地址 `https://github.com/<USER>/<TASK_AGENT_REPO>`（推独立仓库后替换为真实地址）。
+> 相关文档：见 [文档地图](README.md)；独立仓库见 [github.com/Zhuliqx/task-agent](https://github.com/Zhuliqx/task-agent)。
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 > 区别于主项目（Agentchat 的知识库问答/单轮路由）。这是一个**自主任务执行器**：
 > 接收模糊目标 → LLM 分解/每步重规划 → 循环执行（宿主注入执行器，复用现有子 Agent）→ 结构化交付。

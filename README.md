@@ -32,7 +32,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 
 ### 2. task-agent —— 自主任务 Agent 独立包
 
-把长任务 Agent 能力抽成的**独立 Python 包/独立仓库**（src 布局、零业务依赖，发行名 `agentchat-task-agent`，`pip install` 即可用）：接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付。提供 CLI（`task-agent run`）、事件流（on_event → 宿主 SSE）、内置工具执行器、跨任务记忆与 LLM-judge 任务质量评估。设计见 [docs/AGENT_TASK.md](docs/AGENT_TASK.md)，独立仓库说明见 `https://github.com/<USER>/<TASK_AGENT_REPO>`（推独立仓库后替换为真实地址）。
+把长任务 Agent 能力抽成的**独立 Python 包/独立仓库**（src 布局、零业务依赖，发行名 `agentchat-task-agent`，`pip install` 即可用）：接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付。提供 CLI（`task-agent run`）、事件流（on_event → 宿主 SSE）、内置工具执行器、跨任务记忆与 LLM-judge 任务质量评估。设计见 [docs/AGENT_TASK.md](docs/AGENT_TASK.md)，独立仓库见 [github.com/Zhuliqx/task-agent](https://github.com/Zhuliqx/task-agent)。
 
 ## 演示
 
@@ -160,7 +160,7 @@ python run.py
 ```
 
 > 项目 2 · 自主任务 Agent 已拆为**独立仓库**（发行名 `agentchat-task-agent`），
-> 地址：`https://github.com/<USER>/<TASK_AGENT_REPO>`（推独立仓库后替换为真实地址）。
+> 地址：[github.com/Zhuliqx/task-agent](https://github.com/Zhuliqx/task-agent)。
 
 打开 <http://localhost:8000> 即可开始对话。API 文档在 <http://localhost:8000/docs>。
 
