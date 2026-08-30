@@ -31,9 +31,9 @@ class LocalEmbedder(BaseEmbedder):
     def __init__(self, model_name: str, device: str = "cpu"):
         from sentence_transformers import SentenceTransformer
 
-        # local_files_only：仅从本地 HF 缓存加载，避免离线环境联网 HEAD 检查卡死
+        # local_files_only：跟随 settings.hf_offline（默认离线；CI 设 HF_OFFLINE=false 时允许联网下载）
         self._model = SentenceTransformer(
-            model_name, device=device, local_files_only=True
+            model_name, device=device, local_files_only=settings.hf_offline
         )
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:

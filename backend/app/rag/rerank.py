@@ -21,11 +21,11 @@ logger = logging.getLogger(__name__)
 def _get_reranker():
     from sentence_transformers import CrossEncoder
 
-    # local_files_only 原因同 embedding.py：避免离线联网 HEAD 卡死
+    # local_files_only：跟随 settings.hf_offline（默认离线；CI 设 HF_OFFLINE=false 时允许联网下载）
     return CrossEncoder(
         settings.rerank_model,
         device=settings.resolved_embedding_device(),
-        local_files_only=True,
+        local_files_only=settings.hf_offline,
     )
 
 
