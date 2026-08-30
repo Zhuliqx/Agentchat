@@ -163,12 +163,16 @@ jobs:
           python -c "from pathlib import Path; from app.rag.ingestion import ingest_file; print(ingest_file(Path('tests/fixtures/kb_ci.txt'), user_id='default'))"
 
       - name: "Quality eval (LLM-judge, max 10 cases, non-blocking)"
-        if: ${{ secrets.DEEPSEEK_API_KEY != '' }}
         continue-on-error: true
         working-directory: backend
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
+          # CI 未配置 DEEPSEEK_API_KEY 时跳过；配置后运行 LLM-judge 质量评估
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "DEEPSEEK_API_KEY not set; skipping quality eval"
+            exit 0
+          fi
           python scripts/eval_quality.py --dataset tests/fixtures/rag_ground_truth.example.json --max-cases 10 --out data/eval/ci_quality.json --report
 
       - name: "Upload quality report"
