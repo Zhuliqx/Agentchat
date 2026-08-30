@@ -172,3 +172,42 @@ export interface ModelListResponse {
   models: ModelInfo[];
   current: { provider: string; model: string } | null;
 }
+
+// ---------- 自主任务 Agent（/api/agent-tasks/*） ----------
+export interface AgentTaskRunBody {
+  goal: string;
+  session_id?: string;
+  checkpoint_id?: string;
+  checkpoint_ns?: string;
+}
+
+export interface AgentTaskPending {
+  type?: string;
+  goal?: string;
+  next_action?: string;
+  expected_source?: string;
+  step?: number;
+  findings?: string[];
+}
+
+export interface AgentTaskResult {
+  session_id: string;
+  status: "done" | "awaiting_confirm";
+  plan?: string | null;
+  findings?: string[];
+  final_answer?: string;
+  pending?: AgentTaskPending | null;
+}
+
+/** SSE 帧（/api/agent-tasks/run/stream）：event 过程事件 / result 结果 / error 错误 */
+export interface AgentTaskFrame {
+  type: "event" | "result" | "error";
+  kind?: string;
+  data: Record<string, unknown> & { message?: string };
+}
+
+export interface AgentTaskHistoryItem extends Checkpoint {
+  checkpoint_ns?: string;
+  parent_checkpoint_id?: string | null;
+  task_count?: number;
+}

@@ -6,6 +6,7 @@ import Icon from "@/components/common/Icon.vue";
 const emit = defineEmits<{
   stats: [];
   tasks: [];
+  agenttask: [];
   timetravel: [];
   export: [];
 }>();
@@ -35,6 +36,13 @@ const title = computed(() => sessions.current?.title || "新会话");
         @click="emit('tasks')"
       >
         <Icon name="tasks" :size="15" />
+      </button>
+      <button
+        class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+        title="自主任务 Agent"
+        @click="emit('agenttask')"
+      >
+        <Icon name="sparkle" :size="15" />
       </button>
       <button
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"

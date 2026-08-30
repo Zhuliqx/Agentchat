@@ -2,6 +2,10 @@
 import { api, apiRaw, ApiError, parseError } from "./client";
 import { readSSEStream } from "@/utils/sse";
 import type {
+  AgentTaskFrame,
+  AgentTaskHistoryItem,
+  AgentTaskResult,
+  AgentTaskRunBody,
   AdminStats,
   AdminUser,
   AuthStats,
@@ -256,5 +260,44 @@ export async function streamChat(
   if (!res.ok) throw await parseError(res);
   await readSSEStream(res, onEvent);
 }
+
+// ---------- 自主任务 Agent（/api/agent-tasks/*） ----------
+export interface AgentTaskConfirmBody {
+  session_id: string;
+  verb: "proceed" | "edit" | "skip";
+  action?: string;
+  source?: string;
+}
+
+export const agentTasksApi = {
+  run: (body: AgentTaskRunBody) =>
+    api<AgentTaskResult>("/agent-tasks/run", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  runStream: async (
+    body: AgentTaskRunBody,
+    onFrame: (frame: AgentTaskFrame) => void | Promise<void>,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const res = await apiRaw("/agent-tasks/run/stream", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok) throw await parseError(res);
+    await readSSEStream(res, (ev) => onFrame(ev as unknown as AgentTaskFrame));
+  },
+  history: (sessionId: string, limit = 30) =>
+    api<{ session_id: string; history: AgentTaskHistoryItem[] }>(
+      "/agent-tasks/history",
+      { method: "POST", body: JSON.stringify({ session_id: sessionId, limit }) }
+    ),
+  confirm: (body: AgentTaskConfirmBody) =>
+    api<AgentTaskResult>("/agent-tasks/confirm", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};
 
 export { ApiError };

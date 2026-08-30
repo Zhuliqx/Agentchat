@@ -9,9 +9,12 @@ import ChatInput from "./ChatInput.vue";
 import StatsModal from "@/components/dialogs/StatsModal.vue";
 import TasksModal from "@/components/dialogs/TasksModal.vue";
 import TimeTravelModal from "@/components/dialogs/TimeTravelModal.vue";
+import TaskAgentModal from "@/components/dialogs/TaskAgentModal.vue";
+import { useTaskAgentStore } from "@/stores/taskAgent";
 
 const chat = useChatStore();
 const sessions = useSessionsStore();
+const taskAgent = useTaskAgentStore();
 const showStats = ref(false);
 const showTasks = ref(false);
 const showTimeTravel = ref(false);
@@ -39,6 +42,7 @@ const headerRef = ref<InstanceType<typeof ChatHeader> | null>(null);
     <ChatHeader
       @stats="showStats = true"
       @tasks="showTasks = true"
+      @agenttask="taskAgent.openModal()"
       @timetravel="showTimeTravel = true"
       @export="exportSession"
     />
@@ -48,5 +52,6 @@ const headerRef = ref<InstanceType<typeof ChatHeader> | null>(null);
     <StatsModal v-model="showStats" />
     <TasksModal v-model="showTasks" />
     <TimeTravelModal v-model="showTimeTravel" />
+    <TaskAgentModal />
   </main>
 </template>
