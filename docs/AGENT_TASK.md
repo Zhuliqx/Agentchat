@@ -71,14 +71,18 @@ flowchart TB
 
 ## 3. 接口缝与宿主注入
 - 包内定义 `TaskAgentConfig` / `LLMFactory` / `CheckpointerProvider` / `Executor(ExecuteRequest -> StepResult)`
-  四个接口缝，`build_agent(...)` 注入后返回编译图；
+  四个接口缝，另有可选 `on_event`（事件回调）与 `memory`（跨任务记忆），`build_agent(...)` 注入后返回编译图；
 - 宿主适配器：LLM 工厂 `get_llm("light")`、工具/子 Agent（rag/mcp/web_search/code）作执行器
   （`run_agent` 包装，按 `expected_source` 收紧开关）；
 - **Checkpointer**（长任务可中断/恢复 + HITL + Time Travel）；无 checkpointer 自动降级无状态；
+- **跨任务记忆**：`get_store()` 就绪时注入 `_HostMemory`（namespace=(user, "task_memories")），
+  任务开始召回历史结论、结束沉淀 final_answer；Store 不可用时降级无记忆；
+- **事件回调**：`build_host_task_agent(on_event=...)` 透传执行过程事件，路由接 SSE；
 - 可观测（Langfuse）与评估基建（FakeLLM 单测 + judge）由宿主提供。
 
 ## 4. API 与关键配置
 - `POST /api/agent-tasks/run`：`{goal, session_id?, checkpoint_id?, checkpoint_ns?}`——新建任务，或带 `checkpoint_id` 分叉(带 goal)/重放(无 goal)；
+- `POST /api/agent-tasks/run/stream`：SSE 事件流——实时推送 plan/replan/execute/check/verify/hitl/final，最后推 result；
 - `POST /api/agent-tasks/confirm`：`{session_id, verb, action?, source?}`——HITL 恢复（Command(resume)）；
 - `POST /api/agent-tasks/history`：`{session_id, limit}`——Time Travel 列 checkpoint 历史；
 - 配置：`TASK_AGENT_MODE=fixed|replan`(默认 replan)、`TASK_AGENT_HITL=true`(默认，无库降级)、`TASK_AGENT_MAX_RETRIES=2`。
@@ -90,7 +94,17 @@ flowchart TB
 - **Time Travel 分叉**：从历史 checkpoint 改用新 goal → `update_state` → 续跑新分支；
 - **fault tolerance**：LLM 网络错误被 `_is_transient` 重试，error_handler 降级收敛兜底；
 - 单元测试 `task-agent/tests/`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级 + demo 离线全流程），
-  另有宿主适配器单测（source→开关映射 / 图缓存）；全量单测通过 + Ruff 干净。
+  另有宿主适配器单测（source→开关映射 / 图缓存 / on_event 绕过缓存 / 记忆降级）；全量单测通过 + Ruff 干净。
+
+## 5.1 深度 / 广度扩展（2026-08）
+- **事件流**：`on_event` 全生命周期事件（plan/replan/execute/check/verify/hitl/final），宿主路由已接 SSE（`/api/agent-tasks/run/stream`）；
+- **findings 压缩**：`TaskAgentConfig(findings_budget=N)` 超限把历史压进 `findings_summary`，控制长任务上下文与 token 成本；
+- **任务级评估**：包内 `task_agent.judge`（LLM-judge：目标达成/信息完整/幻觉，0-1）；宿主脚本
+  `backend/scripts/eval_task_agent.py` 跑真实 LLM + judge；
+- **工具执行器**：包内 `ToolCallingExecutor` + 内置 calculator/time/random（零依赖）；宿主执行器仍走 supervisor
+  （工具能力更全），接口缝不变；
+- **CLI 与基准**：`task-agent` CLI（run/demo）+ `benchmarks/bench_task_agent.py`（fixed vs replan，含 LLM-judge）；
+- **发布**：发行名 `agentchat-task-agent`（import 名 `task_agent`），TestPyPI 已验证安装。
 
 ## 6. 分期
 - ✅ **一期**：`fixed` Plan → Execute → Final + API；`TASK_AGENT_MODE=fixed`；
@@ -99,4 +113,5 @@ flowchart TB
 - ✅ **三期**：节点级 HITL（confirm_node）+ 节点容错（verify_node）+ 状态 reducer；
 - ✅ **节点级 fault tolerance**：`retry_policy` + `timeout` + `error_handler`(Command) + 自定义 `retry_on`；
 - ✅ **Time Travel 长任务恢复**：`list_task_history` + `run` 支持 `checkpoint_id` 分叉/重放；
-- ⬜ 待办：前端展示过程 + 流式(SSE) 接入。
+- ✅ **流式(SSE) 接入**：`/api/agent-tasks/run/stream` 实时事件流；
+- ⬜ 待办：前端展示执行过程。

@@ -120,6 +120,8 @@ agent = build_agent(..., on_event=langfuse_event_sink())  # 需 task-agent[obser
 
 ## 发布到 PyPI
 
+变更记录见 [CHANGELOG](CHANGELOG.md)。
+
 ```bash
 cd task-agent
 python -m build

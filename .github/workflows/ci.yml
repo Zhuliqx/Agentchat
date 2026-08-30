@@ -24,7 +24,7 @@ jobs:
       - name: "Ruff lint (errors only: F - undefined / unused)"
         run: |
           ruff check backend/app --select F
-          ruff check task-agent/src --select F
+          ruff check task-agent/src task-agent/tests task-agent/benchmarks --select F
 
       - name: "Docs stale-symbol check"
         working-directory: backend
