@@ -25,6 +25,7 @@ node_modules/
 frontend-v2/dist/
 dist/
 build/
+*.tsbuildinfo
 
 # 静态分析 / 测试缓存
 .ruff_cache/
