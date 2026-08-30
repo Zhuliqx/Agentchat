@@ -85,7 +85,8 @@ flowchart TB
 - `POST /api/agent-tasks/run/stream`：SSE 事件流——实时推送 plan/replan/execute/check/verify/hitl/final，最后推 result；
 - `POST /api/agent-tasks/confirm`：`{session_id, verb, action?, source?}`——HITL 恢复（Command(resume)）；
 - `POST /api/agent-tasks/history`：`{session_id, limit}`——Time Travel 列 checkpoint 历史；
-- 配置：`TASK_AGENT_MODE=fixed|replan`(默认 replan)、`TASK_AGENT_HITL=true`(默认，无库降级)、`TASK_AGENT_MAX_RETRIES=2`。
+- 配置：`TASK_AGENT_MODE=fixed|replan`(默认 replan)、`TASK_AGENT_HITL=true`(默认，无库降级)、
+  `TASK_AGENT_MAX_RETRIES=2`、`TASK_AGENT_MAX_STEPS=8`。
 
 ## 5. 已验证
 - 真实 LLM 跑通：目标「示例科技有限公司成立于哪一年」→ 信息源感知选 **kb** → 知识库检索出 2020/北京/company.md；

@@ -39,18 +39,30 @@ class _HostExecutor:
     async def __call__(self, request: ExecuteRequest) -> StepResult:
         route = _SOURCE_ROUTE.get(request.source) or _SOURCE_ROUTE["default"]
         question = (route["prefix"] + request.action) if route["prefix"] else request.action
-        result = await run_agent(
-            question=question,
-            use_rag=route["use_rag"],
-            use_search=route["use_search"],
-            use_memory=False,
-            session_id=f"sub-{uuid.uuid4().hex[:8]}",
-            user_id="default",
-            resume=None,
-            checkpoint_id=None,
-            on_event=None,
-        )
-        return StepResult(answer=result.get("answer", "") or "（子任务无输出）")
+        for _attempt in range(2):  # 偶发空响应 → 重试一次（不重复计步，见 task-agent verify 语义）
+            result = await run_agent(
+                question=question,
+                use_rag=route["use_rag"],
+                use_search=route["use_search"],
+                use_memory=False,
+                session_id=f"sub-{uuid.uuid4().hex[:8]}",
+                user_id="default",
+                resume=None,
+                checkpoint_id=None,
+                on_event=None,
+            )
+            if result.get("hitl_pending") is not None:
+                pending = result["hitl_pending"]
+                pending_q = (
+                    str(pending.get("question") or "")
+                    if isinstance(pending, dict)
+                    else ""
+                )
+                return StepResult(answer=f"（等待人工确认：{pending_q}）")
+            answer = result.get("answer", "") or ""
+            if answer.strip():
+                return StepResult(answer=answer)
+        return StepResult(answer="（子任务无输出）")
 
 
 class _HostMemory:
@@ -123,6 +135,7 @@ def build_host_task_agent(
         settings.task_agent_mode,
         settings.task_agent_hitl,
         settings.task_agent_max_retries,
+        settings.task_agent_max_steps,
         settings.llm_timeout,
         settings.llm_max_retries,
         get_checkpointer() is not None,
@@ -134,6 +147,7 @@ def build_host_task_agent(
         mode=settings.task_agent_mode,
         hitl=settings.task_agent_hitl,
         max_retries=settings.task_agent_max_retries,
+        max_steps=settings.task_agent_max_steps,
         llm_timeout=settings.llm_timeout,
         llm_max_retries=settings.llm_max_retries,
     )

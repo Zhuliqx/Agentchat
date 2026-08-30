@@ -159,6 +159,8 @@ python benchmarks/bench_task_agent.py --llm openai --judge --out results/bench.j
 `--llm openai`（配 `TASK_AGENT_OPENAI_API_KEY`）；`--judge` 开启 LLM-judge 质量评估
 （目标达成度 / 信息完整性 / 幻觉，0-1，见 `src/task_agent/judge.py`）。容错通过混沌测试验证
 （`tests/test_resilience.py`：执行器随机失败 / 永久失败 / LLM 永久失败均能收敛交付）。
+宿主侧评估：`python scripts/eval_task_agent.py`（真实 LLM + judge，串行执行；
+注意宿主 supervisor 全链路受上游偶发空响应影响，结果建议多轮重跑取稳态）。
 
 ### 实测快照（真实 LLM：DeepSeek-chat，3 自包含任务 × 2 轮，2026-08-29）
 

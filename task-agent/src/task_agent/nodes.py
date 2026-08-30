@@ -88,8 +88,8 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
                 ExecuteRequest(action=task["desc"], source="default")
             )
             finding = (result.answer or "（子任务无输出）")[:800]
-            plan[idx]["status"] = "done"
-            ok = True
+            ok = bool(finding and finding.strip() and finding != "（子任务无输出）")
+            plan[idx]["status"] = "done" if ok else "failed"
         except Exception as exc:  # noqa: BLE001 - 单子任务失败不中断整个任务
             finding = f"子任务失败：{exc}"
             plan[idx]["status"] = "failed"
@@ -159,8 +159,9 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
                 )
             )
             finding = (result.answer or "（子任务无输出）")[:800]
-            new_retries = 0  # 成功 → 重试计数归零
-            ok = True
+            # 空答案视为失败：否则 verify 判重试后 retries 又被归零，形成无限循环
+            ok = bool(finding and finding.strip() and finding != "（子任务无输出）")
+            new_retries = 0 if ok else retries
         except Exception as exc:  # noqa: BLE001 - 单步失败不中断
             finding = f"子任务失败：{exc}"
             new_retries = retries  # 失败 → 保留计数(由 verify 决定是否 +1 / 放弃)

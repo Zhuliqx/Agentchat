@@ -249,6 +249,7 @@ class TaskAgentSection(BaseModel):
     task_agent_mode: str = "replan"             # 规划模式: fixed=一次性计划 / replan=每步动态重规划
     task_agent_hitl: bool = True                # 节点级人工确认
     task_agent_max_retries: int = 2             # verify 容错: 单个子任务失败后自检的最大重试次数
+    task_agent_max_steps: int = 8               # replan 模式步数上限（防循环）
 
 
 class HFSection(BaseModel):

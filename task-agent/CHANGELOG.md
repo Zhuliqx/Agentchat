@@ -26,6 +26,10 @@
 **宿主集成（Agentchat）**
 - 适配器注入记忆（Postgres Store）与事件透传；新增 SSE 端点 `/api/agent-tasks/run/stream`
 - 宿主评估脚本 `backend/scripts/eval_task_agent.py`
+- 修复：空答案不再触发 verify 无限循环；执行器对 supervisor 空响应重试一次、正确处理 HITL
+  中断；新增 `TASK_AGENT_MAX_STEPS` 配置（默认 8）
+- 宿主评估实测（DeepSeek，2026-08-30）：计算类任务受上游偶发空响应影响不稳定——
+  稳定通过示例「最小公倍数」judge 1.0/1.0/0.0；建议重跑或作为方法演示而非固定基线
 
 ## 版本策略
 

@@ -17,11 +17,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from task_agent.judge import judge_task  # noqa: E402
 
+from app import observability  # noqa: E402
 from app.agents.llm import get_llm  # noqa: E402
 from app.agents.task_agent_adapter import build_host_task_agent  # noqa: E402
 from app.evaluation import setup_utf8_stdio  # noqa: E402
 
 setup_utf8_stdio()
+# 评估脚本不接 Langfuse，避免无活动 span 的噪音日志拖慢/刷屏
+observability.langfuse_enabled = lambda: False
 
 # 示例目标：自包含计算 + 依赖宿主知识库/工具两类
 CASES: list[dict] = [
@@ -33,6 +36,9 @@ CASES: list[dict] = [
 
 async def _run_once(graph, case: dict) -> dict:
     thread = f"task-eval-{uuid.uuid4().hex[:8]}"
+    import time
+
+    t0 = time.perf_counter()
     try:
         result = await graph.ainvoke(
             {"goal": case["goal"]},
@@ -40,6 +46,7 @@ async def _run_once(graph, case: dict) -> dict:
         )
     except Exception as exc:  # noqa: BLE001 - 单条失败不中断
         return {"goal": case["goal"], "error": f"{type(exc).__name__}: {exc}"}
+    elapsed = round(time.perf_counter() - t0, 1)
     answer = str(result.get("final_answer") or "")
     judge = await judge_task(
         get_llm("light"),
@@ -56,35 +63,41 @@ async def _run_once(graph, case: dict) -> dict:
         "hallucination": judge["hallucination"],
         "comment": judge["comment"],
         "final_answer": answer[:200],
+        "elapsed_s": elapsed,
     }
 
 
-async def _run_all(max_cases: int) -> list[dict]:
+async def _run_all(max_cases: int, max_steps: int) -> list[dict]:
+    from app.config import settings
+
+    settings.task_agent_max_steps = max_steps  # 评估限定步数，控制耗时/成本
+    # 评估走自主模式：关闭 supervisor 级 HITL，避免与 task-agent 级 HITL 叠加中断
+    settings.hitl_enabled = False
     graph = build_host_task_agent()
-    return await asyncio.gather(
-        *(_run_once(graph, c) for c in CASES[:max_cases])
-    )
+    # 串行执行：并发跑多个 supervisor 全链路时 DeepSeek 易出现连续空响应
+    return [await _run_once(graph, c) for c in CASES[:max_cases]]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="宿主侧任务级评估（task_agent + LLM-judge）")
     ap.add_argument("--max-cases", type=int, default=len(CASES))
+    ap.add_argument("--max-steps", type=int, default=1, help="每个任务最大步数（默认 1；宿主全链路每步数分钟，调大耗时/成本显著上升）")
     ap.add_argument("--out", default=None, help="保存 JSON 结果路径")
     args = ap.parse_args()
 
     print("== task-agent 宿主评估（真实 LLM + LLM-judge）==")
-    records = asyncio.run(_run_all(args.max_cases))
+    records = asyncio.run(_run_all(args.max_cases, args.max_steps))
     ok = [r for r in records if "error" not in r]
     print(
-        f"\n{'目标':<24}{'步数':<6}{'答案命中':<8}{'达成':<8}{'完整':<8}{'幻觉':<8}"
+        f"\n{'目标':<24}{'步数':<6}{'耗时(s)':<8}{'答案命中':<8}{'达成':<8}{'完整':<8}{'幻觉':<8}"
     )
-    print("-" * 62)
+    print("-" * 70)
     for r in records:
         if "error" in r:
             print(f"{r['goal']:<24}  ERROR: {r['error']}")
             continue
         print(
-            f"{r['goal']:<24}{r['steps']:<6}{str(r['answer_ok']):<8}"
+            f"{r['goal']:<24}{r['steps']:<6}{r['elapsed_s']:<8}{str(r['answer_ok']):<8}"
             f"{r['goal_attainment']:<8.3f}{r['info_completeness']:<8.3f}{r['hallucination']:<8.3f}"
         )
     if ok:

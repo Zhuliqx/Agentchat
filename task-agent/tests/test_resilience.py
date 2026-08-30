@@ -79,6 +79,13 @@ class _AlwaysFailExecutor:
         raise RuntimeError("执行器永久故障")
 
 
+class _EmptyExecutor:
+    """始终返回空答案（无输出）的执行器。"""
+
+    async def __call__(self, request: ExecuteRequest) -> StepResult:
+        return StepResult(answer="")
+
+
 class _BrokenLLM:
     async def ainvoke(self, prompt: str) -> Any:
         raise RuntimeError("LLM 永久故障")
@@ -128,6 +135,21 @@ def test_executor_always_fails_still_finishes():
     assert result.get("final_answer")
     assert any("子任务失败" in f for f in result.get("findings") or [])
     assert llm._verify_calls >= 2  # 重试机制被真正触发
+
+
+def test_empty_answer_no_infinite_verify_loop():
+    """空答案视为失败且 retries 不归零：verify 到上限后放弃，不会无限循环。"""
+    llm = _ReplanLLM(actions=("a",))
+    agent = build_agent(
+        config=TaskAgentConfig(mode="replan", hitl=False, max_retries=2, max_steps=4),
+        llm_factory=lambda: llm,
+        checkpointer_provider=lambda: None,
+        executor=_EmptyExecutor(),
+    )
+    result = _run(agent, "目标")
+    assert result.get("final_answer")
+    assert llm._verify_calls == 2  # 重试到上限即放弃，而非无限循环
+    assert int(result.get("step") or 0) == 1  # 仅首次尝试计步，重试不计步
 
 
 def test_llm_total_failure_degrades_gracefully():
