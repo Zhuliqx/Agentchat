@@ -22,9 +22,7 @@ jobs:
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
       - name: "Ruff lint (errors only: F - undefined / unused)"
-        run: |
-          ruff check backend/app --select F
-          ruff check task-agent/src task-agent/tests task-agent/benchmarks --select F
+        run: ruff check backend/app --select F
 
       - name: "Docs stale-symbol check"
         working-directory: backend
@@ -36,17 +34,10 @@ jobs:
         run: pyright backend/app
         continue-on-error: true
 
-      - name: "Type check task-agent (Pyright, non-blocking)"
-        run: pyright task-agent/src
-        continue-on-error: true
-
       # 单元测试：纯逻辑，不依赖 Postgres/Milvus/LLM。
       # 集成测试（tests/integration）需 Docker 依赖，由 rag-regression job 跑。
       - name: "Unit tests (no external services)"
         run: pytest backend/tests/unit -q
-
-      - name: "task-agent package tests"
-        run: pytest task-agent/tests -q
 
   frontend:
     name: Frontend

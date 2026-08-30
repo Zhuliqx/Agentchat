@@ -48,4 +48,6 @@ langfuse>=3.0
 httpx>=0.27
 
 # ---- 自主任务 Agent（仓库顶层独立包，本地路径依赖）----
--e ../task-agent
+# 独立仓库依赖：推 task-agent 独立仓库后把 <USER>/<TASK_AGENT_REPO> 换成真实地址；
+# 正式发布 PyPI 后可直接改为 `agentchat-task-agent>=0.1.0`
+agentchat-task-agent @ git+https://github.com/<USER>/<TASK_AGENT_REPO>.git

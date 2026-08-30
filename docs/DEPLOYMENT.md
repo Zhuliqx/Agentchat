@@ -86,7 +86,7 @@ flowchart TB
 cd frontend-v2 && npm run build && cd ..
 docker compose up -d
 
-# 构建后端镜像（Dockerfile 以仓库根为上下文，含 task-agent/ 独立包）
+# 构建后端镜像（Dockerfile 以仓库根为上下文；项目 2 依赖以 git/PyPI 方式安装）
 docker build -t agentchat-backend -f backend/Dockerfile .
 
 # 后端（生产建议：关 Debug、开日志级别）

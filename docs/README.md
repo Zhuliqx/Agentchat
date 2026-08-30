@@ -1,6 +1,7 @@
 # 文档地图与基线
 
-> 本仓库两个项目（**项目 1 · Agentchat** 主应用、**项目 2 · task-agent** 独立包）的全部文档索引与**唯一基线数字**。
+> 本仓库为**项目 1 · Agentchat** 主应用；**项目 2 · task-agent** 已拆为独立仓库
+> （发行名 `agentchat-task-agent`，地址见 [AGENT_TASK](AGENT_TASK.md)）。这里是主仓库的文档索引与**唯一基线数字**。
 > 最后校验：2026-08-29（防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 文档类型速查
@@ -13,7 +14,7 @@
 | 可复现评估 | [REPRODUCIBLE_EVAL](REPRODUCIBLE_EVAL.md) | 公开示例语料 + 14 问评估集，检索级 MRR/Hit@1 可复现（含步骤） |
 | 部署 / 安装 | [DEPLOYMENT](DEPLOYMENT.md) · [SETUP](SETUP.md) | 部署扩展与演进 / 环境搭建 |
 | 运维 | [OBSERVABILITY](OBSERVABILITY.md) | Langfuse 可观测性接入 |
-| 项目 2 | [AGENT_TASK](AGENT_TASK.md) + [task-agent/README](../task-agent/README.md) | 宿主集成 / 独立包 |
+| 项目 2 | [AGENT_TASK](AGENT_TASK.md) | 宿主集成；引擎为独立仓库 `agentchat-task-agent` |
 
 ## 唯一基线（当前，2026-08）
 

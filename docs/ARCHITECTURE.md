@@ -10,9 +10,9 @@
 | 项目 | 定位 | 文档 |
 |------|------|------|
 | **项目 1 · Agentchat**（本文档主线） | FastAPI + LangGraph + LangChain 的多 Agent 平台（RAG+MCP+三层记忆+HITL+Time Travel） | [文档地图](README.md) |
-| **项目 2 · 自主任务 Agent**（仓库顶层 `task-agent/` 独立包） | 接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；经宿主适配器注入项目 1 子 Agent | [AGENT_TASK](AGENT_TASK.md) |
+| **项目 2 · 自主任务 Agent**（独立仓库，发行名 `agentchat-task-agent`） | 接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；经宿主适配器注入项目 1 子 Agent | [AGENT_TASK](AGENT_TASK.md) |
 
-- **代码结构**：`backend/app/`（项目 1 主体）+ `task-agent/`（项目 2 独立包）；前端 `frontend-v2/`。
+- **代码结构**：`backend/app/`（项目 1 主体）+ 独立仓库 `agentchat-task-agent`（项目 2）；前端 `frontend-v2/`。
 
 ## 2. 总览
 
@@ -246,7 +246,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 | `app/config.py` + `config_sections.py` | 配置中心（pydantic-settings，字段按域分组，`.env`） |
 | `app/agents/graph.py` | Supervisor 图构建缓存；`run_agent`（非流式）/ `stream_agent`（token 流式）；提示词在 `prompts.py`、流式去重在 `streaming.py` |
 | `app/agents/tools/` | 工具族包：rag_tool / mcp_tool / search_tool / code_tool / memory_tools / confirmation / sources / text |
-| `app/agents/task_agent_adapter.py` | 项目 2 宿主适配器（向独立 task-agent 包注入 LLM / Checkpointer / `run_agent` 执行器） |
+| `app/agents/task_agent_adapter.py` | 项目 2 宿主适配器（向独立包 `agentchat-task-agent` 注入 LLM / Checkpointer / `run_agent` 执行器） |
 | `app/agents/llm.py` | LLM 工厂（provider 选择 + 超时/重试） |
 | `app/rag/vector_store.py` | MilvusClient 单例：schema/索引/检索/维度校验/`sync_chunks` 幂等同步/`query_source_pairs` 对账查询 |
 | `app/rag/bm25.py` | 轻量 BM25 索引（中英文切分，无第三方依赖） |

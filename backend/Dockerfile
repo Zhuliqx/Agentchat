@@ -25,8 +25,7 @@ RUN pip install --upgrade pip && pip install -r backend/requirements.txt
 COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY backend/run.py ./run.py
-# 自主任务 Agent 独立包（requirements 中 -e ../task-agent 相对 backend/ 解析到 /app/task-agent）
-COPY task-agent ./task-agent
+# 自主任务 Agent 独立包（agentchat-task-agent）：以 git/PyPI 依赖安装，见 backend/requirements.txt
 
 # 数据目录（上传文件/运行时产物；建议挂载卷持久化）
 RUN mkdir -p /app/data

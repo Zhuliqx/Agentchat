@@ -1,10 +1,10 @@
-# 自主任务 Agent（task-agent/ 独立包）
+# 自主任务 Agent（独立仓库 agentchat-task-agent）
 
-> 相关文档：见 [文档地图](README.md)；独立包 README 见 [task-agent/README](../task-agent/README.md)。
+> 相关文档：见 [文档地图](README.md)；独立仓库地址 `https://github.com/<USER>/<TASK_AGENT_REPO>`（推独立仓库后替换为真实地址）。
 > 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 > 区别于主项目（Agentchat 的知识库问答/单轮路由）。这是一个**自主任务执行器**：
 > 接收模糊目标 → LLM 分解/每步重规划 → 循环执行（宿主注入执行器，复用现有子 Agent）→ 结构化交付。
-> 引擎本体是仓库顶层 `task-agent/` 的独立 Python 包（零 `app.*` 依赖），主项目通过
+> 引擎本体是独立 Python 包/独立仓库（发行名 `agentchat-task-agent`，零 `app.*` 依赖），主项目通过
 > `backend/app/agents/task_agent_adapter.py` 注入 LLM / Checkpointer / `run_agent` 执行器。
 
 ## 1. 与主项目的区别
@@ -94,7 +94,7 @@ flowchart TB
 - **verify 自检重试**：子任务失败 → verify 判重试 → 重试成功（findings 同时留失败+成功记录）；
 - **Time Travel 分叉**：从历史 checkpoint 改用新 goal → `update_state` → 续跑新分支；
 - **fault tolerance**：LLM 网络错误被 `_is_transient` 重试，error_handler 降级收敛兜底；
-- 单元测试 `task-agent/tests/`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级 + demo 离线全流程），
+- 单元测试位于独立仓库 `task-agent/tests/`（覆盖解析/路由/HITL/verify/error_handler/TimeTravel 无库降级 + demo 离线全流程），
   另有宿主适配器单测（source→开关映射 / 图缓存 / on_event 绕过缓存 / 记忆降级）；全量单测通过 + Ruff 干净。
 
 ## 5.1 深度 / 广度扩展（2026-08）

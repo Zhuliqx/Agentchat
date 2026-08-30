@@ -17,7 +17,7 @@
 
 数据层：**Milvus**（向量库，Postgres 为事实源、派生索引由 `reconcile_vectors` 对账）+ **PostgreSQL**（关系库）。
 前端：**`frontend-v2/`（Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia）**，生产构建产物由 FastAPI 托管。
-项目 2：**自主任务 Agent（`task-agent/` 独立包）**，见 [AGENT_TASK](AGENT_TASK.md)。
+项目 2：**自主任务 Agent（独立仓库，发行名 `agentchat-task-agent`）**，见 [AGENT_TASK](AGENT_TASK.md)。
 
 ## 2. 技术栈
 
@@ -122,7 +122,7 @@ sequenceDiagram
 | `app/api/` | chat（SSE）/ sessions / rag / memory / auth / tasks / admin / search / agent-tasks |
 | `app/mcp_integration/` | MCP 连接管理 + 自建 db/time 服务器 |
 | `frontend-v2/` | Vue 3 + SSE 流式渲染 + HITL 确认卡片 + Orbit 轨道 |
-| `task-agent/` | 项目 2 独立包（宿主经 `task_agent_adapter.py` 注入），见 [AGENT_TASK](AGENT_TASK.md) |
+| `agentchat-task-agent`（独立仓库） | 项目 2 独立包（宿主经 `task_agent_adapter.py` 注入），见 [AGENT_TASK](AGENT_TASK.md) |
 
 ## 7. 关键设计决策
 
@@ -144,7 +144,7 @@ python scripts/ingest_docs.py D:\your_docs_folder   # 摄入文档
 python scripts/smoke_test.py         # 冒烟（健康 / RAG / MCP / 搜索）
 python -m pytest tests/unit -q       # 单元测试
 python -m pytest tests/integration -v  # 集成测试（需 DB）
-python ../task-agent -m pytest ../task-agent/tests -q  # 项目2 测试
+cd <task-agent 独立仓库> && python -m pytest tests -q   # 项目2 测试
 ```
 
 ## 9. 常见坑
@@ -160,4 +160,4 @@ python ../task-agent -m pytest ../task-agent/tests -q  # 项目2 测试
 
 - 架构总览：**[ARCHITECTURE.md](ARCHITECTURE.md)**；部署/安装：**[SETUP.md](SETUP.md)** · **[DEPLOYMENT.md](DEPLOYMENT.md)**；
 - 可复现评估：**[REPRODUCIBLE_EVAL.md](REPRODUCIBLE_EVAL.md)**；唯一基线见 [docs/README.md](README.md)；
-- 项目 2：**[AGENT_TASK.md](AGENT_TASK.md)** + [task-agent/README](../task-agent/README.md)。
+- 项目 2：**[AGENT_TASK.md](AGENT_TASK.md)** + 独立仓库 `agentchat-task-agent`（地址见 AGENT_TASK）。
