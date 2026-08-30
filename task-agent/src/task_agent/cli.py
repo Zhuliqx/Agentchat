@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from typing import Callable
 
 from task_agent.config import TaskAgentConfig
 from task_agent.demo import _OpenAICompatLLM, _ScriptedLLM
@@ -38,11 +39,13 @@ async def run_task(goal: str, args: argparse.Namespace) -> dict:
         if args.tools
         else None
     )
-    on_event = None
+    on_event: Callable[[str, dict], None] | None = None
     if args.event:
 
-        def on_event(kind: str, data: dict) -> None:
+        def _on_event(kind: str, data: dict) -> None:
             print(f"  [event] {kind}: {data}")
+
+        on_event = _on_event
 
     agent = build_agent(
         config=config,

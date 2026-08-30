@@ -245,7 +245,9 @@ def make_nodes(runtime: Runtime) -> dict[str, Node]:
             }
         )
         return _apply_confirm(
-            decision, state.get("current_action"), state.get("expected_source")
+            decision,
+            state.get("current_action") or "",
+            state.get("expected_source") or "default",
         )
 
     return {

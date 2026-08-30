@@ -104,10 +104,12 @@ async def run_demo_flow(
 
 
 def main() -> None:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     print("== task-agent demo（自主任务 Agent）==")
     print(f"目标: {DEMO_GOAL}")
     if os.environ.get("TASK_AGENT_OPENAI_API_KEY"):

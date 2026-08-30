@@ -13,7 +13,7 @@ from task_agent.prompts import EVAL_PROMPT
 def _norm(score: object) -> float:
     """0-5 分归一化到 0-1（非法/缺失 → 0.0）。"""
     try:
-        s = float(score)
+        s = float(score)  # type: ignore[arg-type] - 运行时校验非法值
     except (TypeError, ValueError):
         return 0.0
     return max(0.0, min(1.0, s / 5.0))

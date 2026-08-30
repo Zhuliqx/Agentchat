@@ -19,7 +19,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 | **180 / 22**（另有 task-agent 独立包 50） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 | **183 / 22**（另有 task-agent 独立包 **78**；单测覆盖率 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
 ## 项目构成
@@ -32,7 +32,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 
 ### 2. task-agent —— 自主任务 Agent 独立包
 
-把长任务 Agent 能力抽成的**独立 Python 包**（`task-agent/`，src 布局、零业务依赖）：接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付；通过依赖注入接入 LLM / Checkpointer / 执行器，自带离线 demo（`python -m task_agent.demo`）。设计见 [docs/AGENT_TASK.md](docs/AGENT_TASK.md)，独立包说明见 [task-agent/README](task-agent/README.md)。
+把长任务 Agent 能力抽成的**独立 Python 包**（`task-agent/`，src 布局、零业务依赖，发行名 `agentchat-task-agent`，`pip install` 即可用）：接收模糊目标 → LLM 分解/每步重规划 → 循环执行 → 结构化交付。提供 CLI（`task-agent run`）、事件流（on_event → 宿主 SSE）、内置工具执行器、跨任务记忆与 LLM-judge 任务质量评估。设计见 [docs/AGENT_TASK.md](docs/AGENT_TASK.md)，独立包说明见 [task-agent/README](task-agent/README.md)。
 
 ## 演示
 
