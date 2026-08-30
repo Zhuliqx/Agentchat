@@ -38,6 +38,7 @@ class AgentTaskConfirm(BaseModel):
     verb: str = Field("proceed", description="决策: proceed(执行) / edit(改用动作) / skip(跳过)")
     action: str | None = Field(None, description="verb=edit 时的替换动作")
     source: str | None = Field(None, description="verb=edit 时的信息来源(kb/db/web/code)")
+    stream: bool = Field(False, description="为 True 时以 SSE 返回恢复后的事件与结果（前端轨迹连续）")
 
 
 def _pack(result: dict, thread: str) -> dict:
@@ -150,8 +151,10 @@ async def agent_task_history(req: AgentTaskHistory, user_id: str = Depends(get_c
 @router.post("/agent-tasks/confirm")
 async def confirm_agent_task(req: AgentTaskConfirm, user_id: str = Depends(get_current_user_id)) -> dict:
     """HITL 恢复：提交决策，从上次 interrupt 处继续执行（同一 thread_id）。"""
+    if req.stream:
+        return await _confirm_stream(req)
     graph = build_host_task_agent()
-    decision = {"verb": req.verb, "action": req.action, "source": req.source}
+    decision = {"verb": req.verb, "action": req.action, "source": req.source}    
     try:
         result = await graph.ainvoke(
             Command(resume=decision),
@@ -160,3 +163,41 @@ async def confirm_agent_task(req: AgentTaskConfirm, user_id: str = Depends(get_c
     except Exception as exc:
         raise HTTPException(500, f"恢复失败: {exc}") from exc
     return _pack(result, req.session_id)
+
+
+async def _confirm_stream(req: AgentTaskConfirm) -> StreamingResponse:
+    """HITL 恢复的 SSE 版本：与 run/stream 同构，恢复后的事件（execute/check/verify/hitl…）
+    实时推送，最后推 result（含再次 awaiting_confirm 或 done），保证前端轨迹连续。"""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def on_event(kind: str, data: dict) -> None:
+        asyncio.ensure_future(queue.put({"type": "event", "kind": kind, "data": data}))
+
+    graph = build_host_task_agent(on_event=on_event)
+    decision = {"verb": req.verb, "action": req.action, "source": req.source}
+
+    async def produce() -> None:
+        try:
+            result = await graph.ainvoke(
+                Command(resume=decision),
+                config={"configurable": {"thread_id": req.session_id}},
+            )
+            await queue.put({"type": "result", "data": _pack(result, req.session_id)})
+        except Exception as exc:  # noqa: BLE001 - SSE 内推送错误帧
+            await queue.put({"type": "error", "data": {"message": str(exc)}})
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(produce())
+
+    async def gen():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+        finally:
+            task.cancel()
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

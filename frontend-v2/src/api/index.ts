@@ -267,6 +267,7 @@ export interface AgentTaskConfirmBody {
   verb: "proceed" | "edit" | "skip";
   action?: string;
   source?: string;
+  stream?: boolean;
 }
 
 export const agentTasksApi = {
@@ -298,6 +299,20 @@ export const agentTasksApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  /** HITL 恢复的 SSE 版本：恢复后事件（execute/check/verify/hitl…）+ 结果实时推送 */
+  confirmStream: async (
+    body: AgentTaskConfirmBody,
+    onFrame: (frame: AgentTaskFrame) => void | Promise<void>,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const res = await apiRaw("/agent-tasks/confirm", {
+      method: "POST",
+      body: JSON.stringify({ ...body, stream: true }),
+      signal,
+    });
+    if (!res.ok) throw await parseError(res);
+    await readSSEStream(res, (ev) => onFrame(ev as unknown as AgentTaskFrame));
+  },
 };
 
 export { ApiError };

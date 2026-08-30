@@ -7,6 +7,7 @@ vi.mock("@/api", () => ({
   agentTasksApi: {
     runStream: vi.fn(),
     confirm: vi.fn(),
+    confirmStream: vi.fn(),
     history: vi.fn(),
     run: vi.fn(),
   },
@@ -17,6 +18,7 @@ import type { AgentTaskFrame } from "@/types/api";
 
 const runStream = agentTasksApi.runStream as unknown as ReturnType<typeof vi.fn>;
 const confirmApi = agentTasksApi.confirm as unknown as ReturnType<typeof vi.fn>;
+const confirmStreamApi = agentTasksApi.confirmStream as unknown as ReturnType<typeof vi.fn>;
 const historyApi = agentTasksApi.history as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -91,24 +93,106 @@ describe("taskAgent store", () => {
     expect(store.pending?.next_action).toBe("查数据库");
     expect(store.pending?.expected_source).toBe("db");
 
+    confirmStreamApi.mockImplementation(
+      async (_body: unknown, onFrame: (f: AgentTaskFrame) => void) => {
+        await onFrame({
+          type: "event",
+          kind: "execute",
+          data: { action: "查数据库", ok: true },
+        });
+        await onFrame({
+          type: "result",
+          data: {
+            session_id: "task-abc",
+            status: "done",
+            plan: null,
+            findings: [],
+            final_answer: "答案是 42",
+          },
+        });
+      }
+    );
+    await store.confirm("proceed");
+
+    expect(confirmStreamApi).toHaveBeenCalledWith(
+      {
+        session_id: "task-abc",
+        verb: "proceed",
+        action: undefined,
+        source: undefined,
+      },
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
+    // 恢复后的事件进入轨迹（HITL 之后不再只有“重新规划/人工确认”）
+    expect(store.events.map((e) => e.kind)).toContain("execute");
+    expect(store.status).toBe("done");
+    expect(store.finalAnswer).toBe("答案是 42");
+    expect(store.pending).toBeNull();
+  });
+
+  it("confirm() still works with the plain (non-stream) api", async () => {
+    const store = useTaskAgentStore();
+    store.sessionId = "task-abc";
     confirmApi.mockResolvedValue({
       session_id: "task-abc",
       status: "done",
       plan: null,
       findings: [],
-      final_answer: "答案是 42",
+      final_answer: "ok",
     });
-    await store.confirm("proceed");
+    // 直接调用底层 api 的 plain confirm（兼容旧路径）
+    const r = await agentTasksApi.confirm({ session_id: "task-abc", verb: "skip" });
+    expect(r.status).toBe("done");
+  });
 
-    expect(confirmApi).toHaveBeenCalledWith({
-      session_id: "task-abc",
-      verb: "proceed",
-      action: undefined,
-      source: undefined,
-    });
+  it("dedupes the replayed hitl event on resume", async () => {
+    const store = useTaskAgentStore();
+    emitFrames([
+      {
+        type: "event",
+        kind: "hitl",
+        data: { next_action: "查数据库", expected_source: "db", step: 1 },
+      },
+      {
+        type: "result",
+        data: {
+          session_id: "task-abc",
+          status: "awaiting_confirm",
+          plan: null,
+          findings: [],
+          final_answer: "",
+          pending: { next_action: "查数据库", expected_source: "db", step: 1 },
+        },
+      },
+    ]);
+    await store.run("统计会话数");
+    expect(store.events.filter((e) => e.kind === "hitl")).toHaveLength(1);
+
+    // 恢复时同一中断的 hitl 重放：不新增轨迹项，也不重复改状态
+    confirmStreamApi.mockImplementation(
+      async (_body: unknown, onFrame: (f: AgentTaskFrame) => void) => {
+        await onFrame({
+          type: "event",
+          kind: "hitl",
+          data: { next_action: "查数据库", expected_source: "db", step: 1 },
+        });
+        await onFrame({
+          type: "result",
+          data: {
+            session_id: "task-abc",
+            status: "done",
+            plan: null,
+            findings: [],
+            final_answer: "答案是 42",
+          },
+        });
+      }
+    );
+    await store.confirm("proceed");
+    expect(store.events.filter((e) => e.kind === "hitl")).toHaveLength(1);
     expect(store.status).toBe("done");
     expect(store.finalAnswer).toBe("答案是 42");
-    expect(store.pending).toBeNull();
   });
 
   it("stop() aborts and marks as stopped", async () => {

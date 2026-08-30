@@ -25,7 +25,7 @@ export interface TaskTraceItem {
 }
 
 const KIND_LABEL: Record<string, string> = {
-  plan: "规划",
+  plan: "开始规划",
   replan: "重新规划",
   execute: "执行",
   check: "完成度检查",
@@ -43,11 +43,18 @@ function traceFrom(
   const label = KIND_LABEL[kind] || kind;
   switch (kind) {
     case "plan":
+      // fixed 模式：plan_node 发 {subtasks, fallback}；replan 模式首次进入发 {action, source}
+      if (typeof data.subtasks === "number") {
+        return {
+          label,
+          detail: `拆分为 ${data.subtasks} 个子任务${
+            data.fallback ? "（直答降级）" : ""
+          }`,
+        };
+      }
       return {
         label,
-        detail: `拆分为 ${data.subtasks ?? "?"} 个子任务${
-          data.fallback ? "（直答降级）" : ""
-        }`,
+        detail: String(data.action || ""),
       };
     case "execute":
       return { label, detail: String(data.subtask || data.action || ""), ok: !!data.ok };
@@ -130,6 +137,11 @@ export const useTaskAgentStore = defineStore("taskAgent", {
         }
       } finally {
         this.abortController = null;
+        // SSE 连接断开但未收到 result/error 帧（如服务重启）时，避免卡在“执行中”
+        if (this.status === "running") {
+          this.status = "idle";
+          this.error = "连接已断开，任务结果未知";
+        }
       }
     },
 
@@ -160,17 +172,29 @@ export const useTaskAgentStore = defineStore("taskAgent", {
     ) {
       if (!this.sessionId || this.running) return;
       this.status = "running";
+      const controller = new AbortController();
+      this.abortController = controller;
       try {
-        const r = await agentTasksApi.confirm({
-          session_id: this.sessionId,
-          verb,
-          action,
-          source,
-        });
-        this.applyResult(r);
+        // 走 SSE：恢复后的事件（执行/自检/完成度/下一轮 HITL）实时进轨迹，最后统一收 result
+        await agentTasksApi.confirmStream(
+          { session_id: this.sessionId, verb, action, source },
+          (frame) => this._onFrame(frame),
+          controller.signal
+        );
       } catch (e) {
-        this.error = (e as Error).message;
-        this.status = "error";
+        if ((e as Error).name === "AbortError") {
+          this.error = "已停止";
+          this.status = "idle";
+        } else {
+          this.error = (e as Error).message;
+          this.status = "error";
+        }
+      } finally {
+        this.abortController = null;
+        if (this.status === "running") {
+          this.status = "idle";
+          this.error = "连接已断开，任务结果未知";
+        }
       }
     },
 
@@ -205,13 +229,24 @@ export const useTaskAgentStore = defineStore("taskAgent", {
     _onFrame(frame: AgentTaskFrame) {
       if (frame.type === "event" && frame.kind) {
         if (frame.kind === "hitl") {
-          // hitl 事件到达即可渲染确认卡片（result 帧会再次确认状态）
-          this.pending = {
-            next_action: String(frame.data.next_action || ""),
-            expected_source: String(frame.data.expected_source || "default"),
-            step: Number(frame.data.step || 0),
-          };
-          this.status = "awaiting_confirm";
+          // hitl 事件到达即可渲染确认卡片（result 帧会再次确认状态）。
+          // LangGraph 恢复时会重放 interrupt 前的代码，同一中断的 hitl 事件会重复到达：
+          // 与当前 pending 相同则视为重复（避免轨迹出现两条“人工确认”/状态抖动）。
+          const next = String(frame.data.next_action || "");
+          const src = String(frame.data.expected_source || "default");
+          const dup =
+            this.pending?.next_action === next &&
+            this.pending?.expected_source === src;
+          if (!dup) {
+            this.pending = {
+              next_action: next,
+              expected_source: src,
+              step: Number(frame.data.step || 0),
+            };
+            this.status = "awaiting_confirm";
+            this.pushTrace(frame.kind, frame.data || {});
+          }
+          return;
         }
         this.pushTrace(frame.kind, frame.data || {});
       } else if (frame.type === "result") {
