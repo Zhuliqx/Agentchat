@@ -88,11 +88,15 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
             f"更新后的内容未写入 Milvus: {texts}"
         )
 
-        # 检索确认：向量通道能命中更新后的内容
+        # 检索确认：向量通道能命中更新后的内容。
+        # 按 source 过滤检索，避免历史测试轮次遗留的同文本幽灵向量挤占 top-K 造成偶发失败。
         hits2 = vector_store.search(
-            "量子模拟器 021-20000000", top_k=10, score_threshold=0.0
+            "量子模拟器 021-20000000",
+            top_k=10,
+            score_threshold=0.0,
+            filter_expr=vector_store.source_filter_expr(source),
         )
-        assert any(h.get("source") == source for h in hits2), "更新后的内容未被检索到"
+        assert hits2, "更新后的内容未被检索到"
     finally:
         # 清理，避免污染其他检索回归用例
         vector_store.delete_by_source(source, user_id="default")
