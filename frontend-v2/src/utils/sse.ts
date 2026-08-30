@@ -11,15 +11,16 @@ export async function readSSEStream(
   let buffer = "";
   while (true) {
     const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const frame = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
+    buffer += decoder.decode(value, { stream: !done });
+    let boundary: RegExpExecArray | null;
+    // SSE 允许 LF 或 CRLF；不要把 CRLF 帧合并为一个无效 JSON 载荷。
+    while ((boundary = /\r?\n\r?\n/.exec(buffer)) !== null) {
+      const frame = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary[0].length);
       const ev = parseFrame(frame);
       if (ev) await onEvent(ev);
     }
+    if (done) break;
   }
   if (buffer.trim()) {
     const ev = parseFrame(buffer);

@@ -93,7 +93,7 @@ def test_build_vlm_chunks_disabled(monkeypatch):
 
 
 def test_build_vlm_chunks_enabled(monkeypatch):
-    # 开启后：describle_image 返回描述 → 生成 kind=image_vlm 块；空描述跳过
+    # 开启后：describe_image 返回描述 → 生成 kind=image_vlm 块；空描述跳过
     from app.config import settings
     from app.rag.chunkers import _build_vlm_chunks
 

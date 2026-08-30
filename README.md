@@ -104,7 +104,7 @@ Agentchat/
 │   │   ├── config.py         # 配置中心（字段分组在 config_sections.py）
 │   │   ├── api/routes/       # chat / sessions / rag / memory / health / auth / tasks / admin / search / agent-tasks
 │   │   ├── agents/           # LangGraph 多 Agent（graph / llm / prompts / streaming / tools 包）
-│   │   ├── task_agent_adapter.py # 项目2宿主适配器（引擎为独立包 agentchat-task-agent）
+│   │   ├── agents/task_agent_adapter.py # 项目2宿主适配器（引擎为独立包 agentchat-task-agent）
 │   │   ├── rag/              # 嵌入(image_embedding) / 向量库 / BM25 / 混合检索 / rerank / 摄入(extractors+chunkers) / postprocess
 │   │   ├── db/               # Postgres 模型、会话管理、Checkpointer/Store
 │   │   ├── mcp_integration/  # MCP 服务器 + 客户端管理器
