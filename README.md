@@ -23,7 +23,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 | **183 / 22**（另有 task-agent 独立包 **78**；单测覆盖率 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 | **183 / 22**（另有 task-agent 独立包 **87**；单测覆盖率 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
 ## 项目构成
@@ -90,6 +90,26 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 | 前端 | Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia + marked/highlight.js（frontend-v2） |
 | 认证 | 自实现 JWT（HS256）+ PBKDF2 密码哈希（stdlib，零依赖） |
 | 可观测 | Langfuse 自托管（trace `supervisor→子Agent→工具→LLM`，三配置齐全即启用，fail-open） |
+
+## 架构
+
+```mermaid
+flowchart LR
+    FE[Vue3 前端] -->|REST / SSE| API[FastAPI]
+    API --> SUP[Supervisor · LangGraph]
+    SUP --> RAG[rag_agent]
+    SUP --> MCP[mcp_agent]
+    SUP --> WEB[web_search]
+    SUP --> CODE[code_agent]
+    SUP --> MEM[记忆 · Checkpointer + Store]
+    RAG --> MIL[(Milvus 向量)]
+    RAG --> PG[(PostgreSQL BM25)]
+    MIL --> RRF[RRF 融合]
+    PG --> RRF
+    RRF --> RER[rerank]
+    RER --> GEN[LLM 生成]
+    SUP -. HITL 人工确认 .-> H[用户]
+```
 
 ## 目录结构
 
