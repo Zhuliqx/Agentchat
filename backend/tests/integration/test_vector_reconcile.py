@@ -12,13 +12,38 @@ BACKEND = Path(__file__).resolve().parent.parent.parent
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+# 集成测试专用用户：与 default 隔离，避免测试数据污染真实知识库；固定名便于崩溃后自愈。
+TEST_USER = "test-vector-reconcile"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolate_test_user() -> None:
+    """模块级隔离：开始前清掉上一轮残留，结束后清掉本模块全部测试数据。"""
+    from app.db.models import Document
+    from app.db.postgres import SessionLocal
+    from app.rag import vector_store
+
+    def _clean() -> None:
+        vector_store.delete_by_user(TEST_USER)
+        with SessionLocal() as db:
+            db.query(Document).filter(Document.user_id == TEST_USER).delete(
+                synchronize_session=False
+            )
+            db.commit()
+
+    _clean()
+    yield
+    _clean()
+
 
 pytestmark = pytest.mark.skipif(
     not db_available(), reason="Postgres/Milvus 不可用（需 Docker 依赖）"
 )
 
 
-def test_reconcile_syncs_pending_and_cleans_ghosts(tmp_path: Path) -> None:
+def test_reconcile_syncs_pending_and_cleans_ghosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """对账任务：pending 行补同步、Milvus 幽灵 doc_id 被清理、状态标记正确。"""
     from app.config import settings
     from app.db.models import Document, gen_uuid
@@ -32,7 +57,7 @@ def test_reconcile_syncs_pending_and_cleans_ghosts(tmp_path: Path) -> None:
     try:
         # 1. 正常摄入 → 全部 synced
         doc.write_text("对账测试内容：量子对账引擎 v1，支持增量同步。", encoding="utf-8")
-        r = ingest_file(doc, user_id="default")
+        r = ingest_file(doc, user_id=TEST_USER)
         assert r.get("chunks", 0) > 0, f"摄入失败: {r}"
         with SessionLocal() as db:
             rows = db.query(Document).filter(Document.source == source).all()
@@ -44,7 +69,7 @@ def test_reconcile_syncs_pending_and_cleans_ghosts(tmp_path: Path) -> None:
             db.add(
                 Document(
                     id=pending_id,
-                    user_id="default",
+                    user_id=TEST_USER,
                     filename="pending.txt",
                     source=source,
                     chunk_index=999,
@@ -62,11 +87,15 @@ def test_reconcile_syncs_pending_and_cleans_ghosts(tmp_path: Path) -> None:
             [{"text": "幽灵向量", "metadata": {}}],
             doc_ids=[ghost_id],
             source=source,
-            user_id="default",
+            user_id=TEST_USER,
             vectors=[[0.1] * settings.embedding_dim],
         )
 
-        # 4. 跑对账
+        # 4. 跑对账（限制只对账测试用户，避免全库任务改动 default 等真实用户数据）
+        monkeypatch.setattr(
+            "app.db.postgres.distinct_document_sources",
+            lambda: [(TEST_USER, source)],
+        )
         stats = _run_reconcile_vectors()
         assert stats["pending_synced"] >= 1, stats
         assert stats["ghosts_deleted"] >= 1, stats
@@ -87,9 +116,11 @@ def test_reconcile_syncs_pending_and_cleans_ghosts(tmp_path: Path) -> None:
         assert pending_id in mv_ids, "pending 行应被对账补写进 Milvus"
         assert ghost_id not in mv_ids, "幽灵 doc_id 应被对账清理"
     finally:
-        vector_store.delete_by_source(source, user_id="default")
+        vector_store.delete_by_source(source, user_id=TEST_USER)
         with SessionLocal() as db:
-            db.query(Document).filter(Document.source == source).delete(
+            db.query(Document).filter(
+                Document.source == source, Document.user_id == TEST_USER
+            ).delete(
                 synchronize_session=False
             )
             db.commit()

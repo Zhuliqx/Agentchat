@@ -16,6 +16,30 @@ BACKEND = Path(__file__).resolve().parent.parent.parent
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+# 集成测试专用用户：与 default（演示/回归用户）隔离，避免测试数据污染真实知识库。
+# 固定用户名（而非每次随机）：即使某轮被强杀，下一轮开始时也能清掉上一轮残留。
+TEST_USER = "test-rag-incremental"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolate_test_user() -> None:
+    """模块级隔离：开始前清掉上一轮残留，结束后清掉本模块全部测试数据。"""
+    from app.db.models import Document
+    from app.db.postgres import SessionLocal
+    from app.rag import vector_store
+
+    def _clean() -> None:
+        vector_store.delete_by_user(TEST_USER)
+        with SessionLocal() as db:
+            db.query(Document).filter(Document.user_id == TEST_USER).delete(
+                synchronize_session=False
+            )
+            db.commit()
+
+    _clean()
+    yield
+    _clean()
+
 # 两段内容：章节 1 不变、章节 2 内容变化 → 增量摄入只改 chunk1
 # （内容 < chunk_size=800 时 RecursiveCharacterTextSplitter 会合并为单块，
 #   但增量语义不变：v2 的块 hash 与 v1 不同 → 整块替换）
@@ -48,7 +72,7 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
     try:
         # ---- v1 摄入 ----
         doc.write_text(V1, encoding="utf-8")
-        r1 = ingest_file(doc, user_id="default")
+        r1 = ingest_file(doc, user_id=TEST_USER)
         assert r1.get("chunks", 0) > 0, f"v1 摄入失败: {r1}"
         with SessionLocal() as db:
             v1_rows = [
@@ -60,7 +84,7 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
 
         # ---- 同 source 增量重传（内容变化 → 整块替换）----
         doc.write_text(V2, encoding="utf-8")
-        r2 = ingest_file(doc, user_id="default")
+        r2 = ingest_file(doc, user_id=TEST_USER)
         assert not r2.get("unchanged"), f"v2 应产生增量写入: {r2}"
         assert r2.get("chunks", 0) > 0, f"v2 摄入失败: {r2}"
         with SessionLocal() as db:
@@ -99,10 +123,12 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
         assert hits2, "更新后的内容未被检索到"
     finally:
         # 清理，避免污染其他检索回归用例
-        vector_store.delete_by_source(source, user_id="default")
+        vector_store.delete_by_source(source, user_id=TEST_USER)
         wait_milvus_converged(source, [])  # 等删除收敛，防止幽灵向量累积挤占 top-K
         with SessionLocal() as db:
-            db.query(Document).filter(Document.source == source).delete(
+            db.query(Document).filter(
+                Document.source == source, Document.user_id == TEST_USER
+            ).delete(
                 synchronize_session=False
             )
             db.commit()
@@ -139,7 +165,7 @@ def test_incremental_partial_update_preserves_chunk_indexes(tmp_path: Path) -> N
     source = str(doc.resolve())
     try:
         doc.write_text(V_P1, encoding="utf-8")
-        r1 = ingest_file(doc, user_id="default")
+        r1 = ingest_file(doc, user_id=TEST_USER)
         assert r1.get("chunks", 0) >= 3, f"v1 应产生至少 3 个块: {r1}"
 
         def _pg_rows() -> list[tuple[str, int, str]]:
@@ -159,7 +185,7 @@ def test_incremental_partial_update_preserves_chunk_indexes(tmp_path: Path) -> N
 
         # ---- v2：只改第二章（原始序号 1），第一/三章不变 ----
         doc.write_text(V_P2, encoding="utf-8")
-        r2 = ingest_file(doc, user_id="default")
+        r2 = ingest_file(doc, user_id=TEST_USER)
         assert not r2.get("unchanged"), f"v2 应产生增量写入: {r2}"
         v2 = _pg_rows()
         assert len(v2) == len(v1), f"块数不应变化: {len(v1)} -> {len(v2)}"
@@ -187,10 +213,12 @@ def test_incremental_partial_update_preserves_chunk_indexes(tmp_path: Path) -> N
             f"PG: {pg_pairs}\nMV: {sorted(mv)}"
         )
     finally:
-        vector_store.delete_by_source(source, user_id="default")
+        vector_store.delete_by_source(source, user_id=TEST_USER)
         wait_milvus_converged(source, [])  # 等删除收敛，防止幽灵向量累积挤占 top-K
         with SessionLocal() as db:
-            db.query(Document).filter(Document.source == source).delete(
+            db.query(Document).filter(
+                Document.source == source, Document.user_id == TEST_USER
+            ).delete(
                 synchronize_session=False
             )
             db.commit()
