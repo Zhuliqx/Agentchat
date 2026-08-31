@@ -95,6 +95,22 @@ def init_db() -> None:
                 "ON documents (vector_status)"
             )
         )
+        # 迁移：documents 唯一约束升级为含 user_id（多用户可摄入同一路径文档）。
+        # 旧库是 uq_source_chunk(source, chunk_index)；新模型是
+        # uq_user_source_chunk(user_id, source, chunk_index)。先删旧约束，再幂等补新约束。
+        conn.execute(
+            _text("ALTER TABLE documents DROP CONSTRAINT IF EXISTS uq_source_chunk")
+        )
+        conn.execute(
+            _text(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = "
+                "'uq_user_source_chunk') THEN "
+                "ALTER TABLE documents ADD CONSTRAINT uq_user_source_chunk "
+                "UNIQUE (user_id, source, chunk_index); "
+                "END IF; END $$;"
+            )
+        )
         # 迁移：旧版 messages 表无 sources 列 → 补列（引用溯源，JSON 数组）
         conn.execute(
             _text(
