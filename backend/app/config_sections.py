@@ -38,7 +38,7 @@ class AppSection(BaseModel):
 
     app_name: str = "Multi-Agent Platform"      # 应用名（影响标题 / 日志）
     log_level: str = "INFO"                     # 日志级别：DEBUG / INFO / WARNING / ERROR
-    host: str = "0.0.0.0"                       # 服务监听地址（run.py 读取）
+    host: str = "127.0.0.1"                     # 服务监听地址（run.py 读取）
     port: int = 8000                            # 服务监听端口（run.py 读取）
     agent_timeout: float = 120.0                # 单轮对话超时（秒）：LLM / MCP 卡死时避免请求无限挂起
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]  # CORS 显式白名单；避免 "*"+credentials 回显任意 Origin
