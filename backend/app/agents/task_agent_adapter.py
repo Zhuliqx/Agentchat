@@ -100,7 +100,8 @@ class _HostMemory:
         except Exception:  # noqa: BLE001 - 无语义索引/检索失败 → 降级全量扫描
             pass
         try:
-            items = await store.alist(self._namespace, limit=100)
+            # 语义检索不可用 → 列出该 namespace 全部（query=None），再做关键词重叠过滤
+            items = await store.asearch(self._namespace, limit=100)
         except Exception:  # noqa: BLE001
             return []
         hits = []

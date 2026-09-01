@@ -91,7 +91,7 @@ def record_retrieval_stats(name: str, stats: dict, elapsed_ms: float) -> None:
         if lf.get_current_observation_id() is None:
             return
         with lf.start_as_current_observation(
-            name=f"rag.{name}", type="SPAN", input=stats
+            name=f"rag.{name}", as_type="span", input=stats
         ):
             pass  # 耗时与入参已记录；上下文管理器退出时自动 end
     except Exception:  # noqa: BLE001 - 观测失败不影响检索

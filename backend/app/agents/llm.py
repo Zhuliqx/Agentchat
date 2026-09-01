@@ -16,6 +16,8 @@ import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from pydantic import SecretStr
+
 from app.config import BASE_DIR, settings
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,14 @@ def _openai_kwargs() -> dict:
         "timeout": settings.llm_timeout,
         "max_retries": settings.llm_max_retries,
     }
+
+
+def _openai_auth_kwargs(api_key: str) -> dict:
+    """OpenAI 兼容系 API key 参数：非空时包成 SecretStr（langchain-openai 1.x 类型要求），
+    为空时省略，保持"走环境变量/报缺 key"的旧语义。"""
+    if not api_key:
+        return {}
+    return {"api_key": SecretStr(api_key)}
 
 
 def _model_name(kind: str) -> str:
@@ -68,9 +78,9 @@ def create_llm(provider: str, model: str) -> "BaseChatModel":
 
         return ChatOpenAI(
             model=model,
-            api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             temperature=settings.temperature,
+            **_openai_auth_kwargs(settings.deepseek_api_key),
             **_openai_kwargs(),
         )
 
@@ -79,9 +89,9 @@ def create_llm(provider: str, model: str) -> "BaseChatModel":
 
         return ChatOpenAI(
             model=model,
-            api_key=settings.dashscope_api_key,
             base_url=settings.dashscope_base_url,
             temperature=settings.temperature,
+            **_openai_auth_kwargs(settings.dashscope_api_key),
             **_openai_kwargs(),
         )
 
@@ -90,9 +100,9 @@ def create_llm(provider: str, model: str) -> "BaseChatModel":
 
     return ChatOpenAI(
         model=model,
-        api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         temperature=settings.temperature,
+        **_openai_auth_kwargs(settings.openai_api_key),
         **_openai_kwargs(),
     )
 

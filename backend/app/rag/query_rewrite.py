@@ -107,7 +107,15 @@ def _llm_rewrite(query: str) -> str:
         resp = get_llm("light").invoke(
             [SystemMessage(content=_LLM_REWRITE_PROMPT), HumanMessage(content=query)]
         )
-        text = resp.content.strip() if hasattr(resp, "content") else str(resp).strip()
+        content = getattr(resp, "content", "")
+        if isinstance(content, list):
+            # langchain AIMessage.content 可能是内容块列表（str | dict）→ 拼接为文本
+            text = "".join(
+                str(p.get("text", "") if isinstance(p, dict) else p) for p in content
+            )
+        else:
+            text = str(content or "")
+        text = text.strip()
     except Exception as exc:
         logger.warning("LLM 改写失败，回退原 query: %s", exc)
         return query
