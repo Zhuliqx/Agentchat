@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -121,7 +122,7 @@ def test_rag_upload_search_delete(client, tmp_path):
         assert "tasks" in body and len(body["tasks"]) == 1
         task_id = body["tasks"][0]["task_id"]
         # 上传改为后台任务：轮询摄入完成（上限 30s）
-        st = {"status": "pending"}
+        st: dict[str, Any] = {"status": "pending"}
         deadline = time.time() + 30
         while time.time() < deadline:
             st = client.get(f"/api/rag/ingest/{task_id}").json()

@@ -126,10 +126,10 @@ class _HtmlTableParser(HTMLParser):
             self._cell = []
 
     def handle_endtag(self, tag):
-        if tag in ("td", "th") and self._cell is not None:
+        if tag in ("td", "th") and self._cell is not None and self._row is not None:
             self._row.append("".join(self._cell).strip())
             self._cell = None
-        elif tag == "tr" and self._row is not None:
+        elif tag == "tr" and self._row is not None and self._cur is not None:
             self._cur.append(self._row)
             self._row = None
         elif tag == "table" and self._cur is not None:

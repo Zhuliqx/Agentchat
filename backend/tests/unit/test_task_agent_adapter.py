@@ -73,9 +73,8 @@ def test_host_memory_recall_falls_back_to_scan(monkeypatch):
 
     class _FakeStore:
         async def asearch(self, *a, **kw):
-            raise RuntimeError("no index")
-
-        async def alist(self, *a, **kw):
+            if kw.get("query"):
+                raise RuntimeError("no index")  # 语义检索不可用
             return [_Item()]
 
     monkeypatch.setattr(adapter, "get_store", lambda: _FakeStore())

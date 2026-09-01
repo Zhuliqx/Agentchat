@@ -16,14 +16,19 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
 import uuid
+from typing import cast
 
 import httpx
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # sys.stdout 的 typeshed 类型是 TextIO（无 reconfigure）
+    cast(io.TextIOWrapper, sys.stdout).reconfigure(
+        encoding="utf-8", errors="replace"
+    )
 except Exception:
     pass
 

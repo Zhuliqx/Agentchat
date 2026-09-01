@@ -9,7 +9,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
+
+from openai.types.chat import (
+    ChatCompletionContentPartParam,
+    ChatCompletionUserMessageParam,
+)
 
 from app.config import settings
 
@@ -85,13 +90,19 @@ def describe_image(img, max_size: int | None = None, detail: str | None = None) 
             image_url: dict[str, Any] = {"url": _encode_image(img)}
             if detail:  # 部分兼容端点（如 DeepSeek）不接受 OpenAI 特有 detail 字段，为空则省略
                 image_url["detail"] = detail
-            content: list[dict[str, Any]] = [
+            content: list[ChatCompletionContentPartParam] = [
                 {"type": "text", "text": _PROMPT},
-                {"type": "image_url", "image_url": image_url},
+                cast(
+                    ChatCompletionContentPartParam,
+                    {"type": "image_url", "image_url": image_url},
+                ),
+            ]
+            messages: list[ChatCompletionUserMessageParam] = [
+                {"role": "user", "content": content}
             ]
             resp = client.chat.completions.create(
                 model=settings.image_vlm_model,
-                messages=[{"role": "user", "content": content}],
+                messages=messages,
                 temperature=0.0,
             )
             text = (resp.choices[0].message.content or "").strip()

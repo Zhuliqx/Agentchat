@@ -149,7 +149,9 @@ async def agent_task_history(req: AgentTaskHistory, user_id: str = Depends(get_c
 
 
 @router.post("/agent-tasks/confirm")
-async def confirm_agent_task(req: AgentTaskConfirm, user_id: str = Depends(get_current_user_id)) -> dict:
+async def confirm_agent_task(
+    req: AgentTaskConfirm, user_id: str = Depends(get_current_user_id)
+) -> dict | StreamingResponse:
     """HITL 恢复：提交决策，从上次 interrupt 处继续执行（同一 thread_id）。"""
     if req.stream:
         return await _confirm_stream(req)

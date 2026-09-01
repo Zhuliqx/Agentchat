@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from collections.abc import Generator
 
 import pytest
 
@@ -22,7 +23,7 @@ TEST_USER = "test-rag-incremental"
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _isolate_test_user() -> None:
+def _isolate_test_user() -> Generator[None, None, None]:
     """模块级隔离：开始前清掉上一轮残留，结束后清掉本模块全部测试数据。"""
     from app.db.models import Document
     from app.db.postgres import SessionLocal

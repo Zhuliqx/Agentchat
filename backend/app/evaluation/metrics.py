@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Sequence
 
 
-def _safe_ratio(numerator: int, denominator: int) -> float:
+def _safe_ratio(numerator: float, denominator: int) -> float:
     return numerator / denominator if denominator else 0.0
 
 
@@ -92,6 +92,8 @@ def faithfulness(supported: Sequence[bool]) -> float:
 
 def answer_relevancy(score_0_5: float | int | None) -> float:
     """0-5 归一化到 0-1（非法/缺失 → 0.0）。"""
+    if score_0_5 is None:
+        return 0.0
     try:
         s = float(score_0_5)
     except (TypeError, ValueError):

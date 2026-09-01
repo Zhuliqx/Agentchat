@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 class ModelChoiceIn(BaseModel):
-    model_id: str = ...
+    model_id: str
 
 
 @router.get("")

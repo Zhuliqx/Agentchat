@@ -272,7 +272,13 @@ def query_source_pairs(
         user_id=user_id,
         output_fields=["doc_id", "chunk_index"],
     )
-    return [(r.get("doc_id"), int(r.get("chunk_index"))) for r in rows]
+    pairs: list[tuple[str, int]] = []
+    for r in rows:
+        doc_id = r.get("doc_id")
+        if doc_id is None:
+            continue
+        pairs.append((str(doc_id), int(r.get("chunk_index") or 0)))
+    return pairs
 
 
 def search(

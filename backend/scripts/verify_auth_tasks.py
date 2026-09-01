@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import httpx
 
@@ -23,7 +24,7 @@ def check(name, cond, extra=""):
     print(f"{mark} {name} {extra}")
 
 
-def call(method, path, **kw):
+def call(method, path, **kw) -> Any:
     r = c.request(method, BASE + path, **kw)
     if r.status_code >= 400:
         print(f"  !! {method} {path} -> {r.status_code} {r.text[:120]}")
