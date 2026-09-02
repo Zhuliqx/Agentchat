@@ -148,7 +148,7 @@ async def agent_task_history(req: AgentTaskHistory, user_id: str = Depends(get_c
     return {"session_id": req.session_id, "history": items}
 
 
-@router.post("/agent-tasks/confirm")
+@router.post("/agent-tasks/confirm", response_model=None)
 async def confirm_agent_task(
     req: AgentTaskConfirm, user_id: str = Depends(get_current_user_id)
 ) -> dict | StreamingResponse:
