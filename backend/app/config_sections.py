@@ -41,6 +41,8 @@ class AppSection(BaseModel):
     host: str = "127.0.0.1"                     # 服务监听地址（run.py 读取）
     port: int = 8000                            # 服务监听端口（run.py 读取）
     agent_timeout: float = 120.0                # 单轮对话超时（秒）：LLM / MCP 卡死时避免请求无限挂起
+    agent_max_tool_calls: int = 20              # 单轮对话工具调用上限（0=不限制；防失控循环烧 token）
+    agent_max_model_calls: int = 25             # 单轮对话模型调用上限（0=不限制；超限直接结束本轮）
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]  # CORS 显式白名单；避免 "*"+credentials 回显任意 Origin
 
 
@@ -96,6 +98,16 @@ class LLMSection(BaseModel):
     dashscope_api_key: str = ""                 # DashScope API Key（必填）
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # DashScope 端点（OpenAI 兼容）
     dashscope_model: str = "qwen-plus"          # 模型名
+
+
+class HistorySection(BaseModel):
+    """对话历史自动压缩（SummarizationMiddleware）"""
+
+    history_summary_enabled: bool = True        # 总开关（默认开；关掉则图不带摘要中间件）
+    history_summary_trigger_tokens: int = 8000  # 触发阈值：历史 token ≥ 此值 且 消息数 ≥ min_messages
+    history_summary_min_messages: int = 30      # 触发阈值：消息数下限（避免短对话被压缩）
+    history_summary_keep_messages: int = 20     # 压缩后保留的最近消息条数
+    history_summary_max_input_tokens: int = 3000  # 喂给摘要模型的输入截断上限（控成本）
 
 
 class TavilySection(BaseModel):

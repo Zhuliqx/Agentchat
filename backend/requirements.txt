@@ -7,7 +7,7 @@ python-multipart>=0.0.9
 
 # ---- LangChain / LangGraph ----
 # 已升级至 langchain 1.x（本仓库以 1.x 为基准开发验证）
-langchain>=1.0,<2.0
+langchain>=1.3.14,<2.0
 langchain-core>=1.0,<2.0
 langchain-openai>=1.0,<2.0
 langchain-ollama>=0.2
