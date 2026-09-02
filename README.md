@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-02（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -23,7 +23,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 | **183 / 22**（另有 task-agent 独立包 **87**；单测覆盖率 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 | **206 / 22**（另有 task-agent 独立包 **101**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
 ## 项目构成
@@ -45,6 +45,8 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 ## 特性
 
 - **多 Agent 编排**：Supervisor 层级模式，自动路由到 RAG Agent / web_search 搜索工具 / MCP Agent，支持任意组合的多步工具调用
+- **对话历史自动压缩**：超阈值（默认 ≥8000 token 且 ≥30 条）时用轻量模型把旧消息压成中文摘要、保留最近 20 条，随 Checkpointer 持久化；摘要失败不裁剪（保留完整历史）；前端历史走 Postgres 消息表不受影响（`HISTORY_SUMMARY_*` 可配，默认开）
+- **单轮调用上限**：工具调用（默认 20 次）与模型调用（默认 25 次）按轮次独立预算，超限自动收尾/结束，防失控循环烧 token（`AGENT_MAX_TOOL_CALLS` / `AGENT_MAX_MODEL_CALLS`，0=不限制）
 - **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）。**解析增强**：PDF 用 `pdfplumber→pymupdf→pypdf` 回退、Markdown 去标题（默认开）；**图片能力**：可选 **图片语义描述**（VLM 转图内容为文本）与 **图文双通道**（多模态向量 + 文本融合，见 [ARCHITECTURE](docs/ARCHITECTURE.md)）
 - **联网搜索**：Tavily 直接搜索工具（`web_search`），实时获取最新网络资讯（LangChain 官方推荐工具）
 - **代码 Agent**：受限沙箱执行 Python（子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断），需要实际计算/验证算法/数据处理时由 Supervisor 自动调度；`CODE_AGENT_ENABLED` / `CODE_EXEC_TIMEOUT` 可配置
@@ -123,7 +125,8 @@ Agentchat/
 │   │   ├── main.py           # FastAPI 入口（托管前端 + API + 模型预热）
 │   │   ├── config.py         # 配置中心（字段分组在 config_sections.py）
 │   │   ├── api/routes/       # chat / sessions / rag / memory / health / auth / tasks / admin / search / agent-tasks
-│   │   ├── agents/           # LangGraph 多 Agent（graph / llm / prompts / streaming / tools 包）
+│   │   ├── agents/           # LangGraph 多 Agent（graph / llm / prompts / streaming / tools 包 /
+│   │   │                     #   middleware 统一工厂：摘要压缩 + 调用上限 + 超时日志）
 │   │   ├── task_agent_adapter.py # 项目2宿主适配器（引擎为独立包 agentchat-task-agent）
 │   │   ├── rag/              # 嵌入(image_embedding) / 向量库 / BM25 / 混合检索 / rerank / 摄入(extractors+chunkers) / postprocess
 │   │   ├── db/               # Postgres 模型、会话管理、Checkpointer/Store
@@ -229,6 +232,13 @@ python run.py
 | `QUERY_REWRITE_MODE` | `rule` | 改写档位：`none` / `rule` / `llm` |
 | `HYBRID_SEARCH` | `true` | 混合检索（向量 + BM25 + RRF） |
 | `AGENT_TIMEOUT` | `120` | 单轮对话超时（秒） |
+| `AGENT_MAX_TOOL_CALLS` | `20` | 单轮对话工具调用上限（0=不限制，防失控循环） |
+| `AGENT_MAX_MODEL_CALLS` | `25` | 单轮对话模型调用上限（0=不限制，超限直接结束本轮） |
+| `HISTORY_SUMMARY_ENABLED` | `true` | 对话历史自动压缩总开关 |
+| `HISTORY_SUMMARY_TRIGGER_TOKENS` | `8000` | 压缩触发阈值：历史 token ≥ 此值 |
+| `HISTORY_SUMMARY_MIN_MESSAGES` | `30` | 压缩触发阈值：且消息数 ≥ 此值 |
+| `HISTORY_SUMMARY_KEEP_MESSAGES` | `20` | 压缩后保留的最近消息条数 |
+| `HISTORY_SUMMARY_MAX_INPUT_TOKENS` | `3000` | 喂给摘要模型的输入截断上限 |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地向量模型 |
 | `EMBEDDING_DEVICE` | `auto` | 推理设备：auto=有 CUDA 用 cuda 否则 cpu（embedding 与 rerank 共用），或显式 cuda/cpu |
 | `INJECTION_DETECTION_ENABLED` | `true` | Prompt 注入检测（外部内容命中→剔除，用户 query 命中→400） |
