@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from typing import Any
 
 import psycopg
 
@@ -47,25 +49,25 @@ def get_checkpointer():
     return _checkpointer
 
 
-def _embed(texts: list[str]) -> list[list[float]]:
+def _embed(texts: Sequence[str]) -> list[list[float]]:
     """Store 语义索引的 embedding 函数（复用 RAG 的 embedder）。
 
-    注意：LangGraph 的 IndexConfig.embed 期望签名是
-    ``(texts: list[str]) -> list[list[float]]``（接收列表返回向量列表），
+    注意：LangGraph 的 index.embed 期望签名是
+    ``(texts: Sequence[str]) -> list[list[float]]``（接收序列返回向量列表），
     不能写成单个文本的 embed_query，否则 LangGraph 传入 list 时会把
     整个 list 再包一层导致 sentence-transformers 报
     "Unsupported input type: list"。
     """
     from app.rag.embedding import get_embedder
 
-    return get_embedder().embed_texts(texts)
+    return get_embedder().embed_texts(list(texts))
 
 
 def _build_index():
-    """构建 Store 语义索引（IndexConfig）。需要 Postgres 启用 pgvector。"""
-    from langgraph.store.base import IndexConfig
+    """构建 Store 语义索引（PostgresIndexConfig）。需要 Postgres 启用 pgvector。"""
+    from langgraph.store.postgres.base import PostgresIndexConfig
 
-    return IndexConfig(dims=settings.embedding_dim, embed=_embed, fields=None)
+    return PostgresIndexConfig(dims=settings.embedding_dim, embed=_embed, fields=None)
 
 
 async def init_store():
@@ -114,6 +116,23 @@ def get_store():
 def store_has_index() -> bool:
     """Store 是否启用了语义索引（决定 asearch 能否用 query 参数）。"""
     return bool(getattr(_store, "index_config", None))
+
+
+async def safe_asearch(
+    store: Any,
+    namespace: tuple[str, ...],
+    **kwargs: Any,
+) -> list | None:
+    """Store 检索的安全包装：失败返回 None，成功返回条目列表（可能为空）。
+
+    统一各处「asearch 失败 → 降级」的 try/except 样板；调用方把 None 当作
+    「检索不可用」处理（如降级全量扫描 / 跳过语义去重）。
+    """
+    try:
+        return await store.asearch(namespace, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - 检索失败不阻断主流程
+        logger.warning("Store 检索失败（namespace=%s）: %s", namespace, exc)
+        return None
 
 
 def cleanup_stale_checkpoints(thread_ids: list[str] | None = None) -> int:

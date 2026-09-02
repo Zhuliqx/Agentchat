@@ -101,21 +101,14 @@ def _clean_llm_output(text: str, query: str) -> str:
 def _llm_rewrite(query: str) -> str:
     """LLM 改写为检索 query；异常/拒绝模板/空/超长一律回退原句。"""
     from app.agents.llm import get_llm  # 延迟导入，避免循环依赖
+    from app.agents.tools.text import extract_text  # 延迟导入，避免包级循环
     from langchain_core.messages import HumanMessage, SystemMessage
 
     try:
         resp = get_llm("light").invoke(
             [SystemMessage(content=_LLM_REWRITE_PROMPT), HumanMessage(content=query)]
         )
-        content = getattr(resp, "content", "")
-        if isinstance(content, list):
-            # langchain AIMessage.content 可能是内容块列表（str | dict）→ 拼接为文本
-            text = "".join(
-                str(p.get("text", "") if isinstance(p, dict) else p) for p in content
-            )
-        else:
-            text = str(content or "")
-        text = text.strip()
+        text = extract_text(getattr(resp, "content", "")).strip()
     except Exception as exc:
         logger.warning("LLM 改写失败，回退原 query: %s", exc)
         return query

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user_id
-from app.db.memory_store import get_store, store_has_index
+from app.db.memory_store import get_store, safe_asearch, store_has_index
 
 router = APIRouter()
 
@@ -56,13 +56,12 @@ async def list_memory(
     """
     store = _require_store()
     namespace = (user_id, NAMESPACE_TAIL)
-    try:
-        if query.strip() and store_has_index():
-            items = await store.asearch(namespace, query=query.strip(), limit=100)
-        else:
-            items = await store.asearch(namespace, limit=100)
-    except Exception:  # 语义检索失败时降级为全量
-        items = await store.asearch(namespace, limit=100)
+    items = None
+    if query.strip() and store_has_index():
+        # 语义检索失败（无索引等）→ None → 降级全量
+        items = await safe_asearch(store, namespace, query=query.strip(), limit=100)
+    if items is None:
+        items = await store.asearch(namespace, limit=100)  # 兜底失败照常上抛
     return [_out(user_id, i) for i in items]
 
 

@@ -6,6 +6,7 @@ import asyncio
 from task_agent.executor import ExecuteRequest
 
 from app.agents import task_agent_adapter as adapter
+from helpers import FakeLLM
 
 
 def test_source_route_covers_all_sources():
@@ -81,3 +82,40 @@ def test_host_memory_recall_falls_back_to_scan(monkeypatch):
     mem = adapter._HostMemory("default")
     hits = asyncio.run(mem.recall("公司成立于哪一年"))
     assert hits == ["公司成立于 2020 年"]
+
+
+# ---------------- LangChainLLM.ainvoke_json（结构化输出适配） ----------------
+
+
+def test_langchain_llm_ainvoke_json_success():
+    """JSON mode 成功 → 返回 dict。"""
+    llm = adapter.LangChainLLM(FakeLLM(text='{"ok": true, "n": 1}'))
+    assert asyncio.run(llm.ainvoke_json("输出 JSON")) == {"ok": True, "n": 1}
+
+
+def test_langchain_llm_ainvoke_json_invalid_returns_none():
+    """模型返回非 JSON 文本 → None（引擎负责降级文本解析）。"""
+    llm = adapter.LangChainLLM(FakeLLM(text="抱歉，我无法输出 JSON"))
+    assert asyncio.run(llm.ainvoke_json("输出 JSON")) is None
+
+
+def test_langchain_llm_ainvoke_json_with_schema_falls_back():
+    """带 schema 但模型不支持 with_structured_output → 降级 JSON mode 仍可用。"""
+    schema = {
+        "type": "object",
+        "properties": {"done": {"type": "boolean"}},
+        "required": ["done"],
+    }
+    llm = adapter.LangChainLLM(FakeLLM(text='{"done": true}'))
+    assert asyncio.run(llm.ainvoke_json("判断", schema=schema)) == {"done": True}
+
+
+def test_langchain_llm_ainvoke_json_raises_returns_none():
+    """模型调用抛异常 → None（不向上抛，引擎重试/降级）。"""
+
+    class _BoomLLM(FakeLLM):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            raise RuntimeError("model down")
+
+    llm = adapter.LangChainLLM(_BoomLLM())
+    assert asyncio.run(llm.ainvoke_json("输出 JSON")) is None
