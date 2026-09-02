@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 
 from app.agents.context import UserContext
 from app.agents.llm import get_llm
-from app.agents.middleware import resilience_middleware
+from app.agents.middleware import build_supervisor_middlewares
 from app.agents.prompts import build_supervisor_prompt
-from app.agents.streaming import _PreludeDedupe
+from app.agents.streaming import SupervisorStreamer
 from app.agents.tools import (
     agent_to_tool,
     build_code_agent,
@@ -43,7 +43,6 @@ from app.agents.tools import (
     build_remember_tool,
     build_search_tool,
     extract_text,
-    get_recent_rag_sources,
     last_ai_text,
 )
 from app.config import settings
@@ -92,6 +91,13 @@ def get_supervisor_graph(
         use_memory,
         get_checkpointer() is not None,
         get_store() is not None,
+        settings.history_summary_enabled,
+        settings.history_summary_trigger_tokens,
+        settings.history_summary_min_messages,
+        settings.history_summary_keep_messages,
+        settings.history_summary_max_input_tokens,
+        settings.agent_max_tool_calls,
+        settings.agent_max_model_calls,
     )
     if key in _graph_cache:
         return _graph_cache[key]
@@ -160,6 +166,10 @@ def get_supervisor_graph(
     if settings.hitl_enabled and not settings.hitl_actions:
         tools.append(build_confirmation_tool())
 
+    # 摘要压缩 / 调用上限 / 超时日志统一在 middleware 工厂组装（返回 list[Any]，
+    # 避免各中间件泛型 StateT/ContextT 差异触发 create_agent 类型推断冲突）。
+    middleware = build_supervisor_middlewares(history_summary_model=get_llm("light"))
+
     graph = create_agent(
         get_llm(),
         tools=tools,
@@ -168,8 +178,8 @@ def get_supervisor_graph(
         store=get_store(),
         context_schema=UserContext,
         # 容错：统一模型调用超时/重试/日志（middleware）
-        middleware=[resilience_middleware()],
-        # 缓存：相同输入命中，跳过重复 LLM 调用（受开关控制，见 config.py）
+        middleware=middleware,
+        # 缓存：相同输入命中，跳过重复 LLM 调用
         cache=_get_agent_cache(),
     )
     _graph_cache[key] = graph
@@ -368,62 +378,22 @@ async def stream_agent(
     if on_event:
         await on_event({"type": "start", "content": "Supervisor 开始调度..."})
 
-    answer_parts: list[str] = []
     used_agents: list[str] = []
     tool_calls_log: list[str] = []
     hitl_pending = None
-    # 开场白缓冲：工具触发前不逐字显示，超过阈值判定为直接回答后平滑流式；
-    # prelude_total 保留全部开场白，供工具后去重（LLM 常连同答案重新生成）。
-    PRELUDE_FLUSH = 40  # 超过该长度判定为直接回答，开始逐字流式
-    prelude_total: list[str] = []  # 全部开场白（含已流式部分），供工具后去重
-    prelude_buf: list[str] = []    # 尚未判定是否直接回答的缓冲文本
-    streaming_direct = False       # 已判定为直接回答 → 后续逐字流式
-    saw_tool_call = False
-    dedupe: _PreludeDedupe | None = None  # 工具后答案流式去重（跳过重复开场白前缀）
-    pending_tool_name: str | None = None  # 最近已发出 tool 事件的工具名（避免重复）
-    # 本次实际注册的工具名集合（按开关）：过滤模型幻觉调用的未注册工具，
-    # 避免误发 phantom tool 事件让用户误以为真的联网了。
-    registered_tools: set[str] = {"mcp_agent"}
+    # 输出装配（开场白缓冲 / 工具事件 / 工具后去重）抽到 SupervisorStreamer
+    streamer = SupervisorStreamer(
+        on_token=on_token, on_tool_event=on_event, user_id=user_id
+    )
     if use_rag:
-        registered_tools.add("rag_agent")
+        streamer.register_tool("rag_agent")
     if use_search:
-        registered_tools.add("web_search")
+        streamer.register_tool("web_search")
     if use_memory:
-        registered_tools.add("remember_memory")
-        registered_tools.add("recall_memory")
+        streamer.register_tool("remember_memory")
+        streamer.register_tool("recall_memory")
     if settings.code_agent_enabled:
-        registered_tools.add("code_agent")
-
-    async def _push(text: str) -> None:
-        """推送一段文本到答案流（并记录到 answer_parts）。"""
-        answer_parts.append(text)
-        if on_token:
-            await on_token(text)
-
-    async def _emit_tool(name: str) -> None:
-        """统一处理工具调用：丢弃未流式的开场白碎片并发出 tool 事件。
-
-        工具调用前的短开场白（如“我来帮您”）尚未流式时直接丢弃 prelude_buf，
-        避免碎片感；若已判定为直接回答（streaming_direct）则开场白已流式，无需
-        处理。仅用 prelude_total 记录完整开场白供工具后去重。仅对本次实际注册的
-        工具（registered_tools）生效——模型可能幻觉吐出未注册工具（如开关关闭
-        时的 web_search）的 tool_call chunk，这类不应点亮工具轨道，也不应计入
-        saw_tool_call（否则会干扰后续去重与开场白逻辑）。
-        """
-        nonlocal saw_tool_call, dedupe, pending_tool_name
-        is_real = name in registered_tools
-        if is_real and not saw_tool_call:
-            if not streaming_direct:
-                prelude_buf.clear()  # 丢弃未显示的开场白碎片
-            dedupe = _PreludeDedupe("".join(prelude_total))
-            saw_tool_call = True
-        if on_event and is_real and name != pending_tool_name:
-            pending_tool_name = name
-            data: dict = {}
-            # 引用溯源：rag_agent 执行后附带检索命中的文档来源
-            if name == "rag_agent":
-                data["sources"] = get_recent_rag_sources(user_id or "default")
-            await on_event({"type": "tool", "content": f"工具: {name}", "data": data})
+        streamer.register_tool("code_agent")
 
     async with _agent_timeout_scope(on_event):
         async for mode, data in graph.astream(
@@ -455,8 +425,8 @@ async def stream_agent(
                             used_agents.append(name)
                         tool_calls_log.append(name)
                         # 兜底：若未在流式 token 中检测到 tool_call（个别模型不
-                        # 流式返回 tool_call_chunks），_emit_tool 会补推开场白
-                        await _emit_tool(name)
+                        # 流式返回 tool_call_chunks），streamer.emit_tool 会补推开场白
+                        await streamer.emit_tool(name)
             elif mode == "messages":
                 chunk, meta = data
                 # 只流式顶层 supervisor（model 节点）的 AI 文本 token。
@@ -475,13 +445,9 @@ async def stream_agent(
                 text = extract_text(getattr(chunk, "content", ""))
                 if has_tool:
                     # 工具即将执行：同 chunk 的 content 属于开场白，缓冲后由
-                    # _emit_tool 丢弃（不显示碎片）；若已判定为直接回答则已流式
-                    if not saw_tool_call and text:
-                        prelude_total.append(text)
-                        if streaming_direct:
-                            await _push(text)
-                        else:
-                            prelude_buf.append(text)
+                    # emit_tool 丢弃（不显示碎片）；若已判定为直接回答则已流式
+                    if not streamer.saw_tool_call and text:
+                        await streamer.record_tool_prelude(text)
                     name: str = str(
                         next(
                             (
@@ -493,39 +459,26 @@ async def stream_agent(
                         )
                         or ""
                     )
-                    await _emit_tool(name)
-                elif saw_tool_call:
+                    await streamer.emit_tool(name)
+                elif streamer.saw_tool_call:
                     # 工具已调用：后续为最终答案。LLM 在工具后常重新生成完整回答
                     # （重复了开场白）→ 流式前缀匹配，跳过重复的开场白前缀
-                    if dedupe is not None and dedupe.active:
-                        text = dedupe.feed(text)
-                    if text:
-                        await _push(text)
+                    await streamer.feed_answer(text)
                 else:
                     # 工具调用前（或直接回答）：未判定时缓冲；超过阈值即判定为直接
                     # 回答并开始逐字流式（此后不再攒段，保证平滑不卡顿）
                     if text:
-                        prelude_total.append(text)
-                        if streaming_direct:
-                            await _push(text)
-                        else:
-                            prelude_buf.append(text)
-                            if len("".join(prelude_buf)) >= PRELUDE_FLUSH:
-                                streaming_direct = True
-                                await _push("".join(prelude_buf))
-                                prelude_buf.clear()
+                        await streamer.feed(text)
 
         # 流结束：尚未判定的短文本（<阈值）补推（例如很短的直接回答）
-        if prelude_buf:
-            await _push("".join(prelude_buf))
-            prelude_buf.clear()
+        await streamer.flush()
 
     await _emit_final_events(
         on_event, list(dict.fromkeys(used_agents)), [], hitl_pending
     )
 
     return {
-        "answer": "".join(answer_parts),
+        "answer": streamer.answer(),
         "used_agents": list(dict.fromkeys(used_agents)),
         "tool_calls": list(dict.fromkeys(tool_calls_log)),
         "hitl_pending": hitl_pending,

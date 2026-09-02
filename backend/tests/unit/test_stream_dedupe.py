@@ -1,10 +1,37 @@
-"""stream_agent 工具后答案去重（_PreludeDedupe）单元测试。
+"""流式输出装配（_PreludeDedupe / SupervisorStreamer）单元测试。
 
 场景：supervisor 先输出开场白再调用工具，工具执行后 LLM 重新生成完整回答
 （重复开场白）。流式输出按小分块到达，验证去重在各种切割下都成立。
 """
+from __future__ import annotations
 
-from app.agents.streaming import _PreludeDedupe
+import asyncio
+
+from app.agents.streaming import SupervisorStreamer, _PreludeDedupe
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class _Sink:
+    """收集 on_token / on_tool_event 回调的假目标。"""
+
+    def __init__(self) -> None:
+        self.tokens: list[str] = []
+        self.events: list[dict] = []
+
+    async def on_token(self, text: str) -> None:
+        self.tokens.append(text)
+
+    async def on_tool_event(self, data: dict) -> None:
+        self.events.append(data)
+
+
+def _streamer(sink: _Sink) -> SupervisorStreamer:
+    return SupervisorStreamer(
+        on_token=sink.on_token, on_tool_event=sink.on_tool_event
+    )
 
 
 def test_exact_repeat_small_chunks():
@@ -61,3 +88,58 @@ def test_inactive_when_empty_expected():
     d = _PreludeDedupe("")
     assert d.active is False
     assert d.feed("直接输出") == "直接输出"
+
+
+# ---------------- SupervisorStreamer（开场白缓冲/工具事件装配） ----------------
+
+
+def test_short_answer_buffered_until_flush():
+    """短直接回答（<阈值）→ 期间不推送，flush 时一次性补推。"""
+    sink = _Sink()
+    st = _streamer(sink)
+    _run(st.feed("好的"))
+    assert sink.tokens == [] and st.answer() == ""
+    _run(st.flush())
+    assert sink.tokens == ["好的"]
+    assert st.answer() == "好的"
+
+
+def test_feed_switches_to_direct_streaming_over_threshold():
+    """缓冲超过 PRELUDE_FLUSH → 判定为直接回答并开始逐字流式。"""
+    sink = _Sink()
+    st = _streamer(sink)
+    chunk1, chunk2 = "起" * 20, "续" * 25  # 合计 45 ≥ 40
+    _run(st.feed(chunk1))
+    assert sink.tokens == []
+    _run(st.feed(chunk2))
+    assert sink.tokens == [chunk1 + chunk2]  # 超阈值一次性推缓冲
+    _run(st.feed("尾"))
+    assert sink.tokens == [chunk1 + chunk2, "尾"]  # 已直推，不再攒段
+    assert st.answer() == chunk1 + chunk2 + "尾"
+
+
+def test_emit_tool_discards_buffer_and_dedupes_answer():
+    """工具事件：丢弃未流式开场白、记录 prelude、工具后去重重启、同工具不重复发事件。"""
+    sink = _Sink()
+    st = _streamer(sink)
+    st.register_tool("rag_agent")
+    prelude = "我来帮你查询公司信息"
+    _run(st.feed(prelude))  # < 阈值，只进缓冲
+    _run(st.emit_tool("rag_agent"))
+    _run(st.emit_tool("rag_agent"))  # 同名重复 → 不再发事件
+    assert st.saw_tool_call is True
+    assert [e["content"] for e in sink.events] == ["工具: rag_agent"]
+    _run(st.feed_answer(prelude + "：结果如下"))
+    assert sink.tokens == ["：结果如下"]  # 开场白碎片已丢弃且去重
+    assert st.answer() == "：结果如下"
+
+
+def test_unregistered_tool_emits_nothing_and_keeps_buffer():
+    """幻觉调用未注册工具 → 不发事件、不置 saw_tool_call、不破坏缓冲。"""
+    sink = _Sink()
+    st = _streamer(sink)
+    _run(st.feed("短回答"))
+    _run(st.emit_tool("phantom_tool"))  # 未登记
+    assert sink.events == [] and st.saw_tool_call is False
+    _run(st.flush())
+    assert sink.tokens == ["短回答"]
