@@ -228,21 +228,36 @@ def delete_by_ids(ids: list[str]) -> None:
 
 
 def delete_by_user(user_id: str) -> None:
-    """删除该用户在 Milvus 主集合中的全部向量（按 source 去重后逐个清理）。"""
+    """删除该用户在 Milvus 主集合中的全部向量（分页取全部 source 后逐个清理）。
+
+    原先单次 query limit=16384 会漏掉更大知识库的尾部 source，导致注销后
+    向量残留；这里按页取直到空，再对去重后的 source 逐个删除。
+    """
     if not user_id:
         return
-    rows = _client().query(
-        settings.milvus_collection,
-        filter=user_filter_expr(user_id),
-        output_fields=["source"],
-        limit=16384,
-    )
+    client = _client()
     seen: set[str] = set()
-    for r in rows:
-        src = r.get("source")
-        if src and src not in seen:
-            seen.add(src)
-            delete_by_source(src, user_id=user_id)
+    page_size = 10000
+    offset = 0
+    while True:
+        rows = client.query(
+            settings.milvus_collection,
+            filter=user_filter_expr(user_id),
+            output_fields=["source"],
+            limit=page_size,
+            offset=offset,
+        )
+        if not rows:
+            break
+        for r in rows:
+            src = r.get("source")
+            if src and src not in seen:
+                seen.add(src)
+        offset += len(rows)
+        if len(rows) < page_size:
+            break
+    for src in seen:
+        delete_by_source(src, user_id=user_id)
 
 
 def query_source(

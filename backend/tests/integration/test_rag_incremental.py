@@ -223,3 +223,79 @@ def test_incremental_partial_update_preserves_chunk_indexes(tmp_path: Path) -> N
                 synchronize_session=False
             )
             db.commit()
+
+
+def _big_section(prefix: str, word: str) -> str:
+    """生成 >chunk_size 的大段文本，保证被拆成独立分块。"""
+    body = " ".join(
+        f"{word}{prefix}{i:02d}数据内容用于测试增量摄入的章节平移，"
+        f"每段都包含足够长的中文句子来撑满分块边界。"
+        for i in range(1, 61)
+    )
+    return f"章节 {word} {prefix}\n{body}"
+
+
+def test_incremental_shifted_prefix_does_not_collide() -> None:
+    """删除开头章节导致后续保留块索引平移时，不得撞唯一键且重试应成功。"""
+    from uuid import uuid4
+
+    from pathlib import Path
+
+    from app.db.models import Document
+    from app.db.postgres import SessionLocal
+    from app.rag import vector_store
+    from app.rag.ingestion import ingest_file
+
+    prefix = uuid4().hex[:6]
+    doc = (
+        Path(__file__).resolve().parent.parent
+        / "fixtures"
+        / f".kb_shift_{prefix}.txt"
+    )
+    source = str(doc.resolve())
+    try:
+        v1 = "\n\n".join(
+            [_big_section(prefix, "甲"), _big_section(prefix, "乙"), _big_section(prefix, "丙")]
+        )
+        # 开头“甲”整章删除 → 乙/丙文本不变但 chunk_index 前移
+        v2 = "\n\n".join(
+            [_big_section(prefix, "乙"), _big_section(prefix, "丙"), _big_section(prefix, "丁")]
+        )
+        doc.write_text(v1, encoding="utf-8")
+        r1 = ingest_file(doc, user_id=TEST_USER)
+        assert r1.get("chunks", 0) >= 3, r1
+
+        doc.write_text(v2, encoding="utf-8")
+        r2 = ingest_file(doc, user_id=TEST_USER)  # 旧实现会在这里抛唯一键冲突
+        assert not r2.get("unchanged"), r2
+        assert r2.get("chunks", 0) > 0, r2
+
+        with SessionLocal() as db:
+            rows = (
+                db.query(Document.id, Document.chunk_index, Document.text)
+                .filter(Document.source == source, Document.user_id == TEST_USER)
+                .order_by(Document.chunk_index.asc())
+                .all()
+            )
+        indexes = [ci for _, ci, _ in rows]
+        assert indexes == list(range(len(rows))), f"索引必须连续无重复: {indexes}"
+        texts = "\n".join(t for _, _, t in rows)
+        assert f"甲{prefix}" not in texts and f"丁{prefix}" in texts
+
+        pg_pairs = sorted((i, ci) for i, ci, _ in rows)
+        mv = wait_milvus_converged(source, pg_pairs)
+        assert sorted(mv) == pg_pairs
+
+        # 修复后：同一 v2 再传一次应稳定返回 unchanged（而不是继续撞唯一键）
+        doc.write_text(v2, encoding="utf-8")
+        r3 = ingest_file(doc, user_id=TEST_USER)
+        assert r3.get("unchanged"), r3
+    finally:
+        vector_store.delete_by_source(source, user_id=TEST_USER)
+        wait_milvus_converged(source, [])
+        with SessionLocal() as db:
+            db.query(Document).filter(
+                Document.source == source, Document.user_id == TEST_USER
+            ).delete(synchronize_session=False)
+            db.commit()
+        doc.unlink(missing_ok=True)

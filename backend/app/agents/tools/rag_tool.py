@@ -141,7 +141,7 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
                     sources.append(src)
                 parts.append(f"[{i}] 来源: {name}\n{wrap_as_data(d.page_content)}")
             # 记录最近检索来源（供引用溯源）
-            _record_rag_sources(user, sources)
+            _record_rag_sources(getattr(rt.context, "run_id", "") or "", sources)
             if not parts:
                 if dropped:
                     return "知识库检索结果经安全过滤后无可用内容。"

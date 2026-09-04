@@ -41,7 +41,7 @@ def test_chat_routes_use_authenticated_user_id(monkeypatch):
         captured["session_id"] = kwargs.get("session_id")
         return {"answer": "ok", "used_agents": [], "hitl_pending": None}
 
-    async def fake_save(_session_id, _result, _user_id):
+    async def fake_save(_session_id, _result):
         return None
 
     monkeypatch.setattr(chat_mod, "_prepare_context", fake_prepare)
@@ -73,9 +73,14 @@ def test_chat_stream_uses_authenticated_user_id(monkeypatch):
 
     async def fake_stream(**kwargs):
         captured["stream_user"] = kwargs.get("user_id")
-        return {"answer": "ok", "used_agents": [], "hitl_pending": None}
+        return {
+            "answer": "ok",
+            "used_agents": [],
+            "hitl_pending": None,
+            "sources": ["platform_doc_a.txt"],
+        }
 
-    async def fake_save(_session_id, _result, _user_id):
+    async def fake_save(_session_id, _result):
         return "asst-1"
 
     monkeypatch.setattr(chat_mod, "_prepare_context", fake_prepare)
@@ -97,6 +102,7 @@ def test_chat_stream_uses_authenticated_user_id(monkeypatch):
     assert captured["prepared_user"] == "alice"
     assert captured["stream_user"] == "alice"
     assert any('"type": "message"' in c for c in out)
+    assert any("platform_doc_a.txt" in c for c in out)
 
 
 # ---------------- 认证：带过期/无效 token 不得静默降级访客 ----------------

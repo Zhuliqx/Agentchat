@@ -47,12 +47,6 @@ from app.agents.tools.search_tool import (
     _SearchQuery,
     build_search_tool,
 )
-from app.agents.tools.sources import (
-    _RAG_SOURCES,
-    _RAG_SOURCES_LOCK,
-    _record_rag_sources,
-    get_recent_rag_sources,
-)
 from app.agents.tools.text import extract_text, last_ai_text
 
 __all__ = [
@@ -84,8 +78,4 @@ __all__ = [
     "agent_to_tool",
     "extract_text",
     "last_ai_text",
-    "_RAG_SOURCES",
-    "_RAG_SOURCES_LOCK",
-    "_record_rag_sources",
-    "get_recent_rag_sources",
 ]

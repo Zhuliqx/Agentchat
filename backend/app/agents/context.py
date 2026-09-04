@@ -24,7 +24,7 @@ def current_user_id() -> str:
 
 @asynccontextmanager
 async def current_user_context(user_id: str) -> Iterator[None]:
-    """在执行 Agent 期间把用户 id 注入 contextvar，退出时恢复。"""
+    """执行 Agent 期间把用户 id 注入 contextvar，退出时恢复。"""
     token = _CURRENT_USER_ID.set(user_id or "default")
     try:
         yield
@@ -44,3 +44,4 @@ class UserContext:
 
     user_id: str = "default"
     session_id: str = ""
+    run_id: str = ""

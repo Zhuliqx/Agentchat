@@ -110,3 +110,49 @@ def test_prelude_dedupe_in_stream(monkeypatch):
     answer = result.get("answer", "")
     # 开场白不应出现两次（工具前已推送，工具后去重）
     assert answer.count(prelude) <= 1, f"开场白重复: {answer!r}"
+
+
+def test_rag_stream_emits_sources_from_run_context(monkeypatch):
+    """检索命中的来源经 SSE tool 事件与 stream_agent 返回值透传（非全局槽）。"""
+    from langchain_core.documents import Document as LCDocument
+
+    from app.agents.tools import rag_tool
+
+    class _FakeRetriever:
+        top_k = 4
+
+        def invoke(self, query: str) -> list:
+            return [
+                LCDocument(
+                    page_content="智能体平台文档正文，不含任何注入指令。",
+                    metadata={"source": "platform_doc_a.txt", "chunk_index": 0},
+                )
+            ]
+
+    fake = _FakeRetriever()
+    monkeypatch.setattr(rag_tool, "get_retriever", lambda user_id="default": fake)
+    # 子 Agent 图按模块级 lru_cache 复用：清掉避免复用此前用例构建的工具
+    rag_tool.build_rag_agent.cache_clear()
+    patch_llms(
+        monkeypatch,
+        supervisor=FakeLLM(
+            text="根据知识库回答完毕",
+            tool_calls=[
+                {"name": "rag_agent", "args": {"query": "测试问题"}, "id": "c1"}
+            ],
+        ),
+        subagent=FakeLLM(
+            text="子 Agent 已根据检索结果回答",
+            tool_calls=[
+                {
+                    "name": "search_knowledge_base",
+                    "args": {"query": "测试问题"},
+                    "id": "c2",
+                }
+            ],
+        ),
+    )
+    events, _, result = _run_stream()
+
+    assert "platform_doc_a.txt" in result.get("sources", [])
+    assert any(e.get("type") == "tool" for e in events), "应产生 rag_agent 工具事件"

@@ -189,57 +189,52 @@ def ingest_file(
                     "deduped": True,
                 }
 
-    if force_reingest:
-        # 全量重建：先删 Postgres 事实源，再尽力删 Milvus（残留由对账清理），
-        # 避免分块配置变化导致的 chunk_index 冲突
-        _progress(30, "全量重建")
-        with SessionLocal() as db:
-            db.query(Document).filter(
-                Document.source == source, Document.user_id == user_id
-            ).delete(synchronize_session=False)
-            db.commit()
-        try:
-            vector_store.delete_by_source(source, user_id)
-            vector_store.delete_image_by_source(source, user_id)
-        except Exception as exc:
-            logger.warning("全量重建删除 Milvus 旧向量失败（对账任务将清理）: %s", exc)
-        stale_ids = []
-        to_write = [(i, c) for i, c in enumerate(chunks)]
-    else:
-        # 2. 读取该用户已有同 source 块：hash -> id，用于增量对比
-        existing: dict[str, str] = {}  # hash -> doc_id
+    # 2. 生成“新计划”：旧块按 (文本hash, 目标索引) 决定保留/重写。
+    #    关键修复：文本相同但目标索引发生平移的块（如删除开头章节），
+    #    若继续保留旧 chunk_index，会与按新索引写入的块撞唯一键；
+    #    因此只有「hash 相同且目标索引也相同」的块才保留，其余一律重写。
+    stale_ids: list[str] = []
+    to_write: list[tuple[int, dict]] = []
+    purge_all = bool(force_reingest)
+    if not purge_all:
+        existing: dict[str, list[tuple[str, int]]] = {}  # hash -> [(doc_id, chunk_index)]
         with SessionLocal() as db:
             rows = (
-                db.query(Document.id, Document.text)
+                db.query(Document.id, Document.text, Document.chunk_index)
                 .filter(Document.source == source, Document.user_id == user_id)
                 .all()
             )
-            for rid, rtext in rows:
-                existing.setdefault(_chunk_hash(rtext), rid)
+            for rid, rtext, rindex in rows:
+                existing.setdefault(_chunk_hash(rtext), []).append((rid, rindex))
 
-        stale_ids = [v for k, v in existing.items() if k not in set(new_hashes)]
-        kept_hashes = set(existing.keys())
-        to_write = [(i, c) for i, c in enumerate(chunks) if new_hashes[i] not in kept_hashes]
+        kept_ids: set[str] = set()
+        for i, h in enumerate(new_hashes):
+            match = next(
+                ((cid, ci) for cid, ci in existing.get(h, []) if ci == i),
+                None,
+            )
+            if match is not None:
+                kept_ids.add(match[0])
+            else:
+                to_write.append((i, chunks[i]))
+        stale_ids = [
+            cid
+            for cands in existing.values()
+            for cid, _ci in cands
+            if cid not in kept_ids
+        ]
+    else:
+        _progress(30, "全量重建")
+        to_write = [(i, c) for i, c in enumerate(chunks)]
 
     # 3. 整篇无变化：直接返回，不触碰任何数据
     if not stale_ids and not to_write:
         _progress(100, "内容无变化，跳过")
         return {"filename": filename, "chunks": len(chunks), "source": source, "unchanged": True}
 
-    # 4. 删除已消失的块（先删 Postgres 事实源，再尽力删 Milvus；残留由对账清理）
-    if stale_ids:
-        _progress(35, "清理过期分块")
-        with SessionLocal() as db:
-            db.query(Document).filter(Document.id.in_(stale_ids)).delete(
-                synchronize_session=False
-            )
-            db.commit()
-        try:
-            vector_store.delete_by_ids(stale_ids)
-        except Exception as exc:
-            logger.warning("删除 Milvus 过期向量失败（对账任务将清理）: %s", exc)
-
-    # 5. 增量：分批嵌入 + 先写 Postgres（pending）再幂等同步 Milvus，最后标记 synced
+    # 4. 先嵌入（任何 PG 变更前）：嵌入失败时旧数据保持原样，避免“旧块已删、新块未写”
+    vectors: list = []
+    new_chunks: list = []
     if to_write:
         from app.rag.embedding import get_embedder
 
@@ -252,32 +247,56 @@ def ingest_file(
             texts = [_embed_context_text(c, source) for c in new_chunks]
         batch = max(1, int(settings.embed_batch_size or 32))
         n = len(texts)
-        vectors: list = []
         for i in range(0, n, batch):
             vectors.extend(embedder.embed_texts(texts[i : i + batch]))
             _progress(40 + int(40 * min(1, (i + batch) / max(1, n))),
                       f"嵌入 {min(i + batch, n)}/{n}")
-        _progress(80, "写入向量库")
-        # 先占位 doc_id，先写 Postgres（事务性事实源，pending），
-        # 再幂等同步 Milvus（sync_chunks 按 doc_id 删+插）；Milvus 失败保持 pending，
-        # 由 reconcile_vectors 对账任务补同步。
-        doc_ids = [gen_uuid() for _ in new_chunks]
-        with SessionLocal() as db:
-            for idx, (orig_i, chunk) in enumerate(to_write):
-                db.add(
-                    Document(
-                        id=doc_ids[idx],
-                        user_id=user_id,
-                        filename=filename,
-                        source=source,
-                        chunk_index=orig_i,
-                        text=chunk["text"],
-                        metadata_json=json.dumps(chunk["metadata"], ensure_ascii=False),
-                        content_hash=content_hash,
-                        vector_status="pending",
-                    )
+
+    # 5. PG 单事务：删除过期/全量旧行 + 写入新行（pending）；失败整体回滚
+    _progress(80, "写入向量库")
+    doc_ids = [gen_uuid() for _ in to_write]
+    with SessionLocal() as db:
+        if purge_all:
+            db.query(Document).filter(
+                Document.source == source, Document.user_id == user_id
+            ).delete(synchronize_session=False)
+        elif stale_ids:
+            db.query(Document).filter(Document.id.in_(stale_ids)).delete(
+                synchronize_session=False
+            )
+        # 文档整体变化时，同步刷新保留行的文档级 content_hash（避免旧版本残留）
+        if not purge_all and kept_ids and (stale_ids or to_write):
+            db.query(Document).filter(Document.id.in_(kept_ids)).update(
+                {Document.content_hash: content_hash},
+                synchronize_session=False,
+            )
+        for idx, (orig_i, chunk) in enumerate(to_write):
+            db.add(
+                Document(
+                    id=doc_ids[idx],
+                    user_id=user_id,
+                    filename=filename,
+                    source=source,
+                    chunk_index=orig_i,
+                    text=chunk["text"],
+                    metadata_json=json.dumps(chunk["metadata"], ensure_ascii=False),
+                    content_hash=content_hash,
+                    vector_status="pending",
                 )
-            db.commit()
+            )
+        db.commit()
+
+    # 6. Milvus：尽力删除旧向量（失败留待对账）；新块幂等同步后标记 synced
+    try:
+        if purge_all:
+            vector_store.delete_by_source(source, user_id)
+            vector_store.delete_image_by_source(source, user_id)
+        elif stale_ids:
+            vector_store.delete_by_ids(stale_ids)
+    except Exception as exc:
+        logger.warning("删除 Milvus 过期向量失败（对账任务将清理）: %s", exc)
+
+    if to_write:
         vector_store.sync_chunks(
             new_chunks,
             doc_ids=doc_ids,
@@ -296,7 +315,7 @@ def ingest_file(
             )
             db.commit()
 
-    # 6. 失效文档集签名缓存（使 BM25 关键词通道立即包含新文档）
+    # 7. 失效文档集签名缓存（使 BM25 关键词通道立即包含新文档）
     invalidate_docs_signature()
     _progress(100, "完成")
 

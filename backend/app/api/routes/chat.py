@@ -27,7 +27,6 @@ from app.agents.graph import (
     run_agent,
     stream_agent,
 )
-from app.agents.tools import get_recent_rag_sources
 from app.api.deps import get_current_user_id
 from app.db import postgres
 from app.db.memory_store import get_checkpointer
@@ -125,7 +124,7 @@ async def _prepare_context(req: ChatRequest, user_id: str) -> tuple[str, str | N
 
 
 async def _save_assistant_if_final(
-    session_id: str, result: dict, user_id: str
+    session_id: str, result: dict
 ) -> str | None:
     """HITL 等待确认时不保存空答案；否则保存 assistant 消息并返回其 id。
 
@@ -143,7 +142,7 @@ async def _save_assistant_if_final(
         leaked, kinds = detect_leak(result.get("answer", ""))
         if leaked:
             logger.warning("检测到回答泄露信号 session=%s kinds=%s", session_id, kinds)
-    sources = get_recent_rag_sources(user_id or "default") or None
+    sources = result.get("sources") or None
     msg = await anyio.to_thread.run_sync(
         postgres.add_message, session_id, "assistant", result["answer"], sources
     )
@@ -185,9 +184,15 @@ async def chat(
         raise HTTPException(504, "处理超时，请重试或简化问题")
 
     hitl_pending = result.get("hitl_pending")
-    await _save_assistant_if_final(session_id, result, user_id)
+    await _save_assistant_if_final(session_id, result)
 
-    events.append(AgentEvent(type="message", content=result["answer"]))
+    events.append(
+        AgentEvent(
+            type="message",
+            content=result["answer"],
+            data={"sources": result.get("sources") or []},
+        )
+    )
     return ChatResponse(
         session_id=session_id,
         answer=result["answer"],
@@ -254,7 +259,7 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
             )
             # HITL：等待用户确认时不保存空答案、不发 message 帧
             #（interrupt 事件已由 on_event 推送，待用户 resume 后继续）
-            assistant_id = await _save_assistant_if_final(session_id, result, user_id)
+            assistant_id = await _save_assistant_if_final(session_id, result)
             if assistant_id is None:
                 return
             await queue.put(
@@ -265,6 +270,7 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
                         "used_agents": result["used_agents"],
                         "session_id": session_id,
                         "message_id": assistant_id,
+                        "sources": result.get("sources") or [],
                     },
                 }
             )

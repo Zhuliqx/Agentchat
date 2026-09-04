@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -18,6 +19,8 @@ from app.db import postgres
 from app.db.memory_store import cleanup_stale_checkpoints, get_store
 from app.db.models import Document, Message, Session
 from app.db.postgres import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 def _delete_user_vectors(user_id: str) -> None:
@@ -32,9 +35,12 @@ async def _delete_user_memories(user_id: str) -> None:
     store = get_store()
     if store is None:
         return
-    items = await store.asearch((user_id, "memories"), limit=1000)
-    for it in items:
-        await store.adelete((user_id, "memories"), it.key)
+    while True:
+        items = await store.asearch((user_id, "memories"), limit=1000)
+        if not items:
+            break
+        for it in items:
+            await store.adelete((user_id, "memories"), it.key)
 
 
 async def purge_user_data(user_id: str) -> None:
@@ -56,16 +62,20 @@ async def purge_user_data(user_id: str) -> None:
     # 1) 知识库：Milvus 向量 + Postgres 元数据
     try:
         _delete_user_vectors(user_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("注销用户 %s 时 Milvus 向量清理失败: %s", user_id, exc)
+        # 不把内部异常原文返回给客户端；细节只进日志
+        raise HTTPException(
+            500, "知识库向量清理失败，账号未删除，请稍后重试"
+        ) from exc
     with SessionLocal() as db:
         db.query(Document).filter(Document.user_id == user_id).delete()
         db.commit()
     # 2) 长期记忆
     try:
         await _delete_user_memories(user_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("注销用户 %s 时长期记忆清理失败（继续删除账号）: %s", user_id, exc)
     # 3) 会话 checkpoint（孤儿线程）
     if session_ids:
         cleanup_stale_checkpoints(session_ids)

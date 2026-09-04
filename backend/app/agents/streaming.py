@@ -25,11 +25,11 @@ class SupervisorStreamer:
         self,
         on_token: Callable[[str], Awaitable[None]] | None,
         on_tool_event: Callable[[dict], Awaitable[None]] | None,
-        user_id: str = "default",
+        run_id: str = "",
     ) -> None:
         self._on_token = on_token
         self._on_tool_event = on_tool_event
-        self.user_id = user_id or "default"
+        self.run_id = run_id or ""
         self.answer_parts: list[str] = []
         # 本次实际注册的工具名集合（按开关）：过滤模型幻觉调用的未注册工具
         self.registered_tools: set[str] = {"mcp_agent"}
@@ -65,7 +65,7 @@ class SupervisorStreamer:
             if name == "rag_agent":
                 from app.agents.tools.sources import get_recent_rag_sources
 
-                data["sources"] = get_recent_rag_sources(self.user_id)
+                data["sources"] = get_recent_rag_sources(self.run_id)
             await self._on_tool_event(
                 {"type": "tool", "content": f"工具: {name}", "data": data}
             )

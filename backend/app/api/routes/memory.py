@@ -91,6 +91,9 @@ async def delete_memory(memory_id: str, user_id: str = Depends(get_current_user_
 async def clear_memory(user_id: str = Depends(get_current_user_id)):
     """清空某用户的全部记忆。"""
     store = _require_store()
-    items = await store.asearch((user_id, NAMESPACE_TAIL), limit=1000)
-    for i in items:
-        await store.adelete((user_id, NAMESPACE_TAIL), i.key)
+    while True:
+        items = await store.asearch((user_id, NAMESPACE_TAIL), limit=1000)
+        if not items:
+            break
+        for i in items:
+            await store.adelete((user_id, NAMESPACE_TAIL), i.key)

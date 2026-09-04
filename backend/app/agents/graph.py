@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
@@ -45,6 +46,7 @@ from app.agents.tools import (
     extract_text,
     last_ai_text,
 )
+from app.agents.tools.sources import clear_rag_sources, get_recent_rag_sources
 from app.config import settings
 from app.db.memory_store import get_checkpointer, get_store
 
@@ -381,9 +383,10 @@ async def stream_agent(
     used_agents: list[str] = []
     tool_calls_log: list[str] = []
     hitl_pending = None
+    run_id = uuid.uuid4().hex
     # 输出装配（开场白缓冲 / 工具事件 / 工具后去重）抽到 SupervisorStreamer
     streamer = SupervisorStreamer(
-        on_token=on_token, on_tool_event=on_event, user_id=user_id
+        on_token=on_token, on_tool_event=on_event, run_id=run_id
     )
     if use_rag:
         streamer.register_tool("rag_agent")
@@ -395,83 +398,95 @@ async def stream_agent(
     if settings.code_agent_enabled:
         streamer.register_tool("code_agent")
 
-    async with current_user_context(user_id or "default"), _agent_timeout_scope(on_event):
-        async for mode, data in graph.astream(
-            input_data,
-            config=config,
-            context=UserContext(user_id=user_id or "default", session_id=session_id or ""),
-            stream_mode=["updates", "messages"],
+    run_sources: list[str] = []
+    try:
+        async with (
+            current_user_context(user_id or "default"),
+            _agent_timeout_scope(on_event),
         ):
-            if mode == "updates":
-                for node, update in data.items():
-                    # HITL 中断：特殊节点 __interrupt__ 携带待确认内容
-                    if node == "__interrupt__":
-                        hits = (
-                            update
-                            if isinstance(update, (list, tuple))
-                            else [update]
-                        )
-                        if hits:
-                            hitl_pending = getattr(hits[0], "value", None)
-                        continue
-                    if not (isinstance(update, dict) and "messages" in update):
-                        continue
-                    for m in update["messages"]:
-                        mtype = getattr(m, "type", "")
-                        if mtype != "tool":
+            async for mode, data in graph.astream(
+                input_data,
+                config=config,
+                context=UserContext(
+                    user_id=user_id or "default",
+                    session_id=session_id or "",
+                    run_id=run_id,
+                ),
+                stream_mode=["updates", "messages"],
+            ):
+                if mode == "updates":
+                    for node, update in data.items():
+                        # HITL 中断：特殊节点 __interrupt__ 携带待确认内容
+                        if node == "__interrupt__":
+                            hits = (
+                                update
+                                if isinstance(update, (list, tuple))
+                                else [update]
+                            )
+                            if hits:
+                                hitl_pending = getattr(hits[0], "value", None)
                             continue
-                        name: str = str(getattr(m, "name", "") or "")
-                        if name in AGENT_TOOL_NAMES:
-                            used_agents.append(name)
-                        tool_calls_log.append(name)
-                        # 兜底：若未在流式 token 中检测到 tool_call（个别模型不
-                        # 流式返回 tool_call_chunks），streamer.emit_tool 会补推开场白
-                        await streamer.emit_tool(name)
-            elif mode == "messages":
-                chunk, meta = data
-                # 只流式顶层 supervisor（model 节点）的 AI 文本 token。
-                # checkpoint_ns 用 "|" 分隔嵌套任务：顶层形如 "model:<task_id>"，
-                # 子 Agent 形如 "model:<id>|mcp_agent:<id>"（含 "|"），跳过后者。
-                if "|" in (meta.get("langgraph_checkpoint_ns") or ""):
-                    continue  # 子 Agent 的嵌套命名空间
-                if not isinstance(chunk, AIMessageChunk):
-                    continue  # 只取 AI 生成文本，排除工具结果
-                # 检测工具调用：AIMessageChunk 携带 tool_call_chunks 说明本
-                # LLM 调用即将执行工具（工具执行前，token 流已给出完整开场白）
-                tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
-                has_tool = any(
-                    isinstance(tc, dict) and tc.get("name") for tc in tool_chunks
-                )
-                text = extract_text(getattr(chunk, "content", ""))
-                if has_tool:
-                    # 工具即将执行：同 chunk 的 content 属于开场白，缓冲后由
-                    # emit_tool 丢弃（不显示碎片）；若已判定为直接回答则已流式
-                    if not streamer.saw_tool_call and text:
-                        await streamer.record_tool_prelude(text)
-                    name: str = str(
-                        next(
-                            (
-                                tc.get("name")
-                                for tc in tool_chunks
-                                if isinstance(tc, dict) and tc.get("name")
-                            ),
-                            "",
-                        )
-                        or ""
+                        if not (isinstance(update, dict) and "messages" in update):
+                            continue
+                        for m in update["messages"]:
+                            mtype = getattr(m, "type", "")
+                            if mtype != "tool":
+                                continue
+                            name: str = str(getattr(m, "name", "") or "")
+                            if name in AGENT_TOOL_NAMES:
+                                used_agents.append(name)
+                            tool_calls_log.append(name)
+                            # 兜底：若未在流式 token 中检测到 tool_call（个别模型不
+                            # 流式返回 tool_call_chunks），streamer.emit_tool 会补推开场白
+                            await streamer.emit_tool(name)
+                elif mode == "messages":
+                    chunk, meta = data
+                    # 只流式顶层 supervisor（model 节点）的 AI 文本 token。
+                    # checkpoint_ns 用 "|" 分隔嵌套任务：顶层形如 "model:<task_id>"，
+                    # 子 Agent 形如 "model:<id>|mcp_agent:<id>"（含 "|"），跳过后者。
+                    if "|" in (meta.get("langgraph_checkpoint_ns") or ""):
+                        continue  # 子 Agent 的嵌套命名空间
+                    if not isinstance(chunk, AIMessageChunk):
+                        continue  # 只取 AI 生成文本，排除工具结果
+                    # 检测工具调用：AIMessageChunk 携带 tool_call_chunks 说明本
+                    # LLM 调用即将执行工具（工具执行前，token 流已给出完整开场白）
+                    tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
+                    has_tool = any(
+                        isinstance(tc, dict) and tc.get("name") for tc in tool_chunks
                     )
-                    await streamer.emit_tool(name)
-                elif streamer.saw_tool_call:
-                    # 工具已调用：后续为最终答案。LLM 在工具后常重新生成完整回答
-                    # （重复了开场白）→ 流式前缀匹配，跳过重复的开场白前缀
-                    await streamer.feed_answer(text)
-                else:
-                    # 工具调用前（或直接回答）：未判定时缓冲；超过阈值即判定为直接
-                    # 回答并开始逐字流式（此后不再攒段，保证平滑不卡顿）
-                    if text:
-                        await streamer.feed(text)
+                    text = extract_text(getattr(chunk, "content", ""))
+                    if has_tool:
+                        # 工具即将执行：同 chunk 的 content 属于开场白，缓冲后由
+                        # emit_tool 丢弃（不显示碎片）；若已判定为直接回答则已流式
+                        if not streamer.saw_tool_call and text:
+                            await streamer.record_tool_prelude(text)
+                        name: str = str(
+                            next(
+                                (
+                                    tc.get("name")
+                                    for tc in tool_chunks
+                                    if isinstance(tc, dict) and tc.get("name")
+                                ),
+                                "",
+                            )
+                            or ""
+                        )
+                        await streamer.emit_tool(name)
+                    elif streamer.saw_tool_call:
+                        # 工具已调用：后续为最终答案。LLM 在工具后常重新生成完整回答
+                        # （重复了开场白）→ 流式前缀匹配，跳过重复的开场白前缀
+                        await streamer.feed_answer(text)
+                    else:
+                        # 工具调用前（或直接回答）：未判定时缓冲；超过阈值即判定为直接
+                        # 回答并开始逐字流式（此后不再攒段，保证平滑不卡顿）
+                        if text:
+                            await streamer.feed(text)
 
-        # 流结束：尚未判定的短文本（<阈值）补推（例如很短的直接回答）
-        await streamer.flush()
+            # 流结束：尚未判定的短文本（<阈值）补推（例如很短的直接回答）
+            await streamer.flush()
+    finally:
+        run_sources = list(get_recent_rag_sources(run_id))
+        clear_rag_sources(run_id)
 
     await _emit_final_events(
         on_event, list(dict.fromkeys(used_agents)), [], hitl_pending
@@ -482,4 +497,5 @@ async def stream_agent(
         "used_agents": list(dict.fromkeys(used_agents)),
         "tool_calls": list(dict.fromkeys(tool_calls_log)),
         "hitl_pending": hitl_pending,
+        "sources": run_sources,
     }
