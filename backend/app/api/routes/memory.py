@@ -23,7 +23,6 @@ class MemoryOut(BaseModel):
 
 
 class MemoryIn(BaseModel):
-    user_id: str = "default"  # 兼容旧客户端；实际归属以认证用户为准
     content: str = Field(..., min_length=1, max_length=2000)
 
 

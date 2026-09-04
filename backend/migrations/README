@@ -1,0 +1,74 @@
+# Agentchat 数据库迁移规范
+
+本目录是 Postgres 业务 Schema 的 Alembic 迁移仓库，应用自有表的**唯一**
+schema 变更入口。
+
+## 适用范围与边界
+
+- 由 Alembic 管理：`users / sessions / messages / documents / tasks / app_settings`
+  （含这些表上的索引、约束、默认值、外键）。
+- **不管理** LangGraph 自动创建的表：
+  `checkpoints / checkpoint_blobs / checkpoint_writes / store / store_vectors`
+  以及 pgvector 相关结构。它们仍由
+  `app/db/memory_store.py` 的 `AsyncPostgresSaver/AsyncPostgresStore.setup()`
+  维护，不要在迁移里手工删除或改动。
+
+## 版本链（截至当前）
+
+1. `96685ebfebbd` baseline：空库建全部业务表（含 `app_settings`）。
+2. `a1b2c3d4e5f6` align legacy db：旧库补 `ix_documents_tag`、移除历史
+   `ALTER TABLE` 遗留的 server defaults（条件执行，新库自动跳过）。
+3. `c0ffee000003` add session user fk：旧库补 `sessions.user_id → users.id`
+   外键（条件执行，新库自动跳过）。
+
+## 常用命令
+
+在 `backend/` 目录执行（连接串来自 `backend/.env` / 环境变量）：
+
+```bash
+# 升级到最新版本
+alembic upgrade head
+
+# 生成新迁移（改完 app/db/models.py 后）
+alembic revision --autogenerate -m "描述"
+
+# 检查 ORM 与数据库是否漂移（CI 也会执行）
+alembic check
+
+# 查看当前版本
+alembic current
+
+# 回退一个版本（谨慎，仅开发环境）
+alembic downgrade -1
+```
+
+## 硬性规则
+
+1. **只允许新增迁移文件，禁止修改已提交/已执行的迁移。**
+   已部署的迁移是历史记录，改动会导致版本链校验失败。
+2. 每次修改 ORM 模型后必须同步生成迁移，并在 CI 的 `alembic check`
+   通过后才算完成。
+3. `app_settings` 不是 ORM 模型，但已登记在 `migrations/env.py` 的
+   元数据中；若它的结构变化，迁移中要同步覆盖。
+4. 破坏性操作（删列、删表、改类型）要单独一个迁移并写清楚影响；
+   涉及真实数据时先出备份/演练方案。
+5. 迁移要保持**新旧库都能升级**：对“新库已有、旧库缺失”的结构
+   使用条件判断（参考 `a1b2c3d4e5f6` / `c0ffee000003`）。
+
+## 旧库接入方式
+
+尚未纳入 Alembic 的旧库不要直接 `alembic upgrade head`（基线会尝试重复建表）。
+正确流程：
+
+```bash
+# 1. 确认结构与当前迁移目标一致（可用 alembic check 反复校准）
+alembic stamp head
+# 2. 之后正常升级
+alembic upgrade head
+```
+
+## 验证
+
+- 空库：`alembic upgrade head` + `alembic check` 无漂移；
+- 旧库：`stamp head` 后 `alembic upgrade head` + `alembic check` 无漂移；
+- 本地/CI 冒烟：`python scripts/init_db.py`（内部先执行 `alembic upgrade head`）。

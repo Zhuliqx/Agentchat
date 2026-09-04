@@ -102,6 +102,10 @@ jobs:
           python scripts/init_db.py
           python -c "from pathlib import Path; from app.rag.ingestion import ingest_file; print(ingest_file(Path('tests/fixtures/kb_ci.txt'), user_id='default'))"
 
+      - name: "Alembic drift check"
+        working-directory: backend
+        run: alembic check
+
       - name: "Retrieval regression (hit-rate threshold)"
         working-directory: backend
         run: pytest tests/integration/test_rag_regression.py -q

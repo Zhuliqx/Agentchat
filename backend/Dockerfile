@@ -25,6 +25,8 @@ RUN pip install --upgrade pip && pip install -r backend/requirements.txt
 COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY backend/run.py ./run.py
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/migrations ./migrations
 # 自主任务 Agent 独立包（agentchat-task-agent）：以 git/PyPI 依赖安装，见 backend/requirements.txt
 
 # 数据目录（上传文件/运行时产物；建议挂载卷持久化）
@@ -32,5 +34,5 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-# Linux 下直接 uvicorn（run.py 的 SelectorEventLoop 仅 Windows 需要）
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 先跑 Alembic 迁移，再启动 uvicorn（SelectorEventLoop 仅 Windows 需要）
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

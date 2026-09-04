@@ -24,6 +24,7 @@ langchain-tavily>=0.2
 pymilvus>=2.4
 sqlalchemy>=2.0
 psycopg[binary]>=3.1
+alembic>=1.13
 
 # ---- MCP（FastMCP 高级 API 在 2.x 被移除，固定 1.x；>=1.9 提供 streamable_http_client 新名）----
 mcp>=1.9,<2.0

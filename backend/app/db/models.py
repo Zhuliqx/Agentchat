@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -66,7 +67,7 @@ class Session(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, index=True
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
     user: Mapped["User"] = relationship(back_populates="sessions")
@@ -130,7 +131,7 @@ class Document(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True
+        DateTime(timezone=True), default=utcnow
     )
 
 
@@ -155,3 +156,8 @@ class Task(Base):
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+
+
+# 与历史手工 DDL 对齐：会话按 updated_at、文档按 created_at 倒序建索引
+Index("ix_sessions_updated_at", Session.updated_at.desc())
+Index("ix_documents_created_at", Document.created_at.desc())

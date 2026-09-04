@@ -346,7 +346,7 @@ def test_chat_query_injection_rejected(client):
     assert "可疑指令" in r.json()["detail"]
 
 
-# ---------------- 安全批次 1：上传 HTML 沙箱 / 平台操作员鉴权 ----------------
+# ---------------- 安全回归：上传 HTML 沙箱 / 平台操作员鉴权 ----------------
 
 def test_upload_html_inline_preview_is_sandboxed(client):
     """HTML 内联预览必须带 CSP sandbox（防上传型存储 XSS）。"""

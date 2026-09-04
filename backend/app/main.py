@@ -4,7 +4,8 @@
     cd backend
     python run.py
 
-前端页面由本服务托管，访问 http://localhost:8000 即可。
+frontend-v2/dist 存在时前端页面由本服务托管，访问 http://localhost:8000 即可；
+未构建前端时仅提供 /api 接口。
 """
 from __future__ import annotations
 
@@ -66,7 +67,7 @@ from app.db.memory_store import (
     init_checkpointer,
     init_store,
 )
-from app.db.postgres import init_db
+from app.db.postgres import init_db, run_migrations
 from app.mcp_integration.client import get_mcp_manager
 from app.rag.vector_store import ensure_vector_store
 from app.scheduler import scheduler_loop
@@ -126,6 +127,8 @@ async def lifespan(app: FastAPI):
         )
         _root.addHandler(_handler)
     _root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    # 表结构由 Alembic 管理；启动时自动升级（advisory lock 防多进程并发）
+    run_migrations()
     init_db()
     # 运行时配置覆盖（DB app_settings 优先级高于 .env；管理后台可在线调整）
     from app.db.runtime_settings import load_runtime_settings

@@ -1,4 +1,4 @@
-"""第三批健壮性单元测试：上传流式落盘限流等。"""
+"""上传流式落盘与大小限制的单元测试。"""
 from __future__ import annotations
 
 from pathlib import Path

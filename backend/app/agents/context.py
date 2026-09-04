@@ -1,8 +1,8 @@
-"""LangGraph 运行时上下文定义。
+"""LangGraph 运行时上下文与请求级 contextvar。
 
-运行时上下文（Runtime Context）仅对当次调用有效，不会被持久化，
-也不会在同一会话的下一次调用中自动恢复。用于传递当前登录用户、
-请求来源等"当次调用相关"的信息。
+UserContext（LangGraph Runtime Context）仅对当次调用有效，不参与图状态；
+contextvar 用于把当前用户传给子 Agent/工具线程。引用溯源已改为按 run_id
+注册表传递，不在本模块。
 """
 from __future__ import annotations
 
@@ -38,8 +38,9 @@ class UserContext:
 
     - user_id：当前登录用户（知识库 / 长期记忆按此隔离）；
     - session_id：当前会话 id（Checkpointer thread_id）。供检索工具拼装
-      多轮对话上下文（RAG_MULTI_TURN_CONTEXT）——注意它**不参与图状态**，
-      仅当次调用传递；无会话时为空串。
+      多轮对话上下文（RAG_MULTI_TURN_CONTEXT）；
+    - run_id：本次 Agent 执行的唯一 id，供子 Agent 写引用溯源注册表。
+    注意：UserContext **不参与图状态**，仅当次调用传递，不会被持久化。
     """
 
     user_id: str = "default"

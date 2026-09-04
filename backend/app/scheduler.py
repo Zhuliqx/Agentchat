@@ -5,6 +5,7 @@
 - 每 15 秒扫描一次 tasks 表，对 enabled 且 next_run_at 到期的任务执行；
 - 任务体是同步函数，统一放线程池（asyncio.to_thread）执行，避免阻塞事件循环；
 - 任务执行结果（状态/错误/下次运行时间）写回 tasks 表。
+- 多副本部署时通过 Postgres advisory lock 选主，只有 leader 执行扫描，避免重复调度。
 
 调度表达式（schedule 字段）：
 - "interval:<秒>"  固定间隔，如 interval:3600 每小时一次

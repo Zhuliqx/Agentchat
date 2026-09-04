@@ -4,11 +4,11 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import create_engine, func, select, text as _text
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from app.config import settings
-from app.db.models import Base, Document, Message, Session, Task, User, utcnow
+from app.config import BASE_DIR, settings
+from app.db.models import Document, Message, Session, Task, User, utcnow
 
 engine = create_engine(
     settings.postgres_dsn,
@@ -20,130 +20,41 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def init_db() -> None:
-    """创建数据表（幂等），并对已存在的旧表做轻量迁移。"""
-    Base.metadata.create_all(bind=engine)
-    # 已存在的表不会自动补建索引/列，这里显式幂等创建（会话/文档排序查询加速 + 旧库迁移）
-    with engine.begin() as conn:
-        # 迁移：旧版 sessions 表无 user_id 列 → 补列并回填为 'default'
-        conn.execute(
-            _text(
-                "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS "
-                "user_id VARCHAR(64) NOT NULL DEFAULT 'default'"
-            )
-        )
-        # 迁移：旧版 users 表无 avatar_color 列 → 补列（头像色板，默认 accent）
-        conn.execute(
-            _text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
-                "avatar_color VARCHAR(16) NOT NULL DEFAULT 'accent'"
-            )
-        )
-        # 迁移：旧版 sessions 表无 pinned 列 → 补列（会话置顶，默认 false）
-        conn.execute(
-            _text(
-                "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS "
-                "pinned BOOLEAN NOT NULL DEFAULT FALSE"
-            )
-        )
-        conn.execute(
-            _text("UPDATE sessions SET user_id = 'default' WHERE user_id IS NULL")
-        )
-        # 迁移：旧版 documents 表无 user_id 列 → 补列并回填为 default（知识库按用户隔离）
-        conn.execute(
-            _text(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
-                "user_id VARCHAR(64) NOT NULL DEFAULT 'default'"
-            )
-        )
-        # 迁移：旧版 documents 表无 tag 列 → 补列（文档标签/分组）
-        conn.execute(
-            _text(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
-                "tag VARCHAR(50)"
-            )
-        )
-        # 迁移：旧版 documents 表无 content_hash 列 → 补列（文档级去重）
-        conn.execute(
-            _text(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
-                "content_hash VARCHAR(64)"
-            )
-        )
-        conn.execute(
-            _text(
-                "CREATE INDEX IF NOT EXISTS ix_documents_content_hash "
-                "ON documents (content_hash)"
-            )
-        )
-        # 迁移：向量同步状态（Postgres 事实源 → Milvus 派生索引的对账标记）。
-        # 存量行默认 synced（假定旧数据已入库），新摄入显式置 pending。
-        conn.execute(
-            _text(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
-                "vector_status VARCHAR(16) NOT NULL DEFAULT 'synced'"
-            )
-        )
-        conn.execute(
-            _text(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
-                "vector_synced_at TIMESTAMPTZ"
-            )
-        )
-        conn.execute(
-            _text(
-                "CREATE INDEX IF NOT EXISTS ix_documents_vector_status "
-                "ON documents (vector_status)"
-            )
-        )
-        # 迁移：documents 唯一约束升级为含 user_id（多用户可摄入同一路径文档）。
-        # 旧库是 uq_source_chunk(source, chunk_index)；新模型是
-        # uq_user_source_chunk(user_id, source, chunk_index)。先删旧约束，再幂等补新约束。
-        conn.execute(
-            _text("ALTER TABLE documents DROP CONSTRAINT IF EXISTS uq_source_chunk")
-        )
-        conn.execute(
-            _text(
-                "DO $$ BEGIN "
-                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = "
-                "'uq_user_source_chunk') THEN "
-                "ALTER TABLE documents ADD CONSTRAINT uq_user_source_chunk "
-                "UNIQUE (user_id, source, chunk_index); "
-                "END IF; END $$;"
-            )
-        )
-        # 迁移：旧版 messages 表无 sources 列 → 补列（引用溯源，JSON 数组）
-        conn.execute(
-            _text(
-                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS sources JSON"
-            )
-        )
-        conn.execute(
-            _text(
-                "CREATE INDEX IF NOT EXISTS ix_documents_user_id "
-                "ON documents (user_id)"
-            )
-        )
-        conn.execute(
-            _text(
-                "CREATE INDEX IF NOT EXISTS ix_sessions_updated_at "
-                "ON sessions (updated_at DESC)"
-            )
-        )
-        conn.execute(
-            _text(
-                "CREATE INDEX IF NOT EXISTS ix_documents_created_at "
-                "ON documents (created_at DESC)"
-            )
-        )
-        conn.execute(
-            _text(
-                "CREATE INDEX IF NOT EXISTS ix_sessions_user_id "
-                "ON sessions (user_id)"
-            )
-        )
-    # 内置访客用户（guest_user_id）：保证 sessions.user_id 外键引用完整性。
-    # 用随机密码哈希，访客无法登录该账号。
+    """应用启动后的最小初始化：确保内置访客用户存在。
+
+    表结构由 Alembic 全权管理（见 run_migrations），本函数不再执行任何 DDL。
+    """
     _ensure_guest_user()
+
+
+def run_migrations() -> bool:
+    """执行 Alembic 迁移到最新版本；用 advisory lock 防止多进程并发 DDL。
+
+    返回是否由本进程执行（未抢到锁时跳过，等待下一个进程执行）。
+    """
+    from sqlalchemy import text
+
+    lock_key = 730255
+    try:
+        with engine.connect() as conn:
+            acquired = conn.execute(
+                text("SELECT pg_try_advisory_lock(:k)"), {"k": lock_key}
+            ).scalar()
+            if not acquired:
+                return False
+            try:
+                from alembic import command
+                from alembic.config import Config
+
+                cfg = Config(str(BASE_DIR / "alembic.ini"))
+                command.upgrade(cfg, "head")
+                return True
+            finally:
+                conn.execute(
+                    text("SELECT pg_advisory_unlock(:k)"), {"k": lock_key}
+                )
+    except Exception:
+        raise
 
 
 def _ensure_guest_user() -> None:

@@ -1,4 +1,4 @@
-"""第二批清理逻辑单元测试：大批量删除必须分页取完，不能只删前 N 条。"""
+"""清理逻辑单元测试：大批量删除必须分页取完，不能只删前 N 条。"""
 from __future__ import annotations
 
 import asyncio
