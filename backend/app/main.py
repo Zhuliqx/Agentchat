@@ -67,12 +67,14 @@ from app.db.memory_store import (
     init_checkpointer,
     init_store,
 )
-from app.db.postgres import init_db, run_migrations
+from app.db.postgres import has_registered_users, init_db, run_migrations
 from app.mcp_integration.client import get_mcp_manager
 from app.rag.vector_store import ensure_vector_store
 from app.scheduler import scheduler_loop
 
 APP_DIST = PROJECT_ROOT / "frontend-v2" / "dist"
+_DEV_AUTH_SECRET = "dev-secret-change-me-in-env-0123456789abcdef"
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _warmup_sync() -> None:
@@ -127,9 +129,23 @@ async def lifespan(app: FastAPI):
         )
         _root.addHandler(_handler)
     _root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    # 对外监听时禁止使用开发默认值或过短密钥（防止 token 可被伪造/爆破）
+    if settings.host not in _LOOPBACK_HOSTS and (
+        settings.auth_secret == _DEV_AUTH_SECRET or len(settings.auth_secret) < 32
+    ):
+        raise RuntimeError(
+            "检测到 AUTH_SECRET 为开发默认值或长度不足 32，且服务监听非本机地址，"
+            "请在 .env 配置强随机 AUTH_SECRET 后再对外提供服务"
+        )
     # 表结构由 Alembic 管理；启动时自动升级（advisory lock 防多进程并发）
     run_migrations()
     init_db()
+    # 运维提示：已有真实用户但没有配置任何管理员，平台级操作将无人可用
+    if has_registered_users() and not settings.admin_usernames.strip():
+        logger.warning(
+            "数据库存在注册用户，但 ADMIN_USERNAMES 为空："
+            "定时任务/模型切换等平台级操作将不可用，请配置管理员"
+        )
     # 运行时配置覆盖（DB app_settings 优先级高于 .env；管理后台可在线调整）
     from app.db.runtime_settings import load_runtime_settings
 

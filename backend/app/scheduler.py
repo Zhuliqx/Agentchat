@@ -313,24 +313,30 @@ def compute_next_run(schedule: str, now: datetime | None = None) -> datetime | N
 
 async def _run_task(task_id: str) -> None:
     """执行单个任务（线程池），并回写结果。"""
-    task = postgres.get_task(task_id)
+    task = await asyncio.to_thread(postgres.get_task, task_id)
     if task is None:
         return
     entry = TASK_REGISTRY.get(task.task_type)
     if entry is None:
-        postgres.mark_task_result(task_id, "failed", "未知任务类型", None)
+        await asyncio.to_thread(
+            postgres.mark_task_result, task_id, "failed", "未知任务类型", None
+        )
         return
 
     logger.info("执行任务 %s (%s)", task.name, task.task_type)
     try:
         result = await asyncio.to_thread(entry["fn"])
         next_run = compute_next_run(task.schedule)
-        postgres.mark_task_result(task_id, "success", None, next_run)
+        await asyncio.to_thread(
+            postgres.mark_task_result, task_id, "success", None, next_run
+        )
         logger.info("任务完成 %s: %s", task.name, result)
     except Exception as exc:
         logger.exception("任务失败 %s", task.name)
         next_run = compute_next_run(task.schedule)
-        postgres.mark_task_result(task_id, "failed", str(exc)[:500], next_run)
+        await asyncio.to_thread(
+            postgres.mark_task_result, task_id, "failed", str(exc)[:500], next_run
+        )
 
 
 async def scheduler_loop(
@@ -364,14 +370,20 @@ async def scheduler_loop(
                         # 首次启动：为无 next_run_at 的已启用任务补算，
                         # 并把长期卡死的任务标记失败（仅 leader 执行一次）
                         if not initialized:
-                            for t in postgres.list_tasks():
+                            tasks = await asyncio.to_thread(postgres.list_tasks)
+                            for t in tasks:
                                 if t.enabled and t.next_run_at is None:
                                     nxt = compute_next_run(t.schedule)
-                                    postgres.mark_task_result(
-                                        t.id, t.last_status or "", None, nxt
+                                    await asyncio.to_thread(
+                                        postgres.mark_task_result,
+                                        t.id,
+                                        t.last_status or "",
+                                        None,
+                                        nxt,
                                     )
                                 if t.enabled and t.last_status == "running":
-                                    postgres.mark_task_result(
+                                    await asyncio.to_thread(
+                                        postgres.mark_task_result,
                                         t.id,
                                         "failed",
                                         "上次运行异常中断（超时/重启）",
@@ -385,7 +397,8 @@ async def scheduler_loop(
                         continue
 
                 now = datetime.now(timezone.utc)
-                for t in postgres.list_tasks():
+                tasks = await asyncio.to_thread(postgres.list_tasks)
+                for t in tasks:
                     if not t.enabled or t.next_run_at is None:
                         continue
                     if t.next_run_at.tzinfo is None:

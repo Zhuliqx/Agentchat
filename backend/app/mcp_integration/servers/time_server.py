@@ -54,5 +54,5 @@ def calculate(expression: str) -> str:
 
         tree = ast.parse(expression, mode="eval")
         return str(_eval_node(tree.body))
-    except Exception as exc:
-        return f"计算失败: {exc}"
+    except Exception:
+        return "计算失败，请检查表达式后重试。"

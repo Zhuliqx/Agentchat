@@ -2,17 +2,62 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.data_ownership import build_user_export, purge_user_data
-from app.api.deps import is_admin_username, require_user_id
+from app.api.deps import is_admin_username, is_platform_operator, require_user_id
 from app.db import postgres
 from app.db.memory_store import get_store
 from app.security import create_token, hash_password, verify_password
 
 router = APIRouter()
+
+# 登录限速（进程内、尽力而为）：同用户名 5 分钟窗口最多失败 5 次
+_LOGIN_WINDOW_SEC = 300.0
+_LOGIN_MAX_FAILURES = 5
+_LOGIN_LOCK = threading.Lock()
+_LOGIN_FAILURES: dict[str, list[float]] = {}
+
+
+def _prune_login_failures(now: float | None = None) -> None:
+    now = time.monotonic() if now is None else now
+    expired = [
+        name
+        for name, ts in _LOGIN_FAILURES.items()
+        if ts and max(ts) < now - _LOGIN_WINDOW_SEC
+    ]
+    for name in expired:
+        _LOGIN_FAILURES.pop(name, None)
+
+
+def is_login_blocked(username: str, now: float | None = None) -> bool:
+    """用户名在当前窗口内失败次数是否已达上限。"""
+    with _LOGIN_LOCK:
+        _prune_login_failures(now)
+        return len(_LOGIN_FAILURES.get(username, [])) >= _LOGIN_MAX_FAILURES
+
+
+def record_login_failure(username: str, now: float | None = None) -> None:
+    with _LOGIN_LOCK:
+        _prune_login_failures(now)
+        _LOGIN_FAILURES.setdefault(username, []).append(
+            time.monotonic() if now is None else now
+        )
+
+
+def clear_login_failures(username: str) -> None:
+    with _LOGIN_LOCK:
+        _LOGIN_FAILURES.pop(username, None)
+
+
+@router.get("/capabilities")
+def capabilities(authorization: str | None = Header(default=None)) -> dict:
+    """返回当前身份是否具备平台操作员能力（模型切换/定时任务入口用）。"""
+    return {"platform_operator": is_platform_operator(authorization)}
 
 
 class RegisterIn(BaseModel):
@@ -74,9 +119,13 @@ def register(body: RegisterIn):
 
 @router.post("/login", response_model=LoginOut)
 def login(body: LoginIn):
+    if is_login_blocked(body.username):
+        raise HTTPException(429, "失败次数过多，请稍后再试")
     u = postgres.get_user_by_username(body.username)
     if not u or not verify_password(body.password, u.password_hash):
+        record_login_failure(body.username)
         raise HTTPException(401, "用户名或密码错误")
+    clear_login_failures(body.username)
     return LoginOut(token=create_token(u.id), user=_user_out(u))
 
 

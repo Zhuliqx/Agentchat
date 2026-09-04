@@ -220,6 +220,48 @@ def test_platform_operator_allows_admin_login(monkeypatch):
     assert deps.require_platform_operator("Bearer admin-token") == "uid-admin"
 
 
+def test_is_platform_operator_flag_matches_require(monkeypatch):
+    """前端能力查询应与 require_platform_operator 同策略。"""
+    from app.config import settings
+    from app.db import postgres
+
+    deps = _deps()
+    monkeypatch.setattr(postgres, "has_registered_users", lambda: False)
+    assert deps.is_platform_operator(None) is True
+
+    monkeypatch.setattr(postgres, "has_registered_users", lambda: True)
+    assert deps.is_platform_operator(None) is False
+
+    monkeypatch.setattr(deps, "decode_token", lambda token: "uid-admin")
+    monkeypatch.setattr(
+        postgres, "get_user", lambda uid: type("U", (), {"username": "admin"})()
+    )
+    monkeypatch.setattr(settings, "admin_usernames", "admin")
+    assert deps.is_platform_operator("Bearer admin-token") is True
+
+
+def test_login_throttle_blocks_and_expires():
+    """登录失败 5 次后拦截，窗口过期后恢复。"""
+    from app.api.routes import auth as auth_mod
+
+    user = "throttle-test-user"
+    try:
+        now = 1000.0
+        for i in range(auth_mod._LOGIN_MAX_FAILURES):
+            auth_mod.record_login_failure(user, now=now + i)
+        assert auth_mod.is_login_blocked(user, now=now + 10) is True
+        # 窗口过期（从最后一次失败算 5 分钟）后不再拦截
+        last_failure = now + auth_mod._LOGIN_MAX_FAILURES - 1
+        assert (
+            auth_mod.is_login_blocked(
+                user, now=last_failure + auth_mod._LOGIN_WINDOW_SEC + 1
+            )
+            is False
+        )
+    finally:
+        auth_mod.clear_login_failures(user)
+
+
 # ---------------- JWT 过期 ----------------
 
 def test_jwt_has_exp_and_respects_ttl(monkeypatch):

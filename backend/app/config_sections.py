@@ -63,7 +63,6 @@ class MilvusSection(BaseModel):
     milvus_port: int = 19530                    # 端口
     milvus_collection: str = "agent_documents"  # collection 名
     milvus_uri: str = ""                        # 留空则用 host:port 拼接；也可填 zilliz 云端 uri
-    milvus_metric_type: str = "IP"              # 索引度量: IP / COSINE / L2
 
 
 class EmbeddingSection(BaseModel):

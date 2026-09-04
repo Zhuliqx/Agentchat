@@ -148,7 +148,8 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
                 return "知识库中没有检索到相关内容。"
             return "\n\n".join(parts)
         except Exception as exc:
-            return f"知识库检索失败: {exc}"
+            logger.warning("知识库检索失败: %s", exc)
+            return "知识库检索失败，请稍后重试。"
 
     return StructuredTool(
         name="search_knowledge_base",

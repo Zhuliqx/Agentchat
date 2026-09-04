@@ -17,11 +17,21 @@ export const useAuthStore = defineStore("auth", {
     authOpen: false,
     authTab: "login" as "login" | "register",
     loading: false,
+    platformOperator: null as boolean | null,
   }),
   getters: {
     isLoggedIn: (s) => !!s.token,
   },
   actions: {
+    /** 查询当前身份是否具备平台操作员能力（决定模型切换/任务入口显隐） */
+    async loadCapabilities() {
+      try {
+        const res = await authApi.capabilities();
+        this.platformOperator = res.platform_operator;
+      } catch {
+        this.platformOperator = null;
+      }
+    },
     /** 启动时恢复登录态（token 失效则清除） */
     async init() {
       if (!this.token) return;
@@ -45,6 +55,7 @@ export const useAuthStore = defineStore("auth", {
         setToken(data.token);
         setStoredUser(data.user);
         this.authOpen = false;
+        await this.loadCapabilities();
       } finally {
         this.loading = false;
       }
@@ -55,6 +66,7 @@ export const useAuthStore = defineStore("auth", {
     logoutLocal() {
       this.token = "";
       this.user = null;
+      this.platformOperator = null;
       clearAuth();
     },
     toggleMenu() {

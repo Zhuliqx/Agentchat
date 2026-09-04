@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useSessionsStore } from "@/stores/sessions";
+import { useAuthStore } from "@/stores/auth";
 import Icon from "@/components/common/Icon.vue";
 
 const emit = defineEmits<{
@@ -12,6 +13,7 @@ const emit = defineEmits<{
 }>();
 
 const sessions = useSessionsStore();
+const auth = useAuthStore();
 const title = computed(() => sessions.current?.title || "新会话");
 </script>
 
@@ -31,6 +33,7 @@ const title = computed(() => sessions.current?.title || "新会话");
         <Icon name="stats" :size="15" />
       </button>
       <button
+        v-if="auth.platformOperator !== false"
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
         title="定时任务"
         @click="emit('tasks')"

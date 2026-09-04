@@ -81,3 +81,12 @@ def require_platform_operator(authorization: str | None = Header(default=None)) 
     if postgres.has_registered_users():
         raise HTTPException(401, "未登录：平台级操作需要管理员权限")
     return settings.guest_user_id
+
+
+def is_platform_operator(authorization: str | None = None) -> bool:
+    """只判断当前请求是否具备平台操作员能力（供前端做入口显隐）。"""
+    try:
+        require_platform_operator(authorization)
+        return True
+    except HTTPException:
+        return False

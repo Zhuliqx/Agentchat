@@ -21,8 +21,8 @@ jobs:
         run: |
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
-      - name: "Ruff lint (F - undefined/unused, E9 - syntax/logic)"
-        run: ruff check backend/app --select F,E9
+      - name: "Ruff lint (F - undefined/unused, E7/E9 - syntax/logic)"
+        run: ruff check backend/app --select F,E7,E9
 
       - name: "Docs stale-symbol check"
         working-directory: backend

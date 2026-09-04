@@ -75,7 +75,8 @@ def _make_search_arun(tool: Any, confirm_before: bool):
         try:
             return _format_search_results(await _invoke(query))
         except Exception as exc:
-            return f"联网搜索失败: {exc}"
+            logger.warning("联网搜索失败: %s", exc)
+            return "联网搜索失败，请稍后重试。"
 
     return _arun
 

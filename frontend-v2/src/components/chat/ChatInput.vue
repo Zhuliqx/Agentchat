@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
 import { useChatStore } from "@/stores/chat";
+import { useAuthStore } from "@/stores/auth";
 import { useChatOptionsStore } from "@/stores/chatOptions";
 import { useModelStore } from "@/stores/model";
 import { useSessionsStore } from "@/stores/sessions";
@@ -9,6 +10,7 @@ import Switch from "@/components/common/Switch.vue";
 import Dropdown from "@/components/common/Dropdown.vue";
 
 const chat = useChatStore();
+const auth = useAuthStore();
 const options = useChatOptionsStore();
 const model = useModelStore();
 const sessions = useSessionsStore();
@@ -133,7 +135,12 @@ async function chooseModel(id: string) {
 
       <!-- 输入框下方工具条：模型切换 + 联网开关 -->
       <div class="mt-1.5 flex items-center justify-between px-0.5">
-        <Dropdown :open="modelOpen" align="left" @close="modelOpen = false">
+        <Dropdown
+          v-if="auth.platformOperator !== false"
+          :open="modelOpen"
+          align="left"
+          @close="modelOpen = false"
+        >
           <template #trigger>
             <button
               class="flex h-6 max-w-[150px] items-center gap-1 rounded-md border border-line bg-surface-2/60 px-1.5 text-[11px] text-ink-faint transition hover:border-line-2 hover:bg-surface-2 hover:text-ink"

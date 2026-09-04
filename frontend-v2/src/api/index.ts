@@ -33,6 +33,7 @@ export const healthApi = {
 
 // ---------- 认证 ----------
 export const authApi = {
+  capabilities: () => api<{ platform_operator: boolean }>("/auth/capabilities"),
   register: (username: string, password: string) =>
     api<User>("/auth/register", {
       method: "POST",

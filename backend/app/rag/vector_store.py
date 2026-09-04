@@ -73,6 +73,43 @@ def _has_index(client: MilvusClient, name: str, field_name: str) -> bool:
         return False
 
 
+def _embedding_metric(client: MilvusClient, name: str) -> str | None:
+    """读取 embedding 索引当前度量；无法读取时返回 None（按无需迁移处理）。"""
+    try:
+        desc = client.describe_index(name, "embedding_idx")
+        if isinstance(desc, dict):
+            return str((desc.get("metric_type") or "") or "").upper() or None
+    except Exception:
+        return None
+    return None
+
+
+def _ensure_cosine_metric(client: MilvusClient, name: str) -> None:
+    """存量集合若使用 IP/L2 索引，则重建为 COSINE（数据保留，仅重建索引）。"""
+    current = _embedding_metric(client, name)
+    if current is None or current == "COSINE":
+        return
+    logger.warning(
+        "collection '%s' embedding 索引度量=%s，重建为 COSINE（数据不受影响）",
+        name,
+        current,
+    )
+    try:
+        client.release_collection(name)
+    except Exception:
+        pass  # 未加载时 release 会失败，忽略后继续
+    client.drop_index(name, "embedding_idx")
+    ip = client.prepare_index_params()
+    ip.add_index(
+        field_name="embedding",
+        index_type="IVF_FLAT",
+        metric_type="COSINE",
+        params={"nlist": 128},
+        index_name="embedding_idx",
+    )
+    client.create_index(name, ip)
+
+
 def _ensure_indexes(client: MilvusClient, name: str) -> None:
     """确保向量索引 + 标量索引存在（缺失则创建，幂等）。
 
@@ -84,7 +121,7 @@ def _ensure_indexes(client: MilvusClient, name: str) -> None:
         ip.add_index(
             field_name="embedding",
             index_type="IVF_FLAT",
-            metric_type=settings.milvus_metric_type,
+            metric_type="COSINE",
             params={"nlist": 128},
             index_name="embedding_idx",
         )
@@ -127,6 +164,7 @@ def ensure_vector_store() -> None:
     else:
         _validate_embedding_dim(client, name)  # 维度一致性校验
         _ensure_indexes(client, name)  # 幂等补齐索引（含 source 标量索引）
+        _ensure_cosine_metric(client, name)  # 存量 IP/L2 索引升级到 COSINE
         client.load_collection(name)
 
 
@@ -312,7 +350,7 @@ def search(
         settings.milvus_collection,
         data=[query_vec],
         anns_field="embedding",
-        search_params={"metric_type": settings.milvus_metric_type, "params": {"nprobe": 16}},
+        search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
         limit=max(top_k * 4, 32),  # 先取多些，再按阈值过滤（避免过滤后不足 top_k）
         output_fields=["id", "doc_id", "source", "chunk_index", "text", "metadata_json"],
         filter=filter_expr or "",
@@ -398,6 +436,7 @@ def ensure_image_collection() -> str:
         logger.info("image collection '%s' 已创建", name)
     else:
         _ensure_indexes(client, name)
+        _ensure_cosine_metric(client, name)
         try:
             client.load_collection(name)
         except Exception:
@@ -452,7 +491,7 @@ def search_image(
         IMAGE_COLLECTION,
         data=[query_vec],
         anns_field="embedding",
-        search_params={"metric_type": settings.milvus_metric_type, "params": {"nprobe": 16}},
+        search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
         limit=top_k * 3,
         output_fields=["source", "page", "image_index", "caption", "metadata_json"],
         filter=user_filter_expr(user_id) or "",

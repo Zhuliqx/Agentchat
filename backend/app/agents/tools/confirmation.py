@@ -92,7 +92,8 @@ def agent_to_tool(
                 last_exc = exc
                 if attempt < retries:
                     await asyncio.sleep(0.5 * (2**attempt))
-        return f"子 Agent {name} 调用失败（已重试 {retries} 次）: {last_exc}"
+        logger.warning("子 Agent %s 调用失败（已重试 %s 次）: %s", name, retries, last_exc)
+        return f"子 Agent {name} 调用失败，请稍后重试。"
 
     return StructuredTool(
         name=name,

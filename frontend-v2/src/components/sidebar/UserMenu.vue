@@ -21,6 +21,7 @@ const initial = computed(() => (auth.user?.username || "?").slice(0, 1).toUpperC
 
 async function afterLogout() {
   auth.logoutLocal();
+  await auth.loadCapabilities();
   // 切回访客域：重置会话与聊天区，避免残留上一账号内容
   sessions.currentId = "";
   chat.clear();

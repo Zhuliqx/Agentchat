@@ -144,8 +144,8 @@ def query_postgres(sql: str) -> str:
             cols = list(result.keys())
             rows = result.fetchall()[:100]
         return _render_table(cols, rows) or "查询无结果。"
-    except Exception as exc:
-        return f"查询失败: {exc}"
+    except Exception:
+        return "查询失败，请稍后重试。"
 
 
 def _require_user_id(user_id: str) -> str | None:

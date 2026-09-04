@@ -62,7 +62,8 @@ def build_remember_tool() -> StructuredTool:
             await rt.store.aput(namespace, key, {"content": content})
             return "已保存到长期记忆，下次对话仍会记得。"
         except Exception as exc:
-            return f"保存记忆失败: {exc}"
+            logger.warning("长期记忆保存失败: %s", exc)
+            return "长期记忆保存失败，请稍后重试。"
 
     return StructuredTool(
         name="remember_memory",
@@ -92,7 +93,8 @@ def build_recall_tool() -> StructuredTool:
             lines = [f"- {i.value.get('content', '')}" for i in items]
             return "该用户的长期记忆（跨会话）：\n" + "\n".join(lines)
         except Exception as exc:
-            return f"读取记忆失败: {exc}"
+            logger.warning("长期记忆读取失败: %s", exc)
+            return "长期记忆读取失败，请稍后重试。"
 
     return StructuredTool(
         name="recall_memory",
