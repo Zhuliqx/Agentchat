@@ -8,9 +8,11 @@
 """
 from __future__ import annotations
 
+import logging
 import shutil
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -28,12 +30,17 @@ from app.rag.ingestion import ingest_file
 from app.rag.retriever import get_retriever
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_SUFFIX = {".txt", ".md", ".markdown", ".pdf", ".docx", ".html", ".htm"}
 # 项目根下的上传目录（config.upload_dir 相对项目根）
 UPLOAD_ROOT = PROJECT_ROOT / settings.upload_dir
 # 上传大小上限（字节）
 MAX_UPLOAD_BYTES = settings.max_upload_mb * 1024 * 1024
+_UPLOAD_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(1, int(settings.upload_max_concurrency or 2)),
+    thread_name_prefix="rag-ingest",
+)
 
 # 后台摄入任务注册表（进程内；重启清空，前端轮询时 404 即视为任务已消失）
 _INGEST_TASKS: dict[str, dict] = {}
@@ -112,6 +119,27 @@ def _run_ingest(task_id: str, dest: Path, filename: str, user_id: str) -> None:
                 t["finished_at"] = _time.time()
 
 
+def _save_upload_stream(file, dest: Path, max_bytes: int) -> None:
+    """流式落盘并限制大小（不整读进内存，超限即抛 413）。"""
+    _CHUNK = 1024 * 1024
+    written = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                data = file.file.read(_CHUNK)
+                if not data:
+                    break
+                written += len(data)
+                if written > max_bytes:
+                    raise HTTPException(
+                        413, f"文件过大（上限 {settings.max_upload_mb}MB）"
+                    )
+                out.write(data)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
+
+
 @router.post("/upload")
 def upload_document(
     files: list[UploadFile] = File(..., alias="file"),
@@ -138,16 +166,14 @@ def upload_document(
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / safe_name
         try:
-            data = file.file.read()
-            if len(data) > MAX_UPLOAD_BYTES:
-                raise HTTPException(413, f"文件过大（上限 {settings.max_upload_mb}MB）")
-            dest.write_bytes(data)
+            _save_upload_stream(file, dest, MAX_UPLOAD_BYTES)
         except HTTPException:
             shutil.rmtree(dest_dir, ignore_errors=True)  # 保存失败时清理
             raise
         except Exception as exc:
             shutil.rmtree(dest_dir, ignore_errors=True)
-            raise HTTPException(500, f"保存文件失败: {exc}")
+            logger.exception("上传文件保存失败: %s", exc)
+            raise HTTPException(500, "文件保存失败，请稍后重试")
 
         task_id = uuid.uuid4().hex
         with _INGEST_LOCK:
@@ -158,9 +184,7 @@ def upload_document(
                 "filename": safe_name,
                 "user_id": user_id,
             }
-        threading.Thread(
-            target=_run_ingest, args=(task_id, dest, safe_name, user_id), daemon=True
-        ).start()
+        _UPLOAD_EXECUTOR.submit(_run_ingest, task_id, dest, safe_name, user_id)
         tasks.append({"task_id": task_id, "filename": safe_name, "file_path": str(dest)})
     return {"tasks": tasks}
 

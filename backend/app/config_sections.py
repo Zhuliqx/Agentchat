@@ -166,6 +166,7 @@ class UploadSection(BaseModel):
 
     upload_dir: str = "data/uploads"            # 上传目录（相对项目根），供下载 / 预览 / 审计
     max_upload_mb: int = 50                     # 上传文件大小上限（MB），超限返回 413
+    upload_max_concurrency: int = 2             # 后台摄入最大并发数（防多文件同时占满 CPU/内存）
 
 
 class DocParsingSection(BaseModel):

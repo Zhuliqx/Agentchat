@@ -1,6 +1,8 @@
 """用户注册 / 登录 / 当前用户接口（JWT 认证）。"""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -132,9 +134,11 @@ async def stats(user_id: str | None = Depends(require_user_id)) -> dict:
     if not u:
         raise HTTPException(401, "用户不存在")
 
-    session_count = postgres.count_sessions(user_id)
-    message_count = postgres.count_messages_for_user(user_id)
-    document_count = postgres.count_documents()
+    session_count = await asyncio.to_thread(postgres.count_sessions, user_id)
+    message_count = await asyncio.to_thread(
+        postgres.count_messages_for_user, user_id
+    )
+    document_count = await asyncio.to_thread(postgres.count_documents)
 
     memory_count = 0
     try:

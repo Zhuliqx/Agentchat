@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +23,8 @@ from pydantic import BaseModel, Field
 
 from app.agents.task_agent_adapter import build_host_task_agent, list_task_history
 from app.api.deps import get_current_user_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -95,7 +98,8 @@ def _prepare_run_input(graph, req: AgentTaskRun, thread: str) -> tuple[dict | No
                 # 必须用 update_state 返回的 config 继续（新分支的 checkpoint_id）
                 cfg = graph.update_state(fc, {"goal": req.goal})
             except Exception as exc:
-                raise HTTPException(400, f"分叉失败: {exc}") from exc
+                logger.warning("任务分叉失败 thread=%s: %s", thread, exc)
+                raise HTTPException(400, "分叉失败，请刷新任务历史后重试") from exc
             return None, cfg
         # Time Travel 重放：从历史点继续(沿用已存 state)
         return None, config
@@ -112,7 +116,8 @@ async def run_agent_task(req: AgentTaskRun, user_id: str = Depends(get_current_u
     try:
         result = await graph.ainvoke(input_data, config=cfg)
     except Exception as exc:
-        raise HTTPException(500, f"任务执行失败: {exc}") from exc
+        logger.exception("任务执行失败 thread=%s", thread)
+        raise HTTPException(500, "任务执行失败，请稍后重试") from exc
     return _pack(result, thread)
 
 
@@ -135,8 +140,11 @@ async def run_agent_task_stream(
         try:
             result = await graph.ainvoke(input_data, config=cfg)
             await queue.put({"type": "result", "data": _pack(result, thread)})
-        except Exception as exc:  # noqa: BLE001 - SSE 内推送错误帧
-            await queue.put({"type": "error", "data": {"message": str(exc)}})
+        except Exception:  # noqa: BLE001 - SSE 内推送错误帧
+            logger.exception("任务流执行失败 thread=%s", thread)
+            await queue.put(
+                {"type": "error", "data": {"message": "任务执行失败，请稍后重试"}}
+            )
         finally:
             await queue.put(None)
 
@@ -185,7 +193,8 @@ async def confirm_agent_task(
             config={"configurable": {"thread_id": req.session_id}},
         )
     except Exception as exc:
-        raise HTTPException(500, f"恢复失败: {exc}") from exc
+        logger.exception("任务恢复失败 thread=%s", req.session_id)
+        raise HTTPException(500, "任务恢复失败，请稍后重试") from exc
     return _pack(result, req.session_id)
 
 
@@ -208,8 +217,11 @@ async def _confirm_stream(req: AgentTaskConfirm, user_id: str) -> StreamingRespo
                 config={"configurable": {"thread_id": req.session_id}},
             )
             await queue.put({"type": "result", "data": _pack(result, req.session_id)})
-        except Exception as exc:  # noqa: BLE001 - SSE 内推送错误帧
-            await queue.put({"type": "error", "data": {"message": str(exc)}})
+        except Exception:  # noqa: BLE001 - SSE 内推送错误帧
+            logger.exception("任务恢复流失败 thread=%s", req.session_id)
+            await queue.put(
+                {"type": "error", "data": {"message": "任务恢复失败，请稍后重试"}}
+            )
         finally:
             await queue.put(None)
 

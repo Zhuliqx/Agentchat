@@ -4,10 +4,14 @@
 - ``purge_user_data``：注销/删除用户时清理知识库（向量 + 元数据）、长期记忆、checkpoint，
   再删除用户本身（级联删除 sessions/messages）。
 
+同步 DB/向量操作全部经 ``asyncio.to_thread`` 执行，避免阻塞事件循环；
+LangGraph Store 的 async 调用仍留在主事件循环（连接绑定该循环）。
+
 从 auth 路由拆出，避免路由之间互相 import（原 admin 从 auth 导入 purge_user_data）。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -50,41 +54,55 @@ async def purge_user_data(user_id: str) -> None:
     """
     if user_id == settings.guest_user_id:
         raise HTTPException(400, "访客账号不可删除")
-    if not postgres.get_user(user_id):
+    user = await asyncio.to_thread(postgres.get_user, user_id)
+    if not user:
         raise HTTPException(404, "用户不存在")
 
     # 删除前收集该用户会话 id（用于定向清理 LangGraph checkpoint）
-    with SessionLocal() as db:
-        session_ids = [
-            s.id for s in db.query(Session).filter(Session.user_id == user_id).all()
-        ]
+    def _collect_session_ids() -> list[str]:
+        with SessionLocal() as db:
+            return [
+                s.id
+                for s in db.query(Session)
+                .filter(Session.user_id == user_id)
+                .all()
+            ]
+
+    session_ids = await asyncio.to_thread(_collect_session_ids)
 
     # 1) 知识库：Milvus 向量 + Postgres 元数据
     try:
-        _delete_user_vectors(user_id)
+        await asyncio.to_thread(_delete_user_vectors, user_id)
     except Exception as exc:
         logger.error("注销用户 %s 时 Milvus 向量清理失败: %s", user_id, exc)
         # 不把内部异常原文返回给客户端；细节只进日志
         raise HTTPException(
             500, "知识库向量清理失败，账号未删除，请稍后重试"
         ) from exc
-    with SessionLocal() as db:
-        db.query(Document).filter(Document.user_id == user_id).delete()
-        db.commit()
-    # 2) 长期记忆
+
+    def _delete_documents() -> None:
+        with SessionLocal() as db:
+            db.query(Document).filter(Document.user_id == user_id).delete()
+            db.commit()
+
+    await asyncio.to_thread(_delete_documents)
+
+    # 2) 长期记忆（async Store 调用保持主事件循环）
     try:
         await _delete_user_memories(user_id)
     except Exception as exc:
         logger.warning("注销用户 %s 时长期记忆清理失败（继续删除账号）: %s", user_id, exc)
+
     # 3) 会话 checkpoint（孤儿线程）
     if session_ids:
-        cleanup_stale_checkpoints(session_ids)
+        await asyncio.to_thread(cleanup_stale_checkpoints, session_ids)
+
     # 4) 删除用户（级联删除 sessions/messages）
-    postgres.delete_user(user_id)
+    await asyncio.to_thread(postgres.delete_user, user_id)
 
 
-async def build_user_export(user_id: str) -> dict:
-    """导出用户全部数据（用户信息 / 会话与消息 / 长期记忆 / 知识库文档）。"""
+def _sync_export_base(user_id: str) -> tuple[dict, list[dict], list[dict]]:
+    """同步聚合导出所需的用户信息/会话消息/文档清单（供线程池执行）。"""
     u = postgres.get_user(user_id)
     if not u:
         raise HTTPException(401, "用户不存在")
@@ -97,7 +115,8 @@ async def build_user_export(user_id: str) -> dict:
         "is_admin": is_admin_username(u.username),
     }
 
-    sessions_out = []
+    sessions_out: list[dict] = []
+    doc_map: dict[str, dict] = {}
     with SessionLocal() as db:
         sessions = (
             db.query(Session)
@@ -130,8 +149,6 @@ async def build_user_export(user_id: str) -> dict:
                     ],
                 }
             )
-        # 知识库文档（按 source 聚合）
-        doc_map: dict[str, dict] = {}
         for d in (
             db.query(Document)
             .filter(Document.user_id == user_id)
@@ -148,8 +165,16 @@ async def build_user_export(user_id: str) -> dict:
                 },
             )
             g["chunks"] += 1
+    return user_out, sessions_out, list(doc_map.values())
 
-    # 长期记忆
+
+async def build_user_export(user_id: str) -> dict:
+    """导出用户全部数据（用户信息 / 会话与消息 / 长期记忆 / 知识库文档）。"""
+    user_out, sessions_out, documents = await asyncio.to_thread(
+        _sync_export_base, user_id
+    )
+
+    # 长期记忆：Store 连接绑定主事件循环，不能放进线程池
     memories = []
     store = get_store()
     if store is not None:
@@ -173,5 +198,5 @@ async def build_user_export(user_id: str) -> dict:
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "sessions": sessions_out,
         "memories": memories,
-        "documents": list(doc_map.values()),
+        "documents": documents,
     }

@@ -16,11 +16,14 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import text as _sql_text
+
 from app.db import postgres
 
 logger = logging.getLogger(__name__)
 
 _SCAN_INTERVAL_SEC = 15
+_ADVISORY_LOCK_KEY = 730254  # 平台内固定键：同一时刻只允许一个进程扫描 tasks
 
 
 # ---------------- 任务注册表 ----------------
@@ -329,32 +332,90 @@ async def _run_task(task_id: str) -> None:
         postgres.mark_task_result(task_id, "failed", str(exc)[:500], next_run)
 
 
-async def scheduler_loop(stop_event: asyncio.Event) -> None:
-    """调度主循环：扫描 tasks 表，执行到期的任务。"""
-    logger.info("任务调度器已启动（扫描间隔 %ss）", _SCAN_INTERVAL_SEC)
-    # 首次启动：为无 next_run_at 的已启用任务补算，并把长期卡死的任务标记失败
-    for t in postgres.list_tasks():
-        if t.enabled and t.next_run_at is None:
-            nxt = compute_next_run(t.schedule)
-            postgres.mark_task_result(t.id, t.last_status or "", None, nxt)
-        if t.enabled and t.last_status == "running":
-            postgres.mark_task_result(t.id, "failed", "上次运行异常中断（超时/重启）", None)
+async def scheduler_loop(
+    stop_event: asyncio.Event,
+    advisory_lock_key: int = _ADVISORY_LOCK_KEY,
+) -> None:
+    """调度主循环：先抢 Postgres advisory lock，只有 leader 扫描并执行任务。
 
-    while not stop_event.is_set():
-        try:
-            now = datetime.now(timezone.utc)
-            for t in postgres.list_tasks():
-                if not t.enabled or t.next_run_at is None:
-                    continue
-                if t.next_run_at.tzinfo is None:
-                    t_next = t.next_run_at.replace(tzinfo=timezone.utc)
-                else:
-                    t_next = t.next_run_at
-                if t_next <= now:
-                    asyncio.create_task(_run_task(t.id))
-            await asyncio.wait_for(stop_event.wait(), timeout=_SCAN_INTERVAL_SEC)
-        except asyncio.TimeoutError:
-            continue
-        except Exception as exc:
-            logger.warning("调度循环异常: %s", exc)
-            await asyncio.sleep(_SCAN_INTERVAL_SEC)
+    多 worker/多副本部署时避免同一任务被重复执行；leader 进程退出后，
+    其余进程会在下一个扫描周期抢到锁继续调度。
+    """
+    logger.info("任务调度器已启动（扫描间隔 %ss）", _SCAN_INTERVAL_SEC)
+    conn = None
+    leader = False
+    initialized = False
+    try:
+        while not stop_event.is_set():
+            try:
+                if not leader:
+                    from app.db.postgres import engine
+
+                    if conn is None or conn.closed:
+                        conn = engine.connect()
+                    got = conn.execute(
+                        _sql_text("SELECT pg_try_advisory_lock(:k)"),
+                        {"k": advisory_lock_key},
+                    ).scalar()
+                    leader = bool(got)
+                    if leader:
+                        logger.info("本进程获得调度领导权")
+                        # 首次启动：为无 next_run_at 的已启用任务补算，
+                        # 并把长期卡死的任务标记失败（仅 leader 执行一次）
+                        if not initialized:
+                            for t in postgres.list_tasks():
+                                if t.enabled and t.next_run_at is None:
+                                    nxt = compute_next_run(t.schedule)
+                                    postgres.mark_task_result(
+                                        t.id, t.last_status or "", None, nxt
+                                    )
+                                if t.enabled and t.last_status == "running":
+                                    postgres.mark_task_result(
+                                        t.id,
+                                        "failed",
+                                        "上次运行异常中断（超时/重启）",
+                                        None,
+                                    )
+                            initialized = True
+                    else:
+                        await asyncio.wait_for(
+                            stop_event.wait(), timeout=_SCAN_INTERVAL_SEC
+                        )
+                        continue
+
+                now = datetime.now(timezone.utc)
+                for t in postgres.list_tasks():
+                    if not t.enabled or t.next_run_at is None:
+                        continue
+                    if t.next_run_at.tzinfo is None:
+                        t_next = t.next_run_at.replace(tzinfo=timezone.utc)
+                    else:
+                        t_next = t.next_run_at
+                    if t_next <= now:
+                        asyncio.create_task(_run_task(t.id))
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=_SCAN_INTERVAL_SEC
+                )
+            except asyncio.TimeoutError:
+                continue
+            except Exception as exc:
+                logger.warning("调度循环异常，尝试重新抢锁: %s", exc)
+                leader = False
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = None
+                await asyncio.sleep(1)
+    finally:
+        if conn is not None and not conn.closed:
+            try:
+                conn.execute(
+                    _sql_text("SELECT pg_advisory_unlock(:k)"),
+                    {"k": advisory_lock_key},
+                )
+            except Exception:
+                pass
+            finally:
+                conn.close()

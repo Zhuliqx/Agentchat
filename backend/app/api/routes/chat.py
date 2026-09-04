@@ -276,9 +276,12 @@ async def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_
             )
         except AgentTimeoutError:
             await queue.put({"type": "error", "content": "处理超时，请重试或简化问题"})
-        except Exception as exc:  # 避免连接被意外中断
+        except Exception:  # 避免连接被意外中断
             logger.exception("chat_stream 处理失败")
-            await queue.put({"type": "error", "content": f"处理失败: {exc}"})
+            # 错误详情只进日志，不把内部异常原文发给客户端
+            await queue.put(
+                {"type": "error", "content": "处理失败，请稍后重试或简化问题。"}
+            )
         finally:
             await queue.put(None)  # 结束哨兵
 
