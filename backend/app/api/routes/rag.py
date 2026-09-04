@@ -260,11 +260,19 @@ def get_document_file(
         )
     if not owned:
         raise HTTPException(404, "原始文件不存在或不可访问")
+    # 同源内联预览 HTML 时强制沙箱：阻断脚本执行，防上传型存储 XSS。
+    extra_headers = {}
+    if not download and path.suffix.lower() in {".html", ".htm"}:
+        extra_headers = {
+            "Content-Security-Policy": "sandbox",
+            "X-Content-Type-Options": "nosniff",
+        }
     return FileResponse(
         path,
         filename=path.name,
         media_type=_guess_media(path),
         content_disposition_type="attachment" if download else "inline",
+        headers=extra_headers,
     )
 
 

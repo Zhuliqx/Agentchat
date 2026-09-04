@@ -29,7 +29,7 @@ def test_verify_password_bad_format():
 def test_token_roundtrip(monkeypatch):
     from app.config import settings
 
-    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_secret", "test-secret-0123456789abcdefghijklmn")
     token = create_token("user-1")
     assert decode_token(token) == "user-1"
 
@@ -37,16 +37,16 @@ def test_token_roundtrip(monkeypatch):
 def test_token_invalid(monkeypatch):
     from app.config import settings
 
-    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_secret", "test-secret-0123456789abcdefghijklmn")
     assert decode_token("garbage.token.here") is None
 
 
 def test_token_wrong_secret(monkeypatch):
     from app.config import settings
 
-    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_secret", "test-secret-0123456789abcdefghijklmn")
     token = create_token("user-1")
-    monkeypatch.setattr(settings, "auth_secret", "other-secret")
+    monkeypatch.setattr(settings, "auth_secret", "other-secret-0123456789abcdefghijklmno")
     assert decode_token(token) is None
 
 

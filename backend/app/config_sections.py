@@ -288,6 +288,8 @@ class CodeAgentSection(BaseModel):
     """代码 Agent（受限沙箱执行 Python）。"""
 
     code_agent_enabled: bool = True             # 是否启用代码执行 Agent
+    code_exec_mode: str = "docker"              # docker=一次性容器沙箱（推荐/安全边界）；subprocess=仅本地调试
+    code_exec_image: str = "agentchat-code-runner:latest"  # 容器 runner 镜像名
     code_exec_timeout: float = 15.0             # 单段代码执行超时（秒）
     code_exec_max_output: int = 8000            # stdout/stderr 截断上限（字符）
 
@@ -306,3 +308,4 @@ class AuthSection(BaseModel):
     auth_secret: str = "dev-secret-change-me-in-env-0123456789abcdef"  # 生产务必在 .env 设置强随机值
     guest_user_id: str = "default"              # 未登录访客使用的默认用户 id
     admin_usernames: str = ""                   # 管理员用户名（逗号分隔）
+    token_ttl_seconds: int = 604800             # JWT 有效期（秒），默认 7 天

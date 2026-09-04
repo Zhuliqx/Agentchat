@@ -124,8 +124,16 @@ class McpClientManager:
         name = f"{server_name}_{mcp_tool.name}"
         description = mcp_tool.description or f"MCP 工具 {mcp_tool.name}（来自 {server_name}）"
         args_schema = json_schema_to_pydantic(mcp_tool.inputSchema, name=f"{name}Args")
+        input_props = set((mcp_tool.inputSchema or {}).get("properties", {}) or {})
+        scoped_db_tool = server_name == "db" and "user_id" in input_props
 
         async def _arun(**kwargs: Any) -> str:
+            # 行级隔离：db 服务端的 user_id 一律由宿主注入当前用户，
+            # 不信任 LLM/客户端传值（防跨用户查询）。
+            if scoped_db_tool:
+                from app.agents.context import current_user_id
+
+                kwargs["user_id"] = current_user_id()
             result = await session.call_tool(mcp_tool.name, arguments=kwargs)
             parts: list[str] = []
             for content in result.content:

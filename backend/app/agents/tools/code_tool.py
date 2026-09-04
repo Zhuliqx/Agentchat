@@ -28,7 +28,7 @@ def build_code_agent():
 class _CodeExecQuery(BaseModel):
     """execute_python_code 工具入参。"""
 
-    code: str = Field(description="要执行的 Python 代码（受限沙箱，仅纯计算标准库）")
+    code: str = Field(description="要执行的 Python 代码（隔离容器沙箱）")
 
 
 def _build_execute_python_tool() -> StructuredTool:
@@ -56,9 +56,9 @@ def _build_execute_python_tool() -> StructuredTool:
     return StructuredTool(
         name="execute_python_code",
         description=(
-            "在受限沙箱中执行一段 Python 代码并返回运行结果（stdout/错误）。"
+            "在隔离容器中执行一段 Python 代码并返回运行结果（stdout/错误）。"
             "当需要实际计算、验证算法、生成数据或运行脚本时使用；"
-            "环境仅支持纯计算标准库（math/json/datetime/random/collections 等），禁文件/网络/子进程。"
+            "环境无网络、根文件系统只读、有资源限额，仅 /tmp 可写。"
         ),
         args_schema=_CodeExecQuery,
         func=_run,

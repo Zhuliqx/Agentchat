@@ -49,7 +49,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **单轮调用上限**：工具调用（默认 20 次）与模型调用（默认 25 次）按轮次独立预算，超限自动收尾/结束，防失控循环烧 token（`AGENT_MAX_TOOL_CALLS` / `AGENT_MAX_MODEL_CALLS`，0=不限制）
 - **RAG**：文档上传（txt/md/pdf/docx/html）→ 分块（Markdown 按标题切分）→ 向量化 → **混合检索**（向量 + BM25 + RRF）→ **rerank 精排**（可选 **查询改写** `rule`/`llm`，默认关）→ LLM 生成，中文友好（默认 `bge-small-zh-v1.5`）；**原始文件持久保存**（`data/uploads/`，可在线预览/下载）。**解析增强**：PDF 用 `pdfplumber→pymupdf→pypdf` 回退、Markdown 去标题（默认开）；**图片能力**：可选 **图片语义描述**（VLM 转图内容为文本）与 **图文双通道**（多模态向量 + 文本融合，见 [ARCHITECTURE](docs/ARCHITECTURE.md)）
 - **联网搜索**：Tavily 直接搜索工具（`web_search`），实时获取最新网络资讯（LangChain 官方推荐工具）
-- **代码 Agent**：受限沙箱执行 Python（子进程隔离 + 超时 kill + 危险能力禁用 + 模块白名单 + 输出截断），需要实际计算/验证算法/数据处理时由 Supervisor 自动调度；`CODE_AGENT_ENABLED` / `CODE_EXEC_TIMEOUT` 可配置
+- **代码 Agent**：容器沙箱执行 Python（默认 `--network none` / 只读根文件系统 / 非 root / 资源限额；`subprocess` 仅限本地调试），需要实际计算/验证算法/数据处理时由 Supervisor 自动调度；`CODE_AGENT_ENABLED` / `CODE_EXEC_MODE` / `CODE_EXEC_TIMEOUT` 可配置
 - **MCP**：
   - 自建 MCP 服务器（数据库查询、时间/计算），stdio 方式
   - 支持接入任意外部 MCP 服务器（streamable http），一行配置
@@ -250,6 +250,10 @@ python run.py
 | `LOG_LEVEL` | `INFO` | 日志级别（DEBUG / INFO / WARNING / ERROR） |
 | `MAX_UPLOAD_MB` | `50` | 上传文档大小上限（MB），超限返回 413 |
 | `AUTH_SECRET` | 开发默认值 | JWT 签名密钥（**生产务必改为强随机值**） |
+| `TOKEN_TTL_SECONDS` | `604800` | JWT 有效期（秒），默认 7 天 |
+| `CODE_AGENT_ENABLED` | `true` | 是否启用代码执行 Agent |
+| `CODE_EXEC_MODE` | `docker` | 代码沙箱：docker=一次性容器（默认，安全边界）；subprocess=仅本地调试 |
+| `CODE_EXEC_IMAGE` | `agentchat-code-runner:latest` | 代码 runner 镜像名（构建命令见 backend/.env.example） |
 | `LLM_LIGHT_MODEL` | 空 | 子 Agent 轻量模型（配置后 Supervisor 用主模型、子 Agent 用轻量模型） |
 
 ## 冒烟测试与单元测试

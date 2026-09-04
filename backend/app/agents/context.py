@@ -6,7 +6,30 @@
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Iterator
+
+
+# 当前请求的用户上下文（contextvar）：在 graph.stream_agent 执行期间设置，
+# 供 MCP 包装层等“无法拿到 LangGraph Runtime 的工具调用点”读取。
+_CURRENT_USER_ID: ContextVar[str] = ContextVar("agent_current_user_id", default="default")
+
+
+def current_user_id() -> str:
+    """当前 Agent 调用所属用户（缺省 default）。"""
+    return _CURRENT_USER_ID.get()
+
+
+@asynccontextmanager
+async def current_user_context(user_id: str) -> Iterator[None]:
+    """在执行 Agent 期间把用户 id 注入 contextvar，退出时恢复。"""
+    token = _CURRENT_USER_ID.set(user_id or "default")
+    try:
+        yield
+    finally:
+        _CURRENT_USER_ID.reset(token)
 
 
 @dataclass

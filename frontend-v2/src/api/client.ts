@@ -1,5 +1,5 @@
 // 统一 fetch 封装：JSON、错误解析、认证头
-import { getToken } from "./token";
+import { clearAuth, getToken } from "./token";
 
 export class ApiError extends Error {
   status: number;
@@ -43,7 +43,18 @@ export async function apiRaw(
   const headers: Record<string, string> = { ...authHeaders() };
   if (!(options.body instanceof FormData))
     headers["Content-Type"] = "application/json";
-  return fetch("/api" + path, { ...options, headers });
+  const res = await fetch("/api" + path, { ...options, headers });
+  // 登录/注册自身的 401 是“密码错误”，不能当成登录态失效处理。
+  if (
+    res.status === 401 &&
+    getToken() &&
+    !path.startsWith("/auth/login") &&
+    !path.startsWith("/auth/register")
+  ) {
+    clearAuth();
+    window.dispatchEvent(new Event("auth-expired"));
+  }
+  return res;
 }
 
 export async function api<T = unknown>(

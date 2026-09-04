@@ -28,7 +28,7 @@ from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
 
-from app.agents.context import UserContext
+from app.agents.context import UserContext, current_user_context
 from app.agents.llm import get_llm
 from app.agents.middleware import build_supervisor_middlewares
 from app.agents.prompts import build_supervisor_prompt
@@ -395,7 +395,7 @@ async def stream_agent(
     if settings.code_agent_enabled:
         streamer.register_tool("code_agent")
 
-    async with _agent_timeout_scope(on_event):
+    async with current_user_context(user_id or "default"), _agent_timeout_scope(on_event):
         async for mode, data in graph.astream(
             input_data,
             config=config,

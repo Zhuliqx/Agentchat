@@ -1,7 +1,9 @@
 """FastAPI 依赖：从 Authorization: Bearer 解析当前用户。
 
-未携带 token / token 无效时回退为访客用户（settings.guest_user_id），
-保证现有单用户体验不被破坏；登录用户则按 user_id 隔离会话数据。
+- 未携带 Authorization 头：回退为访客用户（settings.guest_user_id），
+  保证现有单用户体验不被破坏；
+- 携带了头但 token 无效/过期：返回 401（不静默降级访客），
+  避免登录态过期后悄悄操作共享 default 命名空间。
 """
 from __future__ import annotations
 
@@ -22,8 +24,13 @@ def _resolve_user_id(authorization: str | None) -> str | None:
 
 
 def get_current_user_id(authorization: str | None = Header(default=None)) -> str:
-    """返回当前用户 id（带 token → 校验；否则 → 访客）。"""
-    return _resolve_user_id(authorization) or settings.guest_user_id
+    """返回当前用户 id（无头 → 访客；带 token → 校验，无效/过期 → 401）。"""
+    if not authorization:
+        return settings.guest_user_id
+    uid = _resolve_user_id(authorization)
+    if not uid:
+        raise HTTPException(401, "登录已过期或凭证无效，请重新登录")
+    return uid
 
 
 def require_user_id(authorization: str | None = Header(default=None)) -> str | None:
@@ -52,3 +59,25 @@ def require_admin(authorization: str | None = Header(default=None)) -> str:
     if not u or not is_admin_username(u.username):
         raise HTTPException(403, "需要管理员权限")
     return uid
+
+
+def require_platform_operator(authorization: str | None = Header(default=None)) -> str:
+    """平台级操作（定时任务/全局模型切换）的鉴权依赖。
+
+    兼容默认单用户模式：库里只有内置访客用户时，匿名访客即平台操作员
+    （保持零配置可用）。一旦出现任何真实注册用户，匿名请求被拒绝，
+    平台级操作只允许管理员（ADMIN_USERNAMES）。
+    """
+    uid = _resolve_user_id(authorization)
+    if uid:
+        from app.db import postgres
+
+        u = postgres.get_user(uid)
+        if u and is_admin_username(u.username):
+            return uid
+        raise HTTPException(403, "需要管理员权限")
+    from app.db import postgres
+
+    if postgres.has_registered_users():
+        raise HTTPException(401, "未登录：平台级操作需要管理员权限")
+    return settings.guest_user_id

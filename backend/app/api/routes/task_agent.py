@@ -26,6 +26,26 @@ from app.api.deps import get_current_user_id
 router = APIRouter()
 
 
+def build_task_thread_id(user_id: str) -> str:
+    """为当前用户生成新的任务线程 id（带用户前缀，防跨用户猜解/复用）。"""
+    return f"{user_id}:task-{uuid.uuid4().hex[:12]}"
+
+
+def ensure_task_thread_owned(session_id: str | None, user_id: str) -> str:
+    """校验/生成归属当前用户的任务线程 id。
+
+    - session_id 为空：新建（带 user_id 前缀）；
+    - session_id 非空：必须带 "{user_id}:" 前缀，否则视为不存在
+      （404，避免泄露他人线程是否存在）。
+    """
+    if session_id is None:
+        return build_task_thread_id(user_id)
+    prefix = f"{user_id}:"
+    if not session_id.startswith(prefix) or len(session_id) <= len(prefix):
+        raise HTTPException(404, "任务会话不存在")
+    return session_id
+
+
 class AgentTaskRun(BaseModel):
     goal: str = Field("", max_length=2000, description="用户目标(新任务必填; 分叉/重放时可空)")
     session_id: str | None = None  # 为空则新建任务会话（checkpoint thread_id）
@@ -86,8 +106,8 @@ def _prepare_run_input(graph, req: AgentTaskRun, thread: str) -> tuple[dict | No
 
 @router.post("/agent-tasks/run")
 async def run_agent_task(req: AgentTaskRun, user_id: str = Depends(get_current_user_id)) -> dict:
-    graph = build_host_task_agent()
-    thread = req.session_id or f"task-{uuid.uuid4().hex[:12]}"
+    thread = ensure_task_thread_owned(req.session_id, user_id)
+    graph = build_host_task_agent(user_id=user_id)
     input_data, cfg = _prepare_run_input(graph, req, thread)
     try:
         result = await graph.ainvoke(input_data, config=cfg)
@@ -101,14 +121,14 @@ async def run_agent_task_stream(
     req: AgentTaskRun, user_id: str = Depends(get_current_user_id)
 ) -> StreamingResponse:
     """SSE 事件流：实时推送任务执行过程，最后推 result（含 HITL awaiting_confirm）。"""
-    thread = req.session_id or f"task-{uuid.uuid4().hex[:12]}"
+    thread = ensure_task_thread_owned(req.session_id, user_id)
     queue: asyncio.Queue = asyncio.Queue()
 
     def on_event(kind: str, data: dict) -> None:
         # 包内回调为同步签名；在事件循环内调度推送
         asyncio.ensure_future(queue.put({"type": "event", "kind": kind, "data": data}))
 
-    graph = build_host_task_agent(on_event=on_event)
+    graph = build_host_task_agent(user_id=user_id, on_event=on_event)
     input_data, cfg = _prepare_run_input(graph, req, thread)
 
     async def produce() -> None:
@@ -143,7 +163,8 @@ class AgentTaskHistory(BaseModel):
 @router.post("/agent-tasks/history")
 async def agent_task_history(req: AgentTaskHistory, user_id: str = Depends(get_current_user_id)) -> dict:
     """Time Travel：列出线程的 checkpoint 历史(新→旧)，每条含 checkpoint_id 可回退/分叉。"""
-    graph = build_host_task_agent()
+    ensure_task_thread_owned(req.session_id, user_id)
+    graph = build_host_task_agent(user_id=user_id)
     items = await list_task_history(graph, req.session_id, req.limit)
     return {"session_id": req.session_id, "history": items}
 
@@ -153,9 +174,10 @@ async def confirm_agent_task(
     req: AgentTaskConfirm, user_id: str = Depends(get_current_user_id)
 ) -> dict | StreamingResponse:
     """HITL 恢复：提交决策，从上次 interrupt 处继续执行（同一 thread_id）。"""
+    ensure_task_thread_owned(req.session_id, user_id)
     if req.stream:
-        return await _confirm_stream(req)
-    graph = build_host_task_agent()
+        return await _confirm_stream(req, user_id)
+    graph = build_host_task_agent(user_id=user_id)
     decision = {"verb": req.verb, "action": req.action, "source": req.source}    
     try:
         result = await graph.ainvoke(
@@ -167,15 +189,16 @@ async def confirm_agent_task(
     return _pack(result, req.session_id)
 
 
-async def _confirm_stream(req: AgentTaskConfirm) -> StreamingResponse:
+async def _confirm_stream(req: AgentTaskConfirm, user_id: str) -> StreamingResponse:
     """HITL 恢复的 SSE 版本：与 run/stream 同构，恢复后的事件（execute/check/verify/hitl…）
     实时推送，最后推 result（含再次 awaiting_confirm 或 done），保证前端轨迹连续。"""
+    ensure_task_thread_owned(req.session_id, user_id)
     queue: asyncio.Queue = asyncio.Queue()
 
     def on_event(kind: str, data: dict) -> None:
         asyncio.ensure_future(queue.put({"type": "event", "kind": kind, "data": data}))
 
-    graph = build_host_task_agent(on_event=on_event)
+    graph = build_host_task_agent(user_id=user_id, on_event=on_event)
     decision = {"verb": req.verb, "action": req.action, "source": req.source}
 
     async def produce() -> None:

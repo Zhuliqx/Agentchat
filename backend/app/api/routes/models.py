@@ -5,7 +5,7 @@ LLM/图缓存，后续对话请求使用新模型。
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.agents.llm import (
@@ -13,6 +13,7 @@ from app.agents.llm import (
     get_current_model_choice,
     set_current_model,
 )
+from app.api.deps import require_platform_operator
 
 router = APIRouter()
 
@@ -28,7 +29,9 @@ def list_models() -> dict:
 
 
 @router.put("/current")
-def set_model(body: ModelChoiceIn) -> dict:
+def set_model(
+    body: ModelChoiceIn, _operator: str = Depends(require_platform_operator)
+) -> dict:
     """切换当前模型（清缓存，立即生效）。"""
     if not set_current_model(body.model_id):
         raise HTTPException(400, f"未知的模型: {body.model_id}")

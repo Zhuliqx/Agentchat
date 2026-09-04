@@ -181,3 +181,23 @@ jobs:
           name: rag-quality-report
           path: backend/data/eval/ci_quality*
 
+  # 容器代码沙箱：构建 runner 镜像后验证网络/文件系统/资源边界
+  code-runner:
+    name: Code Runner (container sandbox)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: "Build runner image"
+        run: |
+          docker build -t agentchat-code-runner \
+            -f backend/docker/code-runner/Dockerfile backend/docker/code-runner
+
+      - name: "Runner sandbox tests"
+        run: |
+          pip install pydantic-settings
+          pytest backend/tests/integration/test_code_runner.py -q

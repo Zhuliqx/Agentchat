@@ -201,6 +201,19 @@ def delete_user(user_id: str) -> bool:
         return True
 
 
+def has_registered_users() -> bool:
+    """是否存在除内置访客外的真实注册用户（用于平台操作员鉴权）。"""
+    with SessionLocal() as db:
+        return (
+            db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(User.id != settings.guest_user_id)
+            )
+            or 0
+        ) > 0
+
+
 def update_user(
     user_id: str,
     *,

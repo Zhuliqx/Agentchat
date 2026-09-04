@@ -344,3 +344,110 @@ def test_chat_query_injection_rejected(client):
     )
     assert r.status_code == 400
     assert "可疑指令" in r.json()["detail"]
+
+
+# ---------------- 安全批次 1：上传 HTML 沙箱 / 平台操作员鉴权 ----------------
+
+def test_upload_html_inline_preview_is_sandboxed(client):
+    """HTML 内联预览必须带 CSP sandbox（防上传型存储 XSS）。"""
+    from pathlib import Path
+
+    import uuid
+
+    token = uuid.uuid4().hex[:8]
+    html_path = (
+        Path(__file__).resolve().parent.parent / "fixtures" / f".xss_{token}.html"
+    )
+    try:
+        html_path.write_text(
+            f"<html><body>预览测试 {token}<script>document.body.append('xss')</script></body></html>",
+            encoding="utf-8",
+        )
+        with html_path.open("rb") as f:
+            r = client.post(
+                "/api/rag/upload",
+                files=[("file", (html_path.name, f, "text/html"))],
+            )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["tasks"][0]["task_id"]
+        st: dict[str, Any] = {"status": "pending"}
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            st = client.get(f"/api/rag/ingest/{task_id}").json()
+            if st["status"] in ("done", "error"):
+                break
+            time.sleep(0.3)
+        assert st["status"] == "done", st
+        source = st["result"]["source"]
+        try:
+            fr = client.get("/api/rag/documents/file", params={"source": source})
+            assert fr.status_code == 200
+            csp = fr.headers.get("content-security-policy", "")
+            assert "sandbox" in csp, f"HTML 内联预览缺少 CSP sandbox: {csp}"
+            assert fr.headers.get("x-content-type-options") == "nosniff"
+            assert "inline" in fr.headers.get("content-disposition", "")
+        finally:
+            client.delete("/api/rag/documents", params={"source": source})
+    finally:
+        html_path.unlink(missing_ok=True)
+
+
+def test_platform_tasks_requires_admin_when_users_exist(client, monkeypatch):
+    """存在真实用户后，匿名不能再增删定时任务；管理员可以。"""
+    import uuid as _uuid
+
+    from app.config import settings
+    from app.db.models import User
+    from app.db.postgres import SessionLocal
+
+    suffix = _uuid.uuid4().hex[:8]
+    admin_name = f"op_admin_{suffix}"
+    other_name = f"op_user_{suffix}"
+
+    def _register(name: str) -> tuple[str, str]:
+        r = client.post(
+            "/api/auth/register", json={"username": name, "password": "op-pass-123"}
+        )
+        assert r.status_code == 201, r.text
+        uid = r.json()["id"]
+        login = client.post(
+            "/api/auth/login", json={"username": name, "password": "op-pass-123"}
+        )
+        assert login.status_code == 200
+        return uid, login.json()["token"]
+
+    admin_uid, admin_token = _register(admin_name)
+    other_uid, _ = _register(other_name)
+    ids = [admin_uid, other_uid]
+    try:
+        # 库中已有真实用户 → 匿名/普通用户都不能管理任务
+        assert client.get("/api/tasks/registry").status_code == 200
+        anon = client.post(
+            "/api/tasks",
+            json={"name": "x", "task_type": "cleanup_checkpoints", "schedule": "interval:60"},
+        )
+        assert anon.status_code in (401, 403), anon.text
+
+        monkeypatch.setattr(settings, "admin_usernames", admin_name)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        created = client.post(
+            "/api/tasks",
+            json={"name": "smoke", "task_type": "cleanup_checkpoints", "schedule": "interval:60"},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        task_id = created.json()["id"]
+        try:
+            listed = client.get("/api/tasks", headers=headers)
+            assert listed.status_code == 200
+            assert any(t["id"] == task_id for t in listed.json())
+        finally:
+            assert client.delete(f"/api/tasks/{task_id}", headers=headers).status_code == 204
+    finally:
+        # 清理注册的测试用户（无会话/无任务残留，直接删除保持库状态）
+        with SessionLocal() as db:
+            for uid in ids:
+                u = db.get(User, uid)
+                if u:
+                    db.delete(u)
+            db.commit()

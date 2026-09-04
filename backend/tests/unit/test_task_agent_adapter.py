@@ -36,6 +36,40 @@ def test_host_executor_maps_source_to_flags(monkeypatch):
     assert calls[1]["question"] == "请用代码计算：1到100质数和"
 
 
+def test_host_executor_passes_bound_user_id(monkeypatch):
+    """宿主执行器必须把绑定用户传给 run_agent（长期记忆/知识库隔离）。"""
+    calls: list[dict] = []
+
+    async def fake_run_agent(**kwargs):
+        calls.append(kwargs)
+        return {"answer": "ok"}
+
+    monkeypatch.setattr(adapter, "run_agent", fake_run_agent)
+    executor = adapter._HostExecutor("alice")
+
+    async def go():
+        await executor(ExecuteRequest(action="查公司订单", source="db"))
+
+    asyncio.run(go())
+    assert calls[0]["user_id"] == "alice"
+    assert calls[0]["session_id"].startswith("sub-")
+
+
+def test_host_memory_uses_bound_user_namespace():
+    mem = adapter._HostMemory("alice")
+    assert mem._namespace == ("alice", "task_memories")
+
+
+def test_build_host_task_agent_is_per_user(monkeypatch):
+    """不同用户的宿主图不能共享（子步骤 user_id/记忆命名空间不同）。"""
+    monkeypatch.setattr(adapter, "get_store", lambda: None)
+    alice = adapter.build_host_task_agent(user_id="alice")
+    alice2 = adapter.build_host_task_agent(user_id="alice")
+    bob = adapter.build_host_task_agent(user_id="bob")
+    assert alice is alice2
+    assert bob is not alice
+
+
 def test_build_host_task_agent_caches_by_config(monkeypatch):
     a = adapter.build_host_task_agent()
     b = adapter.build_host_task_agent()

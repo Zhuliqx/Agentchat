@@ -1,8 +1,9 @@
 """安全工具：密码哈希（stdlib pbkdf2，无额外依赖）与 JWT 签发/校验。
 
 - 密码：PBKDF2-HMAC-SHA256，随机 16 字节盐，60w 次迭代（OWASP 建议 ≥60w）。
-- JWT：HS256，payload 含 sub(user_id) / iat；未签发 exp（token 不设有效期）；
-  密钥来自 settings.auth_secret（生产环境请通过 .env 配置强随机值）。
+- JWT：HS256，payload 含 sub(user_id) / iat / exp；有效期默认取
+  settings.token_ttl_seconds（秒）。密钥来自 settings.auth_secret
+  （生产环境请通过 .env 配置强随机值）。
 """
 from __future__ import annotations
 
@@ -42,10 +43,17 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ---------------- JWT ----------------
 
-def create_token(user_id: str) -> str:
+def create_token(user_id: str, ttl_seconds: int | None = None) -> str:
+    """签发 JWT：含 iat / exp；ttl_seconds 缺省用 settings.token_ttl_seconds。"""
     import jwt
 
-    payload = {"sub": user_id, "iat": int(time.time())}
+    ttl = settings.token_ttl_seconds if ttl_seconds is None else ttl_seconds
+    now = time.time()
+    payload = {
+        "sub": user_id,
+        "iat": int(now),
+        "exp": int(now + max(ttl, 0)),
+    }
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
 

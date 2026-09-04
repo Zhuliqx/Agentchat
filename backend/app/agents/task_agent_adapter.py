@@ -107,6 +107,9 @@ class LangChainLLM:
 class _HostExecutor:
     """把每步动作委托给主应用 Supervisor（run_agent）。"""
 
+    def __init__(self, user_id: str = "default") -> None:
+        self.user_id = user_id or "default"
+
     async def __call__(self, request: ExecuteRequest) -> StepResult:
         route = _SOURCE_ROUTE.get(request.source) or _SOURCE_ROUTE["default"]
         question = (route["prefix"] + request.action) if route["prefix"] else request.action
@@ -117,7 +120,7 @@ class _HostExecutor:
                 use_search=route["use_search"],
                 use_memory=False,
                 session_id=f"sub-{uuid.uuid4().hex[:8]}",
-                user_id="default",
+                user_id=self.user_id,
                 resume=None,
                 checkpoint_id=None,
                 on_event=None,
@@ -184,6 +187,7 @@ _host_agent_cache: dict[tuple, Any] = {}
 
 
 def build_host_task_agent(
+    user_id: str = "default",
     on_event: Any | None = None,
 ) -> Any:
     """构建宿主版自主任务 Agent（按配置缓存）。
@@ -192,6 +196,7 @@ def build_host_task_agent(
     以隔离每次请求的 sink（事件不跨请求共享）。
     """
     key = (
+        user_id or "default",
         settings.task_agent_mode,
         settings.task_agent_hitl,
         settings.task_agent_max_retries,
@@ -215,9 +220,9 @@ def build_host_task_agent(
         config=config,
         llm_factory=lambda: LangChainLLM(get_llm("light")),
         checkpointer_provider=get_checkpointer,
-        executor=_HostExecutor(),
+        executor=_HostExecutor(user_id or "default"),
         on_event=on_event,
-        memory=_HostMemory("default") if get_store() is not None else None,
+        memory=_HostMemory(user_id or "default") if get_store() is not None else None,
     )
     if on_event is None:
         _host_agent_cache[key] = agent

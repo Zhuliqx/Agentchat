@@ -52,6 +52,11 @@ async function refreshHealth() {
 }
 
 onMounted(async () => {
+  // token 过期/失效（任意 API 返回 401）→ 清空登录态并弹出登录框
+  window.addEventListener("auth-expired", () => {
+    auth.logoutLocal();
+    auth.openAuth("login");
+  });
   await auth.init();
   refreshHealth();
   await Promise.all([sessions.load(), docs.load(), memory.load()]);

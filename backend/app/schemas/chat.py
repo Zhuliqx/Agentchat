@@ -3,12 +3,20 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
+    """聊天请求体。
+
+    注意：user_id 不属于请求体。长期记忆/知识库的归属一律取
+    Authorization 认证出的用户（extra="forbid" 防止旧客户端用
+    user_id 指定他人命名空间造成越权）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     session_id: Optional[str] = None  # 为空则新建会话（同时作为 Checkpointer 的 thread_id）
-    user_id: Optional[str] = None  # 长期记忆归属用户，默认 "default"
     message: str = Field(..., min_length=1, max_length=20000)
     use_rag: bool = True
     use_search: bool = True

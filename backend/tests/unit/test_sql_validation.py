@@ -41,3 +41,19 @@ def test_rejects_empty():
     assert _validate_readonly("") is not None
     assert _validate_readonly("   ") is not None
     assert _validate_readonly(None) is not None
+
+
+def test_isolation_mode_denies_user_scoped_tables():
+    """多用户隔离模式下，自由 SQL 不允许碰 sessions/messages/documents。"""
+    for sql in [
+        "SELECT * FROM sessions",
+        "SELECT * FROM messages",
+        "SELECT * FROM documents",
+        "SELECT s.id FROM sessions s JOIN messages m ON m.session_id = s.id",
+    ]:
+        assert _validate_readonly(sql, isolation=True) is not None, f"应拒绝: {sql}"
+
+
+def test_isolation_mode_allows_non_scoped_tables():
+    assert _validate_readonly("SELECT * FROM tasks", isolation=True) is None
+    assert _validate_readonly("SELECT COUNT(*) FROM tasks", isolation=True) is None

@@ -1,9 +1,10 @@
 """定时/批处理任务管理接口（配合后台调度器）。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from app.api.deps import require_platform_operator
 from app.db import postgres
 from app.scheduler import TASK_REGISTRY, compute_next_run
 
@@ -85,7 +86,7 @@ def list_tasks():
 
 
 @router.post("", response_model=TaskOut, status_code=201)
-def create_task(body: TaskIn):
+def create_task(body: TaskIn, _operator: str = Depends(require_platform_operator)):
     if body.task_type not in TASK_REGISTRY:
         raise HTTPException(400, f"未知任务类型: {body.task_type}")
     t = postgres.create_task(body.name, body.task_type, body.schedule)
@@ -94,7 +95,7 @@ def create_task(body: TaskIn):
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
-def update_task(task_id: str, body: TaskPatch):
+def update_task(task_id: str, body: TaskPatch, _operator: str = Depends(require_platform_operator)):
     t = postgres.update_task(task_id, name=body.name, schedule=body.schedule, enabled=body.enabled)
     if not t:
         raise HTTPException(404, "任务不存在")
@@ -105,13 +106,13 @@ def update_task(task_id: str, body: TaskPatch):
 
 
 @router.delete("/{task_id}", status_code=204)
-def delete_task(task_id: str):
+def delete_task(task_id: str, _operator: str = Depends(require_platform_operator)):
     if not postgres.delete_task(task_id):
         raise HTTPException(404, "任务不存在")
 
 
 @router.post("/{task_id}/run", response_model=TaskOut)
-async def run_now(task_id: str):
+async def run_now(task_id: str, _operator: str = Depends(require_platform_operator)):
     """立即执行一次（手动触发，不改变调度）。"""
     t = postgres.get_task(task_id)
     if not t:

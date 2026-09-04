@@ -1,15 +1,10 @@
-"""受限 Python 代码执行器（子进程隔离 + 安全沙箱）。
+"""Python 代码执行器（默认一次性容器沙箱）。
 
-供 code_agent 使用：在**独立子进程**中执行用户代码片段，返回 stdout / 错误。
-设计（对本地个人使用场景的务实防护）：
-- **子进程隔离**：代码在独立 Python 进程运行，主进程用 `subprocess.run(timeout=...)`
-  强制超时 kill——即使单行死循环（如 `while True: pass`）也能可靠中断
-- **危险能力禁用**：文件读写、网络、子进程、系统调用、危险内置（open/eval/exec）
-- **模块白名单**：math/json/datetime/random/collections 等纯计算标准库
-- **输出截断**：限制 stdout/stderr 长度，防止刷屏
-- **无持久状态**：每次执行全新 globals，不保留上次状态
-
-> ⚠️ 这是"受限沙箱"，不是强隔离（如 Docker/seccomp）。若需运行不可信代码，请改用容器隔离。
+供 code_agent 使用，安全边界在容器层：
+- code_exec_mode=docker（默认）：docker run --network none --read-only、非 root、
+  drop capabilities、禁提权、CPU/内存/PID 限额，代码经 stdin 传入；
+- code_exec_mode=subprocess：旧式本机子进程 + 内置白名单，**仅本地调试用，
+  不是安全边界**（对象图可逃逸，勿用于不可信代码）。
 """
 from __future__ import annotations
 
@@ -20,11 +15,13 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from contextlib import redirect_stderr, redirect_stdout
 
 from app.config import BASE_DIR as _BACKEND_DIR
+from app.config import settings
 
-# 允许暴露给代码的安全内置子集（纯计算/常用工具，无 IO/系统能力）
+# 允许暴露给代码的安全内置子集（仅 subprocess 调试模式使用）
 _ALLOWED_BUILTIN_NAMES = frozenset(
     {
         "print", "len", "range", "enumerate", "zip", "map", "filter", "sorted",
@@ -42,7 +39,7 @@ _ALLOWED_BUILTIN_NAMES = frozenset(
     }
 )
 
-# 允许 import 的模块白名单（仅纯计算 / 标准数据结构）
+# 允许 import 的模块白名单（仅 subprocess 调试模式使用）
 _ALLOWED_MODULES = frozenset(
     {
         "math", "json", "datetime", "random", "collections", "itertools",
@@ -105,12 +102,8 @@ def _run_isolated(code: str, timeout: float, max_output: int) -> dict:
     return result
 
 
-def execute_code(code: str, timeout: float = 15.0, max_output: int = 8000) -> dict:
-    """在独立子进程中执行 Python 代码，返回 {"stdout", "stderr", "error"}。
-
-    子进程由 subprocess 管理：`timeout` 超时后强制 kill，
-    即使单行死循环也能可靠中断，且隔离主进程状态。
-    """
+def _run_subprocess(code: str, timeout: float, max_output: int) -> dict:
+    """旧式本机子进程执行（仅调试用，不是安全边界）。"""
     script = (
         "import json, sys\n"
         f"sys.path.insert(0, {str(_BACKEND_DIR)!r})\n"
@@ -144,3 +137,88 @@ def execute_code(code: str, timeout: float = 15.0, max_output: int = 8000) -> di
             "error": "执行器异常：无法解析子进程输出",
         }
     return result
+
+
+def _run_docker(code: str, timeout: float, max_output: int) -> dict:
+    """在一次性容器中执行代码（安全边界）。
+
+    容器参数：无网络、根文件系统只读、非 root、drop 全部 capabilities、
+    禁提权、CPU/内存/PID 限额；代码经 stdin 传入，结果经 stdout JSON 返回。
+    """
+    name = f"agentchat-code-{uuid.uuid4().hex[:12]}"
+    cmd = [
+        "docker", "run", "--rm", "-i",
+        "--name", name,
+        "--network", "none",
+        "--read-only",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--user", "10001:10001",
+        "--memory", "256m",
+        "--memory-swap", "256m",
+        "--cpus", "0.5",
+        "--pids-limit", "64",
+        "--stop-timeout", "2",
+        settings.code_exec_image,
+        str(timeout), str(max_output),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=code.encode("utf-8"),
+            capture_output=True,
+            timeout=timeout + 6.0,  # 容器启动/退出留余量
+        )
+    except FileNotFoundError:
+        return {
+            "stdout": "",
+            "stderr": "",
+            "error": "Docker CLI 不可用：code_exec_mode=docker 需要本机可执行 docker",
+        }
+    except subprocess.TimeoutExpired:
+        try:
+            # 宿主超时杀掉 docker CLI 后容器可能残留：按名字强制清理
+            subprocess.run(
+                ["docker", "rm", "-f", name],
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception:
+            pass
+        return {
+            "stdout": "",
+            "stderr": "",
+            "error": f"代码执行超过 {timeout:.0f}s 限制（容器已强制终止）",
+        }
+
+    if proc.returncode != 0:
+        return {
+            "stdout": "",
+            "stderr": proc.stderr.decode("utf-8", "ignore")[:max_output],
+            "error": (
+                f"容器执行失败（exit={proc.returncode}）："
+                "请确认已构建镜像 docker build -t agentchat-code-runner "
+                "-f backend/docker/code-runner/Dockerfile backend/docker/code-runner"
+            ),
+        }
+    try:
+        return json.loads(proc.stdout.decode("utf-8", "ignore"))
+    except (ValueError, UnicodeDecodeError):
+        return {
+            "stdout": "",
+            "stderr": proc.stderr.decode("utf-8", "ignore")[:max_output],
+            "error": "执行器异常：无法解析容器输出",
+        }
+
+
+def execute_code(code: str, timeout: float = 15.0, max_output: int = 8000) -> dict:
+    """执行不可信 Python 代码，返回 {"stdout", "stderr", "error"}。
+
+    code_exec_mode=docker（默认）：一次性容器 + 网络/文件系统/资源限制，
+    这是唯一的安全边界；subprocess 仅用于本地调试。
+    """
+    mode = getattr(settings, "code_exec_mode", "subprocess").lower()
+    if mode == "docker":
+        return _run_docker(code, timeout, max_output)
+    return _run_subprocess(code, timeout, max_output)
