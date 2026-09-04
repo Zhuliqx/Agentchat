@@ -19,7 +19,11 @@ from typing import Any
 from task_agent.config import TaskAgentConfig
 from task_agent.executor import ExecuteRequest, StepResult
 from task_agent.graph import build_agent, list_task_history  # noqa: F401 - 供路由统一导入
-from task_agent.memory import tokenize
+
+try:
+    from task_agent.memory import tokenize  # agentchat-task-agent >= 0.1.3
+except ImportError:  # 兼容已发布的 0.1.2（公开 tokenize 尚未发布）：回退旧私有 _tokens
+    from task_agent.memory import _tokens as tokenize  # type: ignore[no-redef]
 
 from langchain_core.messages import HumanMessage
 
