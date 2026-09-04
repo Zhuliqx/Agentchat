@@ -451,3 +451,107 @@ def test_platform_tasks_requires_admin_when_users_exist(client, monkeypatch):
                 if u:
                     db.delete(u)
             db.commit()
+
+
+def test_cross_user_document_file_denied(client):
+    """A 上传的原始文件，B 即使知道 source 也不能读取。"""
+    import uuid as _uuid
+
+    from app.api.routes.rag import UPLOAD_ROOT
+    from app.db.models import Document, User
+    from app.db.postgres import SessionLocal
+
+    suffix = _uuid.uuid4().hex[:8]
+
+    def _register(name: str) -> tuple[str, str, str]:
+        r = client.post(
+            "/api/auth/register", json={"username": name, "password": "pw-123456"}
+        )
+        assert r.status_code == 201, r.text
+        uid = r.json()["id"]
+        login = client.post(
+            "/api/auth/login", json={"username": name, "password": "pw-123456"}
+        )
+        return uid, login.json()["token"], name
+
+    uid_a, token_a, _ = _register(f"file_a_{suffix}")
+    uid_b, token_b, _ = _register(f"file_b_{suffix}")
+    dest_dir = UPLOAD_ROOT / _uuid.uuid4().hex
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    source_file = dest_dir / f"secret_{suffix}.txt"
+    source_file.write_text(f"仅 A 可见 {suffix}", encoding="utf-8")
+    source = str(source_file.resolve())
+    try:
+        with SessionLocal() as db:
+            db.add(
+                Document(
+                    id=_uuid.uuid4().hex,
+                    user_id=uid_a,
+                    filename=source_file.name,
+                    source=source,
+                    chunk_index=0,
+                    text="x",
+                    metadata_json="{}",
+                    vector_status="synced",
+                )
+            )
+            db.commit()
+        headers_a = {"Authorization": f"Bearer {token_a}"}
+        headers_b = {"Authorization": f"Bearer {token_b}"}
+        ok = client.get("/api/rag/documents/file", params={"source": source}, headers=headers_a)
+        assert ok.status_code == 200
+        denied = client.get("/api/rag/documents/file", params={"source": source}, headers=headers_b)
+        assert denied.status_code == 404
+        assert "detail" in denied.text
+    finally:
+        with SessionLocal() as db:
+            db.query(Document).filter(Document.source == source).delete(
+                synchronize_session=False
+            )
+            for uid in (uid_a, uid_b):
+                u = db.get(User, uid)
+                if u:
+                    db.delete(u)
+            db.commit()
+        import shutil
+
+        shutil.rmtree(dest_dir, ignore_errors=True)
+
+
+def test_task_thread_cross_user_rejected(client):
+    """他人任务线程 id 无法被 run/history/confirm 使用。"""
+    import uuid as _uuid
+
+    from app.db.models import User
+    from app.db.postgres import SessionLocal
+
+    suffix = _uuid.uuid4().hex[:8]
+    ids: list[str] = []
+    tokens: dict[str, str] = {}
+    for role in ("taska", "taskb"):
+        name = f"{role}_{suffix}"
+        r = client.post(
+            "/api/auth/register", json={"username": name, "password": "pw-123456"}
+        )
+        assert r.status_code == 201, r.text
+        uid = r.json()["id"]
+        ids.append(uid)
+        login = client.post(
+            "/api/auth/login", json={"username": name, "password": "pw-123456"}
+        )
+        tokens[role] = login.json()["token"]
+    try:
+        # B 尝试沿用 A 前缀的任务会话（无需真实任务，校验阶段即 404）
+        r = client.post(
+            "/api/agent-tasks/run",
+            json={"goal": "测试", "session_id": f"{ids[0]}:task-deadbeefcafe"},
+            headers={"Authorization": f"Bearer {tokens['taskb']}"},
+        )
+        assert r.status_code == 404, r.text
+    finally:
+        with SessionLocal() as db:
+            for uid in ids:
+                u = db.get(User, uid)
+                if u:
+                    db.delete(u)
+            db.commit()

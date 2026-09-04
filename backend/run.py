@@ -6,7 +6,8 @@ uvicorn 默认在 Windows 使用 ProactorEventLoop，而 psycopg 异步模式
 通过 uvicorn 的 `loop` 参数传入 SelectorEventLoop 工厂，双保险。
 
 用法:
-    python run.py            # 默认 0.0.0.0:8000
+    python run.py            # 监听 settings.host / settings.port（默认 127.0.0.1:8000）
+                             # 生产/容器部署请通过 .env 设 HOST=0.0.0.0
 """
 from __future__ import annotations
 
