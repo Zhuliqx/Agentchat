@@ -318,7 +318,7 @@ def ingest_file(
             db.commit()
 
     # 7. 失效文档集签名缓存（使 BM25 关键词通道立即包含新文档）
-    invalidate_docs_signature()
+    invalidate_docs_signature(user_id)
     _progress(100, "完成")
 
     return {

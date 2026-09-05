@@ -6,14 +6,17 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import threading
 import time
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import func, select
 
+from app.cache.redis_client import get_redis, redis_key
 from app.config import settings
 from app.db.models import Document
 from app.db.postgres import SessionLocal
@@ -31,33 +34,88 @@ _EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 
 # 文档集签名的短 TTL 缓存（按用户隔离）：避免每次检索都查一次 COUNT/MAX（摄入后主动失效）。
 _SIGNATURE_TTL = 5.0
-_signature_cache: dict[str, dict[str, Any]] = {}  # user_id -> {"ts": float, "value": tuple}
+_signature_cache: dict[str, dict[str, Any]] = {}  # Redis 不可用时的进程内回退
 _signature_lock = threading.Lock()  # 双通道并行后 _docs_signature 可能被多线程并发访问
 
 
-def _docs_signature(user_id: str = "default") -> tuple:
-    """文档集签名：该用户的行数 + 最新创建时间（TTL 缓存），用于 BM25 索引失效判断。"""
-    now = time.monotonic()
+def _signature_key(user_id: str) -> str:
+    """文档集签名在 Redis 中的 key（带统一前缀与业务域）。"""
+    return redis_key("rag", "sig", user_id)
+
+
+def _encode_signature(value: tuple) -> str:
+    """签名序列化为 JSON 数组：行数 + 最新创建时间（无行时为 null）。"""
+    count, latest = value
+    return json.dumps([int(count), latest.isoformat() if latest else None])
+
+
+def _decode_signature(raw: str | bytes) -> tuple:
+    count, latest = json.loads(raw)
+    return int(count), datetime.fromisoformat(latest) if latest else None
+
+
+def _remember_signature(user_id: str, value: tuple) -> None:
+    """写入本进程签名缓存（Redis 不可用时的回退层）。"""
     with _signature_lock:
-        entry = _signature_cache.get(user_id)
-        if entry is not None and now - entry["ts"] < _SIGNATURE_TTL:
-            return entry["value"]
+        _signature_cache[user_id] = {"ts": time.monotonic(), "value": value}
+
+
+def _forget_signature(user_id: str) -> None:
+    """删除本进程与 Redis 中的签名缓存。"""
+    with _signature_lock:
+        _signature_cache.pop(user_id, None)
+    client = get_redis()
+    if client is not None:
+        try:
+            client.delete(_signature_key(user_id))
+        except Exception:  # noqa: BLE001
+            pass  # Redis 故障时只清内存；5 秒 TTL 也会自动淘汰旧 key
+
+
+def _query_docs_signature(user_id: str) -> tuple:
+    """从 Postgres 计算文档集签名（调用方负责缓存）。"""
     with SessionLocal() as db:
         count, latest = db.execute(
             select(func.count(), func.max(Document.created_at)).select_from(Document).where(
                 Document.user_id == user_id
             )
         ).one()
-    value = (count or 0, latest)
+    return (count or 0, latest)
+
+
+def _docs_signature(user_id: str = "default") -> tuple:
+    """文档集签名：该用户行数 + 最新创建时间；Redis 优先，用于跨 worker 共享。"""
+    key = _signature_key(user_id)
+    client = get_redis()
+    if client is not None:
+        try:
+            raw = client.get(key)
+        except Exception:  # noqa: BLE001
+            pass  # Redis 故障时走进程内缓存，避免检索失败
+        else:
+            if raw is not None:
+                return _decode_signature(raw)
+            value = _query_docs_signature(user_id)
+            try:
+                client.set(key, _encode_signature(value), ex=int(_SIGNATURE_TTL))
+            except Exception:  # noqa: BLE001
+                pass
+            return value
+
+    # Redis 未启用或不可用：使用/填充进程内缓存
+    now = time.monotonic()
     with _signature_lock:
-        _signature_cache[user_id] = {"ts": now, "value": value}
+        entry = _signature_cache.get(user_id)
+        if entry is not None and now - entry["ts"] < _SIGNATURE_TTL:
+            return entry["value"]
+    value = _query_docs_signature(user_id)
+    _remember_signature(user_id, value)
     return value
 
 
-def invalidate_docs_signature() -> None:
-    """文档变化（摄入/删除）后立即失效签名缓存，使 BM25 索引重建。"""
-    with _signature_lock:
-        _signature_cache.clear()
+def invalidate_docs_signature(user_id: str) -> None:
+    """该用户文档变化（摄入/删除）后失效签名，使 BM25 索引及时重建。"""
+    _forget_signature(user_id)
 
 
 @lru_cache(maxsize=16)

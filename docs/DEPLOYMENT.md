@@ -38,7 +38,7 @@ flowchart TB
 | 状态 | 位置 | 多 worker 后果 | 影响 |
 |------|------|---------------|------|
 | `_graph_cache`（supervisor 图） | `app/agents/graph.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
-| `_bm25_index` / `_signature_cache` | `app/rag/hybrid.py` | 每 worker 各一份内存索引 | 内存翻倍 |
+| `_bm25_index` / `_signature_cache` | `app/rag/hybrid.py` | 签名缓存可经 Redis 共享；BM25 内存索引仍每 worker 一份 | 默认各一份（可接受） |
 | `_INGEST_TASKS`（摄入任务表） | `app/api/routes/rag.py` | Redis 未启用时 A worker 上传、B worker 查不到任务；启用后快照同步 Redis | 默认功能错误；启用后解决 |
 | `run_id → sources`（引用溯源） | `app/agents/tools/sources.py` | 仅服务于当次执行内的流式事件；最终来源已写入 `Message.sources` | 无功能影响 |
 | `_host_agent_cache`（任务 Agent 图） | `app/agents/task_agent_adapter.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
@@ -57,12 +57,11 @@ flowchart TB
 
 ### 阶段 2（多 worker）：共享缓存 + 落库
 > 当需要 uvicorn `--workers N` 时，把 `REDIS_ENABLED=true`
-> （登录失败计数与摄入任务进度已自动共享），再迁移以下进程内状态：
+> （登录失败计数、摄入任务进度与文档集签名已自动共享）。以下状态无需迁移或保持取舍：
 
 | 改动 | 做法 | 收益 |
 |------|------|------|
 | `run_id → sources` 持久化 | 无需额外改动：最终来源已随 assistant 消息写入 `Message.sources` | 溯源不丢 |
-| `_signature_cache` / BM25 | 签名缓存放 Redis；BM25 接受每 worker 重建（块 <5000 成本低） | 一致性与内存可控 |
 | `_graph_cache` | 保留每 worker 重建（图构建 ~秒级，预热即可） | 无需改 |
 
 ### 阶段 3（多副本 / 高可用）

@@ -367,7 +367,7 @@ def _delete_document_by_source(source: str, user_id: str) -> dict:
         )
         db.commit()
     # 失效文档集签名缓存（使 BM25 关键词通道立即排除被删文档）
-    invalidate_docs_signature()
+    invalidate_docs_signature(user_id)
     # 原始文件在 uploads 内时一并删除（整个 <uuid>/ 目录）
     path = Path(source)
     if _safe_source_in_uploads(path):
