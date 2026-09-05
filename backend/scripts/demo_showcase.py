@@ -48,6 +48,7 @@ class Showcase:
     def __init__(self, base: str) -> None:
         self.client = httpx.Client(timeout=180)
         self.base = base
+        self.last_task_session: str | None = None
 
     def _post(self, path: str, payload: dict) -> dict:
         r = self.client.post(self.base + path, json=payload)
@@ -74,7 +75,8 @@ class Showcase:
 
     def scenario2_hitl(self) -> None:
         _sep("场景 2：HITL 人工确认 → resume 恢复")
-        session_id = f"hitl-demo-{uuid.uuid4().hex[:8]}"
+        created = self._post("/api/sessions", {})
+        session_id = created["id"]
         r = self._post(
             "/api/chat",
             {
@@ -92,7 +94,7 @@ class Showcase:
         resume = self._post(
             "/api/chat",
             {
-                "message": "",
+                "message": "继续",
                 "use_rag": False,
                 "use_search": False,
                 "session_id": session_id,
@@ -115,12 +117,14 @@ class Showcase:
                 "/api/agent-tasks/confirm",
                 {"session_id": sid, "verb": "proceed"},
             )
+        self.last_task_session = r.get("session_id") or self.last_task_session
         _dump("任务结果", r)
         print(f"\n最终交付：{(r.get('final_answer') or '')[:300]}")
 
     def scenario4_time_travel(self) -> None:
         _sep("场景 4：Time Travel（checkpoint 历史，可回退/分叉）")
-        r = self._post("/api/agent-tasks/history", {"session_id": "demo-task", "limit": 5})
+        session_id = self.last_task_session or "default:demo-task"
+        r = self._post("/api/agent-tasks/history", {"session_id": session_id, "limit": 5})
         hist = r.get("history") or []
         print(f"共 {len(hist)} 条 checkpoint：")
         for h in hist[:5]:
