@@ -1,7 +1,7 @@
 # Multi-Agent Platform 项目详解（10 分钟总览）
 
 > 相关文档：见 [文档地图](README.md)；实现细节以代码注释与 [ARCHITECTURE](ARCHITECTURE.md) 为准。
-> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 从零理解本项目：是什么、怎么组织、怎么跑、核心机制、设计决策。
 
@@ -12,7 +12,7 @@
 - **RAG Agent**：知识库问答（向量检索 + 生成）
 - **MCP Agent**：数据库查询、时间计算、外部工具
 - **web_search**：Tavily 直接联网搜索工具（非子 Agent）
-- **code_agent**：受限沙箱执行 Python（计算 / 算法 / 数据处理）
+- **code_agent**：默认容器沙箱执行 Python（计算 / 算法 / 数据处理）
 - **记忆工具**：三层记忆（短期 / 运行时 / 长期）
 
 数据层：**Milvus**（向量库，Postgres 为事实源、派生索引由 `reconcile_vectors` 对账）+ **PostgreSQL**（关系库）。
@@ -75,7 +75,7 @@ sequenceDiagram
     participant M as MCP管理器
     U->>U: Windows 设置 SelectorEventLoop
     U->>L: uvicorn 启动 app.main:app
-    L->>DB: init_db() 建表 + 索引（含 vector_status 迁移）
+    L->>DB: run_migrations() Alembic 建表/索引 → init_db() 补访客用户
     L->>MV: ensure_vector_store() 建collection + 索引 + 维度校验
     L->>DB: init_checkpointer() → AsyncPostgresSaver
     L->>DB: init_store() → AsyncPostgresStore（无pgvector则降级）

@@ -1,6 +1,6 @@
 # 系统架构
 
-> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 1. 文档地图（本仓库两个项目）
 
@@ -213,7 +213,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 - **LLM 重试/超时**：所有 OpenAI 兼容 provider（DeepSeek/DashScope/OpenAI）统一 `timeout`（60s）+ `max_retries`（2），网络抖动自动重试。
 - **模型预热**：rerank 模型在应用启动后后台线程预热，避免首个 RAG 请求卡顿（首次需下载约 1.1GB）。
 - **rerank 候选受限**：仅对 `rerank_candidate_k`（默认 6）条候选精排，输入按 `rerank_max_length` 截断，控制 CPU 推理量。
-- **数据库索引**：`sessions.updated_at` / `documents.created_at` 建 DESC 索引，`init_db()` 幂等补建，加速会话/文档列表排序。
+- **数据库索引**：`sessions.updated_at` / `documents.created_at` 建 DESC 索引，由 Alembic 迁移创建，加速会话/文档列表排序。
 
 ## 10. 数据流（一次对话，SSE token 级流式）
 

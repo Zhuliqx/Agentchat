@@ -1,7 +1,7 @@
 # 环境搭建（Setup）
 
 > 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
-> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 本文档说明如何在 Windows（Docker Desktop 运行数据库）上把项目跑起来。
 
@@ -97,9 +97,17 @@ Copy-Item .env.example .env
 python scripts/init_db.py
 ```
 
-- 创建 Postgres 表（sessions / messages / documents）
+- Alembic 迁移全部业务表（users / sessions / messages / documents / tasks / app_settings）
 - 创建 Milvus collection（`agent_documents`）
 - Checkpointer / Store 所需的表由应用启动时（lifespan）自动创建，无需手动操作
+- 确保内置访客用户存在
+
+> **代码沙箱镜像（可选但推荐）**：代码 Agent 默认 `CODE_EXEC_MODE=docker`，
+> 使用前先构建 runner 镜像：
+> ```powershell
+> docker build -t agentchat-code-runner -f backend/docker/code-runner/Dockerfile backend/docker/code-runner
+> ```
+> Docker Hub 不可达时可加 `--build-arg PYTHON_BASE=docker.1ms.run/library/python:3.12-slim`。
 
 ## 5. 摄入知识库文档
 

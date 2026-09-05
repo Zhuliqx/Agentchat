@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-02（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -23,7 +23,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 | **206 / 22**（另有 task-agent 独立包 **101**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 | **239 / 33**（另有 task-agent 独立包 **101**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
 ## 项目构成
@@ -64,7 +64,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **流式输出（SSE）**：`POST /api/chat/stream` **token 级流式**——Agent 调度事件实时推送，工具调用前先一次性推送完整开场白、工具完成后的答案逐 token 推送（自动去重重复前缀），前端实时渲染；同步 DB 调用放线程池，不阻塞事件循环
 - **人工确认（HITL）**：基于 LangGraph `interrupt`/`Command(resume)` 机制，前端弹出确认卡片，用户确认/取消后从断点继续（同一 `thread_id`）。**默认 LLM 自主判定**（类似 Claude Code/Codex）：由模型根据操作影响自主决定是否请求用户授权（`request_confirmation` 工具）；也可配置 `HITL_ACTIONS` 切换为**强制确认**（调用前无条件中断；有开关的动作在开关打开时自动豁免）
 - **版本历史（Time Travel）**：基于 Checkpointer 的 checkpoint 版本链，前端可查看会话**每一步的历史状态**（时间线 + 摘要），并**从任意历史步骤分叉重新生成**（产生新分支，不影响原历史）；`GET /api/sessions/{id}/checkpoints` 拉取历史，`/api/chat(/stream)` 传 `checkpoint_id` 触发分叉
-- **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未登录访客自动归入 `default` 用户（不破坏单用户体验）；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
+- **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未携带 Authorization 头时归入 `default` 访客（不破坏单用户体验），带过期/无效 token 则返回 401；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
 - **知识库按用户隔离**：文档（Postgres + Milvus 向量）按 `user_id` 隔离，不同用户的知识库互不可见（上传/检索/删除/预览均校验归属）；`ingest_docs.py` 可用 `--user` 指定归属用户
 - **Prompt 注入防护**：检索/搜索外部内容按「不可信数据块」隔离；中英规则库检测命中即剔除+告警，用户 query 含注入指令直接拒绝（`INJECTION_DETECTION_ENABLED`）；可选 LLM 复核降误报（`INJECTION_LLM_REVIEW`）；输出侧泄露检测（系统提示词片段/密钥模式，`INJECTION_OUTPUT_FILTER`）
 - **会话数据分析**：`GET /api/sessions/{id}/stats` 返回消息数/回合数/Token 估算/平均回复长度/对话时长等，前端「📊 分析」面板可视化
@@ -134,7 +134,7 @@ Agentchat/
 │   │   ├── evaluation/       # 评估（LLM-judge / 四指标聚合 / 指纹去重）
 │   │   ├── security.py       # 密码哈希 + JWT（用户认证）
 │   │   ├── observability.py  # Langfuse 可观测（handler 工厂 + fail-open）
-│   │   ├── scheduler.py      # 定时/批处理任务调度器（asyncio，零依赖）
+│   │   ├── scheduler.py      # 定时/批处理任务调度器（asyncio + PG advisory lock 选主，不依赖 APScheduler）
 │   │   ├── event_loop.py     # Windows ProactorEventLoop 兼容修复
 │   │   └── schemas/          # Pydantic 请求/响应模型
 │   ├── data/                 # 应用运行时数据（model_choice.json + eval/ 评估产物）
@@ -176,6 +176,9 @@ Copy-Item .env.example .env   # 编辑 .env（默认 DeepSeek；也可切 DashSc
 python scripts/init_db.py
 python scripts/ingest_docs.py D:\your_docs_folder
 
+# 可选但推荐：构建代码沙箱镜像（代码 Agent 默认 docker 模式）
+docker build -t agentchat-code-runner -f backend/docker/code-runner/Dockerfile backend/docker/code-runner
+
 # 4. 构建前端（frontend-v2，首次）
 cd ..\frontend-v2
 npm install
@@ -206,11 +209,11 @@ python run.py
 | GET | `/api/sessions/{id}/checkpoints` | **版本历史（Time Travel）**：会话 checkpoint 时间线 |
 | GET | `/api/sessions/{id}/export` | 导出会话为 Markdown |
 | POST | `/api/sessions/batch-delete` | 批量删除会话（含消息与 checkpoint） |
-| GET/POST | `/api/tasks` | 定时任务列表 / 新建 |
+| GET/POST | `/api/tasks` | 定时任务列表（公开）/ 新建（需平台操作员权限） |
 | GET | `/api/models` | 可用模型列表 + 当前选择（运行时模型切换） |
 | PUT | `/api/models/current` | 切换当前模型（持久化 + 清缓存，立即生效） |
-| PATCH/DELETE | `/api/tasks/{id}` | 修改（启停/调度）/ 删除任务 |
-| POST | `/api/tasks/{id}/run` | 立即执行一次任务 |
+| PATCH/DELETE | `/api/tasks/{id}` | 修改（启停/调度）/ 删除任务（需平台操作员权限） |
+| POST | `/api/tasks/{id}/run` | 立即执行一次任务（需平台操作员权限） |
 | GET | `/api/tasks/registry` | 可用任务类型 |
 | POST | `/api/rag/upload` | 上传文档（原始文件持久保存到 `data/uploads/`） |
 | POST | `/api/rag/search?query=` | 检索测试接口（混合检索 + 可选 rerank，与 RAG Agent 同路径） |
@@ -249,7 +252,8 @@ python run.py
 | `HF_OFFLINE` | `true` | 模型离线加载（HF 网络不可达时避免联网 HEAD 卡住） |
 | `LOG_LEVEL` | `INFO` | 日志级别（DEBUG / INFO / WARNING / ERROR） |
 | `MAX_UPLOAD_MB` | `50` | 上传文档大小上限（MB），超限返回 413 |
-| `AUTH_SECRET` | 开发默认值 | JWT 签名密钥（**生产务必改为强随机值**） |
+| `UPLOAD_MAX_CONCURRENCY` | `2` | 后台摄入最大并发数 |
+| `AUTH_SECRET` | 开发默认值 | JWT 签名密钥（**生产务必改为强随机值**；对外监听时若仍为默认值或长度 <32，应用拒绝启动） |
 | `TOKEN_TTL_SECONDS` | `604800` | JWT 有效期（秒），默认 7 天 |
 | `CODE_AGENT_ENABLED` | `true` | 是否启用代码执行 Agent |
 | `CODE_EXEC_MODE` | `docker` | 代码沙箱：docker=一次性容器（默认，安全边界）；subprocess=仅本地调试 |
@@ -303,7 +307,7 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 
 查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照）。
 
-CI（`.github/workflows/ci.yml`）：Ruff 检查（F 级错误）→ Pyright 类型检查（非阻塞）→ 单元测试。
+CI（`.github/workflows/ci.yml`）：Ruff 检查（F/E7/E9）→ Pyright 类型检查（非阻塞）→ 单元测试。
 
 ## License
 

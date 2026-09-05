@@ -1,7 +1,7 @@
 # 部署与扩展性指南
 
 > 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
-> 最后校验：2026-08-29（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 > 目的：说明本项目当前的**单机部署模型**、为什么这么选（取舍）、以及在何时、如何演进到
 > 多 worker / 多副本。这是架构决策记录，供运维排障与扩展参考。
@@ -39,7 +39,7 @@ flowchart TB
 | `_graph_cache`（supervisor 图） | `app/agents/graph.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
 | `_bm25_index` / `_signature_cache` | `app/rag/hybrid.py` | 每 worker 各一份内存索引 | 内存翻倍 |
 | `_INGEST_TASKS`（摄入任务表） | `app/api/routes/rag.py` | A worker 上传，B worker 查不到任务 | **功能错误** |
-| `_RAG_SOURCES`（引用溯源） | `app/agents/tools/sources.py` | 溯源丢失 | 功能降级 |
+| `run_id → sources`（引用溯源） | `app/agents/tools/sources.py` | 仅服务于当次执行内的流式事件；最终来源已写入 `Message.sources` | 无功能影响 |
 | `_host_agent_cache`（任务 Agent 图） | `app/agents/task_agent_adapter.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
 | `lru_cache`（embedder/reranker） | `app/rag/*` | 每 worker 一份模型实例 | 内存翻倍（~2GB） |
 
@@ -58,7 +58,7 @@ flowchart TB
 | 改动 | 做法 | 收益 |
 |------|------|------|
 | `_INGEST_TASKS` 落库 | 摄入任务写入 Postgres（复用 `tasks` 表思路） | 任意 worker 可查任务进度 |
-| `_RAG_SOURCES` 持久化 | 直接依赖已持久化的 `Message.sources`（检索工具写入） | 溯源不丢 |
+| `run_id → sources` 持久化 | 无需额外改动：最终来源已随 assistant 消息写入 `Message.sources` | 溯源不丢 |
 | `_signature_cache` / BM25 | 签名缓存放 Redis；BM25 接受每 worker 重建（块 <5000 成本低） | 一致性与内存可控 |
 | `_graph_cache` | 保留每 worker 重建（图构建 ~秒级，预热即可） | 无需改 |
 

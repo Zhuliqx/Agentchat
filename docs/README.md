@@ -2,7 +2,7 @@
 
 > 本仓库为**项目 1 · Agentchat** 主应用；**项目 2 · task-agent** 已拆为独立仓库
 > （发行名 `agentchat-task-agent`，地址见 [AGENT_TASK](AGENT_TASK.md)）。这里是主仓库的文档索引与**唯一基线数字**。
-> 最后校验：2026-08-29（防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-05（防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 文档类型速查
 
@@ -26,6 +26,6 @@
 | Agent route@1 / 危险操作拒绝 | **1.0 / 1.0** | 17 条 × 3 采样 |
 | 检索 p50 / 吞吐（单 worker） | 82ms / ~16 QPS | 性能快照 |
 | Embedding Hit@1（4 模型对比） | **0.975**（bge-small-zh） | 来源级 |
-| 测试规模 | **206 单测 / 22 集成 / task-agent 101** | pytest 收集数（2026-09-02）；覆盖率沿用既有快照（app 41% / task-agent 87%） |
+| 测试规模 | **239 单测 / 33 集成 / task-agent 101** | pytest 收集数（2026-09-05）；覆盖率沿用既有快照（app 41% / task-agent 87%） |
 
 > 数字只在本表维护；各篇文档引用本表或标注为历史快照，不再各自维护当前基线。
