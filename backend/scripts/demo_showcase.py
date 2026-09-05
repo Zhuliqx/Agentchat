@@ -19,7 +19,6 @@ import argparse
 import io
 import json
 import sys
-import uuid
 from typing import cast
 
 import httpx
