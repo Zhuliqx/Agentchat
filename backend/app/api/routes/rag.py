@@ -8,9 +8,11 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -20,8 +22,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.config import PROJECT_ROOT, settings
 from app.api.deps import get_current_user_id
+from app.cache.redis_client import get_redis, redis_key
+from app.config import PROJECT_ROOT, settings
 from app.db.postgres import SessionLocal
 from app.db.models import Document
 from app.rag import vector_store
@@ -42,11 +45,14 @@ _UPLOAD_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="rag-ingest",
 )
 
-# 后台摄入任务注册表（进程内；重启清空，前端轮询时 404 即视为任务已消失）
+# 摄入任务注册表：内存保存最新状态；REDIS_ENABLED=true 时同步 Redis 快照
+#（TTL 24h），多 worker 下任意进程都能查到进度。重启后执行中的任务无法继续，
+# Redis 快照会随 TTL 过期，与“任务已消失”语义一致。
 _INGEST_TASKS: dict[str, dict] = {}
 _INGEST_LOCK = threading.Lock()
 # 最多保留多少条已完成任务（超出后丢弃最旧的，防止内存无限增长）
 _MAX_FINISHED_TASKS = 20
+_INGEST_TASK_TTL_SEC = 24 * 60 * 60
 
 
 def _safe_source_in_uploads(path: Path) -> bool:
@@ -73,6 +79,7 @@ def _guess_media(path: Path) -> str:
 
 def _prune_finished_tasks() -> None:
     """丢弃最旧的已完成任务（内存上限保护）。"""
+    # Redis 端由 TTL 自动清理，这里只限制本进程内存占用
     with _INGEST_LOCK:
         finished = [
             (ts, k)
@@ -84,39 +91,87 @@ def _prune_finished_tasks() -> None:
             _INGEST_TASKS.pop(k, None)
 
 
+def _ingest_task_key(task_id: str) -> str:
+    """摄入任务状态的 Redis key（带统一前缀与业务域）。"""
+    return redis_key("ingest", "task", task_id)
+
+
+def _sync_ingest_task_to_redis(task_id: str) -> None:
+    """把内存中的最新快照写入 Redis（保留 TTL 24h）。"""
+    with _INGEST_LOCK:
+        task = _INGEST_TASKS.get(task_id)
+        snapshot = dict(task) if task is not None else None
+    if snapshot is None:
+        return
+    client = get_redis()
+    if client is None:
+        return
+    try:
+        client.set(
+            _ingest_task_key(task_id),
+            json.dumps(snapshot, ensure_ascii=False),
+            ex=_INGEST_TASK_TTL_SEC,
+        )
+    except Exception:  # noqa: BLE001
+        pass  # Redis 故障时保留内存状态；降级状态由健康检查体现
+
+
+def _create_ingest_task(task_id: str, task: dict) -> None:
+    """登记新任务：先写内存，再同步 Redis 供其他 worker 查询。"""
+    with _INGEST_LOCK:
+        _INGEST_TASKS[task_id] = task
+    _sync_ingest_task_to_redis(task_id)
+
+
+def _update_ingest_task(task_id: str, **updates: object) -> None:
+    """更新任务字段，并把最新快照同步到 Redis。"""
+    with _INGEST_LOCK:
+        task = _INGEST_TASKS.get(task_id)
+        if task is not None:
+            task.update(updates)
+    _sync_ingest_task_to_redis(task_id)
+
+
+def _read_ingest_task(task_id: str) -> dict | None:
+    """读取任务状态：Redis 优先（跨 worker），缺失/故障时回退本进程内存。"""
+    client = get_redis()
+    if client is not None:
+        try:
+            raw = client.get(_ingest_task_key(task_id))
+            if raw is not None:
+                return json.loads(raw)
+        except Exception:  # noqa: BLE001
+            pass
+    with _INGEST_LOCK:
+        task = _INGEST_TASKS.get(task_id)
+        return dict(task) if task is not None else None
+
+
 def _run_ingest(task_id: str, dest: Path, filename: str, user_id: str) -> None:
     """后台执行摄入，更新任务注册表中的进度/结果。"""
 
     def progress(percent: int, stage: str) -> None:
-        with _INGEST_LOCK:
-            t = _INGEST_TASKS.get(task_id)
-            if t:
-                t["progress"] = percent
-                t["stage"] = stage
+        _update_ingest_task(task_id, progress=percent, stage=stage)
 
     try:
-        with _INGEST_LOCK:
-            t = _INGEST_TASKS.get(task_id)
-            if t:
-                t["status"] = "processing"
+        _update_ingest_task(task_id, status="processing")
         result = ingest_file(dest, filename=filename, user_id=user_id, progress_cb=progress)
-        with _INGEST_LOCK:
-            t = _INGEST_TASKS.get(task_id)
-            if t:
-                t.update(status="done", progress=100, stage="完成", result=result)
+        _update_ingest_task(
+            task_id,
+            status="done",
+            progress=100,
+            stage="完成",
+            result=result,
+            finished_at=time.time(),
+        )
     except Exception as exc:  # 摄入失败：清理原始文件并记录错误
         shutil.rmtree(dest.parent, ignore_errors=True)
-        with _INGEST_LOCK:
-            t = _INGEST_TASKS.get(task_id)
-            if t:
-                t.update(status="error", error=str(exc))
-    finally:
-        import time as _time
-
-        with _INGEST_LOCK:
-            t = _INGEST_TASKS.get(task_id)
-            if t:
-                t["finished_at"] = _time.time()
+        _update_ingest_task(
+            task_id,
+            status="error",
+            error=str(exc),
+            finished_at=time.time(),
+        )
 
 
 def _save_upload_stream(file, dest: Path, max_bytes: int) -> None:
@@ -176,14 +231,16 @@ def upload_document(
             raise HTTPException(500, "文件保存失败，请稍后重试")
 
         task_id = uuid.uuid4().hex
-        with _INGEST_LOCK:
-            _INGEST_TASKS[task_id] = {
+        _create_ingest_task(
+            task_id,
+            {
                 "status": "pending",
                 "progress": 0,
                 "stage": "排队中",
                 "filename": safe_name,
                 "user_id": user_id,
-            }
+            },
+        )
         _UPLOAD_EXECUTOR.submit(_run_ingest, task_id, dest, safe_name, user_id)
         tasks.append({"task_id": task_id, "filename": safe_name, "file_path": str(dest)})
     return {"tasks": tasks}
@@ -192,8 +249,7 @@ def upload_document(
 @router.get("/ingest/{task_id}")
 def ingest_status(task_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     """查询摄入任务进度（仅限任务归属用户）。"""
-    with _INGEST_LOCK:
-        t = _INGEST_TASKS.get(task_id)
+    t = _read_ingest_task(task_id)
     if not t or t.get("user_id") != user_id:
         raise HTTPException(404, "任务不存在或已过期")
     return {
