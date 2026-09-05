@@ -254,7 +254,8 @@ python run.py
 | `MAX_UPLOAD_MB` | `50` | 上传文档大小上限（MB），超限返回 413 |
 | `UPLOAD_MAX_CONCURRENCY` | `2` | 后台摄入最大并发数 |
 | `AUTH_SECRET` | 开发默认值 | JWT 签名密钥（**生产务必改为强随机值**；对外监听时若仍为默认值或长度 <32，应用拒绝启动） |
-| `TOKEN_TTL_SECONDS` | `604800` | JWT 有效期（秒），默认 7 天 |
+| `ACCESS_TOKEN_TTL_SECONDS` | `1800` | access token 有效期（秒），默认 30 分钟 |
+| `REFRESH_TOKEN_TTL_SECONDS` | `604800` | refresh token 有效期（秒），默认 7 天（可轮换/撤销） |
 | `CODE_AGENT_ENABLED` | `true` | 是否启用代码执行 Agent |
 | `CODE_EXEC_MODE` | `docker` | 代码沙箱：docker=一次性容器（默认，安全边界）；subprocess=仅本地调试 |
 | `CODE_EXEC_IMAGE` | `agentchat-code-runner:latest` | 代码 runner 镜像名（构建命令见 backend/.env.example） |

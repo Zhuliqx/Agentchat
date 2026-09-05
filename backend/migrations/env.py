@@ -6,7 +6,7 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import Column, String, Table, Text, engine_from_config, pool
+from sqlalchemy import Column, DateTime, String, Table, Text, engine_from_config, pool
 
 # 允许在 backend 或项目根执行 alembic 时都能导入 app 包
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -22,6 +22,18 @@ Table(
     Base.metadata,
     Column("key", String(64), primary_key=True),
     Column("value", Text(), nullable=False),
+    extend_existing=True,
+)
+Table(
+    "token_sessions",
+    Base.metadata,
+    Column("id", String(32), primary_key=True),
+    Column("user_id", String(64), nullable=False),
+    Column("token_hash", String(64), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    extend_existing=True,
 )
 
 config = context.config

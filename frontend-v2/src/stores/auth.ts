@@ -1,7 +1,9 @@
 import { defineStore } from "pinia";
 import { authApi } from "@/api";
 import {
+  getRefreshToken,
   getToken,
+  setRefreshToken,
   setToken,
   getStoredUser,
   setStoredUser,
@@ -53,6 +55,7 @@ export const useAuthStore = defineStore("auth", {
         this.token = data.token;
         this.user = data.user;
         setToken(data.token);
+        setRefreshToken(data.refresh_token);
         setStoredUser(data.user);
         this.authOpen = false;
         await this.loadCapabilities();
@@ -62,6 +65,18 @@ export const useAuthStore = defineStore("auth", {
     },
     async register(username: string, password: string) {
       await authApi.register(username, password);
+    },
+    /** 通知后端撤销 refresh（尽力而为），随后清空本地登录态 */
+    async logout() {
+      const refreshToken = getRefreshToken();
+      if (refreshToken) {
+        try {
+          await authApi.logout(refreshToken);
+        } catch {
+          /* 后端不可达也继续本地登出 */
+        }
+      }
+      this.logoutLocal();
     },
     logoutLocal() {
       this.token = "";

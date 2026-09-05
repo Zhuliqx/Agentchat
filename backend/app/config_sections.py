@@ -308,4 +308,5 @@ class AuthSection(BaseModel):
     auth_secret: str = "dev-secret-change-me-in-env-0123456789abcdef"  # 生产务必在 .env 设置强随机值
     guest_user_id: str = "default"              # 未登录访客使用的默认用户 id
     admin_usernames: str = ""                   # 管理员用户名（逗号分隔）
-    token_ttl_seconds: int = 604800             # JWT 有效期（秒），默认 7 天
+    access_token_ttl_seconds: int = 1800        # access token 有效期（秒），默认 30 分钟
+    refresh_token_ttl_seconds: int = 604800     # refresh token 有效期（秒），默认 7 天

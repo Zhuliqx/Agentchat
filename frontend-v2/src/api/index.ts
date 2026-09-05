@@ -40,9 +40,14 @@ export const authApi = {
       body: JSON.stringify({ username, password }),
     }),
   login: (username: string, password: string) =>
-    api<{ token: string; user: User }>("/auth/login", {
+    api<{ token: string; refresh_token: string; user: User }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
+    }),
+  logout: (refreshToken: string) =>
+    api<void>("/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken }),
     }),
   me: () => api<User>("/auth/me"),
   stats: () => api<AuthStats>("/auth/stats"),

@@ -269,7 +269,7 @@ def test_jwt_has_exp_and_respects_ttl(monkeypatch):
     from app.security import create_token
 
     monkeypatch.setattr(settings, "auth_secret", "test-secret-0123456789abcdefghijklmn")
-    monkeypatch.setattr(settings, "token_ttl_seconds", 3600)
+    monkeypatch.setattr(settings, "access_token_ttl_seconds", 3600)
     token = create_token("user-1")
 
     import jwt

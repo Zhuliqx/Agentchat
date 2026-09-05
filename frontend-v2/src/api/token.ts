@@ -2,6 +2,7 @@
 import type { User } from "@/types/api";
 
 const TOKEN_KEY = "agentchat_token";
+const REFRESH_KEY = "agentchat_refresh_token";
 const USER_KEY = "agentchat_user";
 
 export function getToken(): string {
@@ -11,6 +12,15 @@ export function getToken(): string {
 export function setToken(token: string): void {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getRefreshToken(): string {
+  return localStorage.getItem(REFRESH_KEY) || "";
+}
+
+export function setRefreshToken(token: string): void {
+  if (token) localStorage.setItem(REFRESH_KEY, token);
+  else localStorage.removeItem(REFRESH_KEY);
 }
 
 export function getStoredUser(): User | null {
@@ -28,5 +38,6 @@ export function setStoredUser(user: User | null): void {
 
 export function clearAuth(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
 }

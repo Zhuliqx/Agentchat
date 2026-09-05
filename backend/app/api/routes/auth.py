@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -11,8 +12,15 @@ from pydantic import BaseModel, Field
 from app.api.data_ownership import build_user_export, purge_user_data
 from app.api.deps import is_admin_username, is_platform_operator, require_user_id
 from app.db import postgres
+from app.db import token_store
 from app.db.memory_store import get_store
-from app.security import create_token, hash_password, verify_password
+from app.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token_payload,
+    hash_password,
+    verify_password,
+)
 
 router = APIRouter()
 
@@ -96,7 +104,12 @@ class UserOut(BaseModel):
 
 class LoginOut(BaseModel):
     token: str
+    refresh_token: str
     user: UserOut
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str = Field(..., min_length=1, max_length=4096)
 
 
 def _user_out(u) -> UserOut:
@@ -107,6 +120,16 @@ def _user_out(u) -> UserOut:
         created_at=u.created_at.isoformat(),
         is_admin=is_admin_username(u.username),
     )
+
+
+def _issue_token_pair(user_id: str) -> tuple[str, str]:
+    """签发 access + refresh，并把 refresh 登记到 token_sessions。"""
+    access = create_access_token(user_id)
+    refresh, jti = create_refresh_token(user_id)
+    payload = decode_token_payload(refresh) or {}
+    expires_at = datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc)
+    token_store.store_refresh_token(user_id, jti, expires_at)
+    return access, refresh
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
@@ -126,7 +149,37 @@ def login(body: LoginIn):
         record_login_failure(body.username)
         raise HTTPException(401, "用户名或密码错误")
     clear_login_failures(body.username)
-    return LoginOut(token=create_token(u.id), user=_user_out(u))
+    access, refresh = _issue_token_pair(u.id)
+    return LoginOut(token=access, refresh_token=refresh, user=_user_out(u))
+
+
+@router.post("/refresh", response_model=LoginOut)
+def refresh_token(body: RefreshIn):
+    """用 refresh token 换取新的 access+refresh（旧 refresh 轮换作废）。"""
+    payload = decode_token_payload(body.refresh_token)
+    if not payload or payload.get("type") != "refresh" or not payload.get("jti"):
+        raise HTTPException(401, "refresh token 无效")
+    row = token_store.get_refresh_token(payload["jti"])
+    if not row or row.get("revoked_at") is not None:
+        raise HTTPException(401, "refresh token 已失效")
+    expires_at = row.get("expires_at")
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(401, "refresh token 已过期")
+    user = postgres.get_user(row["user_id"])
+    if not user:
+        raise HTTPException(401, "用户不存在")
+    token_store.revoke_refresh_token(payload["jti"])  # 轮换：旧 token 立即失效
+    access, refresh = _issue_token_pair(user.id)
+    return LoginOut(token=access, refresh_token=refresh, user=_user_out(user))
+
+
+@router.post("/logout", status_code=204)
+def logout(body: RefreshIn):
+    """注销 refresh token（后续无法续期；已签发的 access 到期自然失效）。"""
+    payload = decode_token_payload(body.refresh_token)
+    if payload and payload.get("type") == "refresh" and payload.get("jti"):
+        token_store.revoke_refresh_token(payload["jti"])
+    return None
 
 
 @router.get("/me", response_model=UserOut)
@@ -171,6 +224,7 @@ def change_password(
     if not verify_password(body.old_password, u.password_hash):
         raise HTTPException(400, "旧密码错误")
     postgres.update_user(user_id, password_hash=hash_password(body.new_password))
+    token_store.revoke_user_tokens(user_id)  # 改密后旧 refresh 全部失效
     return _user_out(postgres.get_user(user_id))
 
 

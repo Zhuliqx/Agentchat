@@ -1,5 +1,12 @@
-// 统一 fetch 封装：JSON、错误解析、认证头
-import { clearAuth, getToken } from "./token";
+// 统一 fetch 封装：JSON、错误解析、认证头、401 自动刷新
+import {
+  clearAuth,
+  getRefreshToken,
+  getToken,
+  setRefreshToken,
+  setStoredUser,
+  setToken,
+} from "./token";
 
 export class ApiError extends Error {
   status: number;
@@ -35,6 +42,49 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+let refreshPromise: Promise<boolean> | null = null;
+
+async function doRefresh(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+  try {
+    const res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.token && data.refresh_token) {
+      setToken(data.token);
+      setRefreshToken(data.refresh_token);
+      if (data.user) setStoredUser(data.user);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function refreshOnce(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+function shouldRefresh(path: string): boolean {
+  return (
+    !path.startsWith("/auth/login") &&
+    !path.startsWith("/auth/register") &&
+    !path.startsWith("/auth/refresh") &&
+    !path.startsWith("/auth/logout")
+  );
+}
+
 /** 原始 fetch（带 /api 前缀 + 认证头），供需要 Response 的场景（SSE/文件）复用。 */
 export async function apiRaw(
   path: string,
@@ -43,14 +93,21 @@ export async function apiRaw(
   const headers: Record<string, string> = { ...authHeaders() };
   if (!(options.body instanceof FormData))
     headers["Content-Type"] = "application/json";
-  const res = await fetch("/api" + path, { ...options, headers });
-  // 登录/注册自身的 401 是“密码错误”，不能当成登录态失效处理。
+  const attempt = (h: Record<string, string>) =>
+    fetch("/api" + path, { ...options, headers: h });
+
+  let res = await attempt(headers);
   if (
     res.status === 401 &&
     getToken() &&
-    !path.startsWith("/auth/login") &&
-    !path.startsWith("/auth/register")
+    shouldRefresh(path) &&
+    getRefreshToken() &&
+    (await refreshOnce())
   ) {
+    // access 过期 → refresh 成功 → 用新 access 重放一次原请求
+    res = await attempt({ ...authHeaders(), ...headers });
+  }
+  if (res.status === 401 && getToken() && shouldRefresh(path)) {
     clearAuth();
     window.dispatchEvent(new Event("auth-expired"));
   }
