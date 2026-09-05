@@ -115,6 +115,36 @@ def postgres_available() -> bool:
         return False
 
 
+def redis_available() -> bool:
+    """Redis 是否可达（仅需 Redis 的集成用例统一跳过判据）。"""
+    try:
+        import redis
+
+        from app.config import settings
+
+        if settings.redis_url.strip():
+            client = redis.Redis.from_url(
+                settings.redis_url,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+            )
+        else:
+            client = redis.Redis(
+                host=settings.redis_host,
+                port=settings.redis_port,
+                db=settings.redis_db,
+                password=settings.redis_password or None,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+            )
+        try:
+            return bool(client.ping())
+        finally:
+            client.close()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def db_available() -> bool:
     """Postgres + Milvus 是否可达（RAG 类集成用例统一跳过判据）。"""
     try:

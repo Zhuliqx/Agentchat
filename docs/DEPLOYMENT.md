@@ -22,12 +22,13 @@ flowchart TB
         B[Postgres pgvector<br>会话 / 消息 / 文档 / 记忆]:::rag
         C[Milvus etcd+minio<br>文档块向量]:::rag
         D[Langfuse 可选<br>可观测性 trace]:::tool
+        E[Redis 可选<br>跨进程状态/缓存]:::tool
     end
 ```
 
 - **单进程**：`run.py` 启动一个 uvicorn worker；
 - **定位**：个人 / 小团队，知识库块数 < 5000，QPS 低；
-- **优点**：零外部依赖（除 Postgres/Milvus）、部署简单、进程内缓存一致性好。
+- **优点**：除 Postgres/Milvus 外零外部依赖（Redis 默认关闭）、部署简单、进程内缓存一致性好。
 
 ## 2. 单机取舍的根因：进程内状态清单
 
@@ -42,22 +43,25 @@ flowchart TB
 | `run_id → sources`（引用溯源） | `app/agents/tools/sources.py` | 仅服务于当次执行内的流式事件；最终来源已写入 `Message.sources` | 无功能影响 |
 | `_host_agent_cache`（任务 Agent 图） | `app/agents/task_agent_adapter.py` | 每 worker 各构建一次 | 仅耗时，可接受 |
 | `lru_cache`（embedder/reranker） | `app/rag/*` | 每 worker 一份模型实例 | 内存翻倍（~2GB） |
+| 登录失败计数（5 分钟窗口） | `app/api/routes/auth.py` | 每 worker 独立计数，防爆破可被分散请求绕过 | **安全弱化** |
 
-> 关键认知：**当前架构 = "进程内缓存换零外部依赖"**。数据一致性靠"单进程持有全部状态"保证，
+> 关键认知：**当前架构 = "进程内缓存换零外部依赖（Redis 关闭）"**。数据一致性靠"单进程持有全部状态"保证，
 > 这是刻意取舍，不是缺陷。
 
 ## 3. 演进路径（分阶段）
 
 ### 阶段 1（现状）：单机
 - **适用**：个人 / 小团队，`volumes/` 数据量可控，无并发上传压力。
-- **取舍依据**：BM25 索引内存化带来检索零延迟；部署只依赖 2 个数据库。
+- **取舍依据**：BM25 索引内存化带来检索零延迟；部署只依赖 Postgres + Milvus
+  （Redis 已随 docker-compose 提供，但 `REDIS_ENABLED=false` 默认不连接）。
 
 ### 阶段 2（多 worker）：共享缓存 + 落库
-> 当需要 uvicorn `--workers N` 时，先做这 3 步：
+> 当需要 uvicorn `--workers N` 时，把 `REDIS_ENABLED=true` 并逐步迁移：
 
 | 改动 | 做法 | 收益 |
 |------|------|------|
-| `_INGEST_TASKS` 落库 | 摄入任务写入 Postgres（复用 `tasks` 表思路） | 任意 worker 可查任务进度 |
+| 登录失败计数迁 Redis | `app/api/routes/auth.py` 改用 Redis 固定窗口计数（未启用时回落进程内） | 多 worker 共享限速 |
+| `_INGEST_TASKS` 迁 Redis | 摄入任务进度/状态写入 Redis hash（TTL 自动清理；最终结果仍以 Postgres 为准） | 任意 worker 可查任务进度 |
 | `run_id → sources` 持久化 | 无需额外改动：最终来源已随 assistant 消息写入 `Message.sources` | 溯源不丢 |
 | `_signature_cache` / BM25 | 签名缓存放 Redis；BM25 接受每 worker 重建（块 <5000 成本低） | 一致性与内存可控 |
 | `_graph_cache` | 保留每 worker 重建（图构建 ~秒级，预热即可） | 无需改 |

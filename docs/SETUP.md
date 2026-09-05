@@ -4,10 +4,13 @@
 > 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 本文档说明如何在 Windows（Docker Desktop 运行数据库）上把项目跑起来。
+Postgres 与 Milvus 是必需依赖；Redis 是**可选**基础设施（默认 `REDIS_ENABLED=false`，
+单 worker 本地使用无需开启）。
 
 ## 1. 启动数据库（Docker Desktop）
 
-本项目的 Postgres 与 Milvus 运行在 **Docker Desktop** 中。两种方式：
+本项目的 Postgres 与 Milvus 运行在 **Docker Desktop** 中（Redis 容器随 compose 一并提供，
+但应用默认不连接）。两种方式：
 
 ### 方式 A：使用项目自带的 docker-compose（推荐，一键拉起全部）
 
@@ -25,6 +28,7 @@ docker compose ps
 | postgres | 5432 | 关系数据库（pgvector 镜像，内置向量扩展） |
 | milvus-standalone | 19530 | 向量数据库 |
 | milvus-etcd / milvus-minio | - | Milvus 依赖 |
+| redis | 6379 | 可选：跨进程短时状态 / 协调（多 worker 前保持关闭） |
 
 > 首次启动 Milvus 需要下载镜像，等 `docker compose ps` 显示 healthy 后再继续。
 
@@ -90,6 +94,9 @@ Copy-Item .env.example .env
 - **模型离线加载**：`HF_OFFLINE=true`（默认）——embedding/rerank 已本地缓存时直接离线加载，避免 HF 网络不可达时启动/首次请求联网 HEAD 卡住重试；需下载新模型时临时设 `false`。
 - **日志与上传**：`LOG_LEVEL=INFO`（DEBUG/INFO/WARNING/ERROR）、`MAX_UPLOAD_MB=50`（上传文档大小上限）。
 - **外部 MCP**（可选）：`EXTERNAL_MCP_SERVERS={"github": "http://localhost:8080/mcp"}`（JSON；兼容旧 `name=url` 逗号格式）
+- **Redis（可选）**：默认 `REDIS_ENABLED=false`，单 worker 本地开发**不需要开启**；
+  多 worker/多副本前再设为 `true`。compose 中 Redis 默认密码为 `redis-dev-password`
+  （生产务必改成强随机值）；也可用 `REDIS_URL` 指向外部实例。
 
 ## 4. 初始化数据库
 
@@ -198,6 +205,8 @@ npm run dev          # http://localhost:5173，/api 自动代理到 :8000
 3. 再试"帮我统计一下数据库里有多少个会话"，应看到 `mcp_agent` 调用 `db_get_session_stats`
    工具（宿主自动按当前用户注入 user_id；多用户模式下自由 SQL 已禁止直接查业务表）。
 4. （可选）上传一个文档后点击文档名，弹窗中可**预览/下载原始文件**（存于 `data/uploads/`）。
+5. （可选）健康检查返回 `redis` 字段：未启用为 `{"enabled": false}`；
+   启用后为 `{"enabled": true, "ok": true}`（连接失败则 `ok=false` 且整体 degraded）。
 
 ## 8. 测试
 
@@ -218,7 +227,9 @@ pip install -r requirements-dev.txt
 .\venv\Scripts\python.exe -m pytest tests/integration -v
 ```
 
-覆盖：健康检查、会话 CRUD + 批量删除（含 checkpoint 清理）、记忆 CRUD、RAG 上传/检索/删除、chat 与 HITL（中断 → 409 → 清理）。DB 不可达时自动跳过；对话/HITL 用例在未配置 LLM key 时单独跳过。
+覆盖：健康检查、会话 CRUD + 批量删除（含 checkpoint 清理）、记忆 CRUD、RAG 上传/检索/删除、
+chat 与 HITL（中断 → 409 → 清理）、Redis 客户端连通性。Postgres/Milvus/Redis 不可达时对应模块自动跳过；
+对话/HITL 用例在未配置 LLM key 时单独跳过。
 
 ## 常见问题
 
@@ -226,6 +237,7 @@ pip install -r requirements-dev.txt
 |------|------|
 | `向量库初始化失败` | `docker compose ps` 确认 milvus healthy；检查 19530 端口 |
 | 连接 Postgres 失败 | 确认 compose 中 postgres healthy；检查 `.env` 账号密码 |
+| 启用 Redis 后健康检查 ok=false | 确认 `redis` 容器 healthy；`.env` 的 `REDIS_PASSWORD` 与 compose 一致 |
 | `ollama connection refused` | 启动 Ollama 应用，`ollama pull qwen2.5:7b` |
 | 首次 embedding / rerank 慢 | 本地模型首次运行需下载（rerank 约 1.1GB），之后有缓存 |
 | MCP 服务器启动失败 | 用 `python run.py` 从 backend 目录启动（脚本路径相对 backend） |

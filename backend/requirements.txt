@@ -26,6 +26,9 @@ sqlalchemy>=2.0
 psycopg[binary]>=3.1
 alembic>=1.13
 
+# ---- Redis 客户端（可选：仅 REDIS_ENABLED=true 时连接）----
+redis>=5.0
+
 # ---- MCP（FastMCP 高级 API 在 2.x 被移除，固定 1.x；>=1.9 提供 streamable_http_client 新名）----
 mcp>=1.9,<2.0
 sqlparse>=0.5

@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from sqlalchemy import text
 
+from app.cache.redis_client import redis_health
 from app.db.postgres import engine
 from app.mcp_integration.client import get_mcp_manager
 from app.rag.vector_store import stats as milvus_stats
@@ -31,9 +32,17 @@ async def health() -> dict:
     mcp = get_mcp_manager()
     mcp_names = mcp.server_names()
 
+    # Redis（可选：REDIS_ENABLED=false 时返回 enabled=False，不计入降级）
+    redis = redis_health()
+
     return {
-        "status": "ok" if pg_ok and ms.get("connected") else "degraded",
+        "status": (
+            "ok"
+            if pg_ok and ms.get("connected") and redis.get("ok", True)
+            else "degraded"
+        ),
         "postgres": {"ok": pg_ok, "error": pg_error},
         "milvus": ms,
         "mcp_servers": mcp_names,
+        "redis": redis,
     }

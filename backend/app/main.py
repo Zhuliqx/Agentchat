@@ -67,6 +67,7 @@ from app.db.memory_store import (
     init_checkpointer,
     init_store,
 )
+from app.cache.redis_client import close_redis, init_redis
 from app.db.postgres import has_registered_users, init_db, run_migrations
 from app.mcp_integration.client import get_mcp_manager
 from app.rag.vector_store import ensure_vector_store
@@ -140,6 +141,7 @@ async def lifespan(app: FastAPI):
     # 表结构由 Alembic 管理；启动时自动升级（advisory lock 防多进程并发）
     run_migrations()
     init_db()
+    init_redis()
     # 运维提示：已有真实用户但没有配置任何管理员，平台级操作将无人可用
     if has_registered_users() and not settings.admin_usernames.strip():
         logger.warning(
@@ -188,6 +190,7 @@ async def lifespan(app: FastAPI):
 
     scheduler_stop.set()
     scheduler_task.cancel()
+    close_redis()
     await get_mcp_manager().stop_all()
     from app.observability import flush_langfuse
 

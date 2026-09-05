@@ -55,6 +55,7 @@ def test_health(client):
     assert body["status"] in ("ok", "degraded")
     assert body["postgres"]["ok"] is True
     assert body["milvus"]["connected"] is True
+    assert "redis" in body
 
 
 # ---------------- 会话 ----------------

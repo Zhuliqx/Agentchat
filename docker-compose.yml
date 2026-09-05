@@ -1,4 +1,4 @@
-# 在 Docker Desktop 中启动本项目的依赖数据库（Postgres + Milvus）
+# 在 Docker Desktop 中启动本项目的依赖数据库（Postgres + Milvus，Redis 可选）
 #
 # 用法:
 #   docker compose up -d
@@ -8,6 +8,8 @@
 #
 # 说明: 如果你已经有一套运行中的 Postgres / Milvus，可以直接修改
 # backend/.env 指向现有实例，无需重复启动本文件中的服务。
+# Redis 容器默认随 compose 启动，但应用侧 REDIS_ENABLED=false 时不会连接；
+# 需要多 worker/多副本的跨进程状态时再开启应用侧开关。
 services:
   # ---------- 关系数据库：Postgres ----------
   # 使用 pgvector 镜像：除基础 Postgres 外内置 pgvector 扩展，
@@ -25,6 +27,27 @@ services:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d agentchat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- 可选：Redis（跨进程短时状态/协调）----------
+  redis:
+    image: redis:7-alpine
+    container_name: agentchat-redis
+    command:
+      - redis-server
+      - --requirepass
+      - redis-dev-password
+      - --appendonly
+      - "yes"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis-dev-password", "--no-auth-warning", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -96,3 +119,4 @@ services:
 
 volumes:
   pg_data:
+  redis_data:

@@ -117,13 +117,14 @@ flowchart LR
 
 ```
 Agentchat/
-├── docker-compose.yml        # Docker Desktop 一键启动 Postgres + Milvus
+├── docker-compose.yml        # Docker Desktop 一键启动 Postgres + Milvus（含可选 Redis）
 ├── backend/
 │   ├── run.py               # 启动入口（Windows 用，保证 Checkpointer 正常）
 │   ├── requirements.txt / requirements-dev.txt / Dockerfile
 │   ├── app/
 │   │   ├── main.py           # FastAPI 入口（托管前端 + API + 模型预热）
 │   │   ├── config.py         # 配置中心（字段分组在 config_sections.py）
+│   │   ├── cache/            # Redis 可选封装（默认关闭，不引入外部服务）
 │   │   ├── api/routes/       # chat / sessions / rag / memory / health / auth / tasks / admin / search / agent-tasks
 │   │   ├── agents/           # LangGraph 多 Agent（graph / llm / prompts / streaming / tools 包 /
 │   │   │                     #   middleware 统一工厂：摘要压缩 + 调用上限 + 超时日志）
@@ -140,7 +141,7 @@ Agentchat/
 │   ├── data/                 # 应用运行时数据（model_choice.json + eval/ 评估产物）
 │   ├── tests/                # pytest 测试（unit/ 单元 + integration/ 集成）
 │   │   ├── unit/             # 纯逻辑单元测试（BM25 / 分块 / 评估 / RRF / 流式去重…）
-│   │   └── integration/      # 需 Postgres+Milvus 的集成测试（test_api / 检索回归）
+│   │   └── integration/      # 需 Postgres/Milvus（或 Redis）的集成测试
 │   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / check_docs_stale / MCP 服务器入口
 │   └── .env.example
 ├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
@@ -222,7 +223,7 @@ python run.py
 | DELETE | `/api/rag/documents?source=` | 删除文档（含原始文件） |
 | GET/POST | `/api/memory` | 长期记忆列表 / 添加（支持 `?query=` 语义检索） |
 | DELETE | `/api/memory/{id}` | 删除单条记忆 |
-| GET | `/api/health` | 健康检查（Postgres / Milvus / MCP） |
+| GET | `/api/health` | 健康检查（Postgres / Milvus / MCP / 可选 Redis） |
 
 ## 关键配置项（`backend/.env`）
 
@@ -256,6 +257,7 @@ python run.py
 | `AUTH_SECRET` | 开发默认值 | JWT 签名密钥（**生产务必改为强随机值**；对外监听时若仍为默认值或长度 <32，应用拒绝启动） |
 | `ACCESS_TOKEN_TTL_SECONDS` | `1800` | access token 有效期（秒），默认 30 分钟 |
 | `REFRESH_TOKEN_TTL_SECONDS` | `604800` | refresh token 有效期（秒），默认 7 天（可轮换/撤销） |
+| `REDIS_ENABLED` | `false` | 可选 Redis 开关（多 worker / 多副本前的跨进程状态与缓存才需要） |
 | `CODE_AGENT_ENABLED` | `true` | 是否启用代码执行 Agent |
 | `CODE_EXEC_MODE` | `docker` | 代码沙箱：docker=一次性容器（默认，安全边界）；subprocess=仅本地调试 |
 | `CODE_EXEC_IMAGE` | `agentchat-code-runner:latest` | 代码 runner 镜像名（构建命令见 backend/.env.example） |

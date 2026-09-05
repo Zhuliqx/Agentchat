@@ -56,6 +56,19 @@ class PostgresSection(BaseModel):
     postgres_db: str = "agentchat"              # 数据库名
 
 
+class RedisSection(BaseModel):
+    """Redis（可选；默认关闭，不引入外部服务依赖）。"""
+
+    redis_enabled: bool = False                 # 总开关；单 worker 部署无需开启
+    redis_host: str = "localhost"               # 地址
+    redis_port: int = 6379                      # 端口
+    redis_password: str = ""                    # 密码（生产必填；本地 compose 默认 redis-dev-password）
+    redis_db: int = 0                           # 逻辑库编号
+    redis_url: str = ""                         # 留空则用 host/port/db 拼接；也可填完整 URL（含云端实例）
+    redis_socket_timeout: float = 1.0           # 连接/读写超时（秒），避免 Redis 故障拖慢请求
+    redis_key_prefix: str = "agentchat"         # key 统一前缀，多环境共用实例时隔离命名空间
+
+
 class MilvusSection(BaseModel):
     """Milvus（向量库）。"""
 
