@@ -97,6 +97,7 @@ Copy-Item .env.example .env
 - **Redis（可选）**：默认 `REDIS_ENABLED=false`，单 worker 本地开发**不需要开启**；
   多 worker/多副本前再设为 `true`。compose 中 Redis 默认密码为 `redis-dev-password`
   （生产务必改成强随机值）；也可用 `REDIS_URL` 指向外部实例。
+  启用后登录失败计数跨 worker 共享；关闭时自动回退为进程内计数。
 
 ## 4. 初始化数据库
 

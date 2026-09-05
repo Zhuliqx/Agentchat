@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.api.data_ownership import build_user_export, purge_user_data
 from app.api.deps import is_admin_username, is_platform_operator, require_user_id
+from app.cache.redis_client import get_redis, redis_key
 from app.db import postgres
 from app.db import token_store
 from app.db.memory_store import get_store
@@ -31,6 +32,11 @@ _LOGIN_LOCK = threading.Lock()
 _LOGIN_FAILURES: dict[str, list[float]] = {}
 
 
+def _login_failure_key(username: str) -> str:
+    """登录失败计数的 Redis key（带统一前缀与业务域）。"""
+    return redis_key("auth", "login_fail", username)
+
+
 def _prune_login_failures(now: float | None = None) -> None:
     now = time.monotonic() if now is None else now
     expired = [
@@ -44,12 +50,31 @@ def _prune_login_failures(now: float | None = None) -> None:
 
 def is_login_blocked(username: str, now: float | None = None) -> bool:
     """用户名在当前窗口内失败次数是否已达上限。"""
+    client = get_redis()
+    if client is not None:
+        try:
+            value = client.get(_login_failure_key(username))
+            return value is not None and int(value) >= _LOGIN_MAX_FAILURES
+        except Exception:  # noqa: BLE001
+            pass  # Redis 故障时退回进程内计数，避免登录接口不可用
     with _LOGIN_LOCK:
         _prune_login_failures(now)
         return len(_LOGIN_FAILURES.get(username, [])) >= _LOGIN_MAX_FAILURES
 
 
 def record_login_failure(username: str, now: float | None = None) -> None:
+    client = get_redis()
+    if client is not None:
+        try:
+            key = _login_failure_key(username)
+            pipe = client.pipeline()
+            pipe.incr(key)
+            # NX：只在首次失败时起算窗口，后续失败不延长锁定期
+            pipe.expire(key, int(_LOGIN_WINDOW_SEC), nx=True)
+            pipe.execute()
+            return
+        except Exception:  # noqa: BLE001
+            pass  # Redis 故障时退回进程内计数（尽力而为）
     with _LOGIN_LOCK:
         _prune_login_failures(now)
         _LOGIN_FAILURES.setdefault(username, []).append(
@@ -58,6 +83,13 @@ def record_login_failure(username: str, now: float | None = None) -> None:
 
 
 def clear_login_failures(username: str) -> None:
+    client = get_redis()
+    if client is not None:
+        try:
+            client.delete(_login_failure_key(username))
+        except Exception:  # noqa: BLE001
+            pass
+    # 同时清理进程内计数：覆盖 Redis 故障期间或启用前的残留
     with _LOGIN_LOCK:
         _LOGIN_FAILURES.pop(username, None)
 

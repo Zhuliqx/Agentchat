@@ -240,9 +240,13 @@ def test_is_platform_operator_flag_matches_require(monkeypatch):
     assert deps.is_platform_operator("Bearer admin-token") is True
 
 
-def test_login_throttle_blocks_and_expires():
+def test_login_throttle_blocks_and_expires(monkeypatch):
     """登录失败 5 次后拦截，窗口过期后恢复。"""
+    from app.config import settings
     from app.api.routes import auth as auth_mod
+
+    # 单元测试固定走进程内实现：now 参数模拟过期不依赖真实时钟
+    monkeypatch.setattr(settings, "redis_enabled", False)
 
     user = "throttle-test-user"
     try:
