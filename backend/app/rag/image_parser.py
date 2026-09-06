@@ -1,7 +1,7 @@
 """图片处理：从 PDF 抽取图片 + OCR 识别文字（供扫描件/截图入库）。
 
-说明：仅提供「抽图 + OCR」这一层；VLM 语义描述在后续扩展，
-当前不含；OCR 结果走现有文本通道，不改变向量 schema / 模型。
+说明：本模块仅提供「抽图 + OCR」；图片的 VLM 语义描述在 ``app.rag.vlm``
+（默认关）。OCR 结果走现有文本通道，不改变向量 schema / 模型。
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 # Multi-Agent Platform 项目详解（10 分钟总览）
 
 > 相关文档：见 [文档地图](README.md)；实现细节以代码注释与 [ARCHITECTURE](ARCHITECTURE.md) 为准。
-> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-06（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 从零理解本项目：是什么、怎么组织、怎么跑、核心机制、设计决策。
 
@@ -80,7 +80,7 @@ sequenceDiagram
     L->>DB: init_checkpointer() → AsyncPostgresSaver
     L->>DB: init_store() → AsyncPostgresStore（无pgvector则降级）
     L->>DB: cleanup_stale_checkpoints() 清孤儿
-    L->>M: start_all() 拉起 db / time 两个MCP
+    L->>M: start_all() 并行拉起 db / time 两个MCP
     L->>L: 后台线程预热 rerank/embedding 模型 + BM25 索引 + Supervisor 图
     Note over L: 应用就绪 → 监听 http://localhost:8000
 ```

@@ -1,6 +1,6 @@
 # 系统架构
 
-> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-06（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 1. 文档地图（本仓库两个项目）
 
@@ -246,13 +246,16 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 |------|------|
 | `app/main.py` | FastAPI 入口：生命周期初始化 + MCP 启动 + 模型预热 + 路由挂载 |
 | `app/config.py` + `config_sections.py` | 配置中心（pydantic-settings，字段按域分组，`.env`） |
+| `app/cache/redis_client.py` | 可选 Redis 客户端与健康检查（默认关闭；登录限速/摄入进度/签名/向量/检索缓存共用） |
 | `app/agents/graph.py` | Supervisor 图构建缓存；`run_agent`（非流式）/ `stream_agent`（token 流式）；提示词在 `prompts.py`、流式去重在 `streaming.py` |
 | `app/agents/tools/` | 工具族包：rag_tool / mcp_tool / search_tool / code_tool / memory_tools / confirmation / sources / text |
 | `app/agents/task_agent_adapter.py` | 项目 2 宿主适配器（向独立包 `agentchat-task-agent` 注入 LLM / Checkpointer / `run_agent` 执行器） |
 | `app/agents/llm.py` | LLM 工厂（provider 选择 + 超时/重试） |
 | `app/rag/vector_store.py` | MilvusClient 单例：schema/索引/检索/维度校验/`sync_chunks` 幂等同步/`query_source_pairs` 对账查询 |
+| `app/rag/embedding.py` | embedding 封装（local/openai）+ 跨 worker 向量缓存（默认关，不存原文） |
 | `app/rag/bm25.py` | 轻量 BM25 索引（中英文切分，无第三方依赖） |
 | `app/rag/hybrid.py` | 向量 + BM25 + RRF 混合检索融合 |
+| `app/rag/retrieval_cache.py` | 检索结果 identity 缓存（默认关；Redis 不存正文，命中后从 Postgres 重建） |
 | `app/rag/rerank.py` | CrossEncoder 精排（候选受限 + 输入截断） |
 | `app/rag/query_rewrite.py` | 查询改写（rule/llm + 精确词豁免 + 拒绝词回退，默认关） |
 | `app/rag/prompt_injection.py` | Prompt 注入防护（不可信数据块隔离 / 规则检测剔除 / LLM 复核 / 输出泄露检测） |
@@ -260,7 +263,7 @@ Token 级流式基于 `graph.astream(stream_mode=["updates", "messages"])`：
 | `app/rag/ingestion.py` | 摄入编排（解析在 `extractors/`、分块在 `chunkers.py`；PG 先行 + 状态标记 + 幂等同步） |
 | `app/rag/postprocess.py` | 检索后处理纯函数（去重合并/近似去重/预算/截断，供 retriever 组装） |
 | `app/scheduler.py` | 定时任务调度器（含 `reconcile_vectors` 向量对账任务） |
-| `app/db/postgres.py` | 会话/消息 CRUD + 幂等建索引 |
+| `app/db/postgres.py` | 引擎/SessionLocal + 会话/消息 CRUD（表结构与索引由 Alembic 管理） |
 | `app/db/memory_store.py` | Checkpointer / Store 全局单例（语义索引自动降级） |
 | `app/api/routes/chat.py` | 非流式 + SSE token 级流式端点 |
 | `app/api/routes/rag.py` | 上传（原始文件持久化）/ 列表 / 预览下载 / 删除 |

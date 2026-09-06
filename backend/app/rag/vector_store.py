@@ -113,7 +113,7 @@ def _ensure_cosine_metric(client: MilvusClient, name: str) -> None:
 def _ensure_indexes(client: MilvusClient, name: str) -> None:
     """确保向量索引 + 标量索引存在（缺失则创建，幂等）。
 
-    - embedding：IVF_FLAT / IP（相似度检索）
+    - embedding：IVF_FLAT / COSINE（相似度检索）
     - source / user_id：Trie 标量索引（加速按来源/用户的过滤与删除）
     """
     if not _has_index(client, name, "embedding"):
@@ -358,7 +358,7 @@ def search(
     hits: list[dict[str, Any]] = []
     for hit in (results[0] if results else []):
         try:
-            if float(hit["distance"]) < score_threshold:  # IP 相似度阈值
+            if float(hit["distance"]) < score_threshold:  # COSINE 相似度阈值
                 continue
         except (TypeError, ValueError):
             continue

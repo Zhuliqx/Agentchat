@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-05（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-06（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -23,7 +23,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 | **239 / 33**（另有 task-agent 独立包 **101**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 | **246 / 46**（另有 task-agent 独立包 **101**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
 ## 项目构成

@@ -158,6 +158,6 @@ class Task(Base):
     )
 
 
-# 与历史手工 DDL 对齐：会话按 updated_at、文档按 created_at 倒序建索引
+# 列表排序常用倒序索引（由 Alembic 按 ORM 元数据生成）
 Index("ix_sessions_updated_at", Session.updated_at.desc())
 Index("ix_documents_created_at", Document.created_at.desc())
