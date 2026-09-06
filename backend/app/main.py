@@ -85,6 +85,7 @@ def _warmup_sync() -> None:
     - Supervisor 图（含各子 Agent）在延迟导入方案下首次对话才构建，后台预热避免首轮等待；
       图由 _graph_cache 缓存，预热失败则请求时按需构建（仅告警）。
     """
+    logger.info("后台模型预热开始（不阻塞监听）")
     try:
         if settings.rerank_enabled:
             from app.rag.rerank import _get_reranker
@@ -114,6 +115,7 @@ def _warmup_sync() -> None:
         logger.info("Supervisor 图预热完成")
     except Exception as exc:
         logger.warning("图预热失败（请求时将按需构建）: %s", exc)
+    logger.info("后台模型预热流程结束（失败项已单独告警）")
 
 
 @asynccontextmanager
@@ -130,6 +132,7 @@ async def lifespan(app: FastAPI):
         )
         _root.addHandler(_handler)
     _root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    logger.info("启动阶段 1/5：Alembic 迁移与数据库初始化")
     # 对外监听时禁止使用开发默认值或过短密钥（防止 token 可被伪造/爆破）
     if settings.host not in _LOOPBACK_HOSTS and (
         settings.auth_secret == _DEV_AUTH_SECRET or len(settings.auth_secret) < 32
@@ -152,6 +155,7 @@ async def lifespan(app: FastAPI):
     from app.db.runtime_settings import load_runtime_settings
 
     load_runtime_settings()
+    logger.info("启动阶段 2/5：向量库 / Checkpointer / Store 初始化")
     try:
         ensure_vector_store()
     except Exception as exc:  # 数据库未启动时不阻塞应用
@@ -173,6 +177,7 @@ async def lifespan(app: FastAPI):
     cleanup_stale_checkpoints()
 
     # 启动 MCP 服务器（自建 stdio + 外部 http）
+    logger.info("启动阶段 3/5：连接 MCP 服务器（并行）")
     try:
         connected = await get_mcp_manager().start_all()
         logger.info("MCP 已连接服务器: %s", connected)
@@ -180,11 +185,13 @@ async def lifespan(app: FastAPI):
         logger.warning("MCP 启动失败: %s", exc)
 
     # 后台预热 rerank 模型（不阻塞启动，避免首个 RAG 请求卡顿下载）
+    logger.info("启动阶段 4/5：后台模型预热")
     threading.Thread(target=_warmup_sync, daemon=True).start()
 
     # 启动后台任务调度器（定时/批处理任务）
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(scheduler_loop(scheduler_stop))
+    logger.info("启动阶段 5/5：调度器就绪，应用启动完成")
 
     yield
 

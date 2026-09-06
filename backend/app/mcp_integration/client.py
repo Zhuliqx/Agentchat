@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -44,27 +45,60 @@ class McpServerHandle:
 
 class McpClientManager:
     def __init__(self) -> None:
-        self._stack = AsyncExitStack()
         self._handles: dict[str, McpServerHandle] = {}
+        self._conn_tasks: dict[str, asyncio.Task] = {}
+        self._stop_events: dict[str, asyncio.Event] = {}
+        self._ready_events: dict[str, asyncio.Event] = {}
 
     # ---------------- 生命周期 ----------------
 
     async def start_all(self) -> list[str]:
-        """启动全部已配置的 MCP 服务器，返回已连接服务器名。"""
+        """并行启动全部 MCP 服务器；每个连接在自己的任务内完成启停。"""
         for name, (cmd, args) in self._builtin_servers().items():
-            try:
-                await self._start_stdio(name, cmd, args)
-            except Exception as exc:
-                logger.warning("自建 MCP '%s' 启动失败: %s", name, exc)
+            ready = asyncio.Event()
+            stop = asyncio.Event()
+            self._ready_events[name] = ready
+            self._stop_events[name] = stop
+            self._conn_tasks[name] = asyncio.create_task(
+                self._run_connection(
+                    name=name,
+                    kind="stdio",
+                    cmd=cmd,
+                    args=args,
+                    ready=ready,
+                    stop=stop,
+                )
+            )
         for name, url in settings.external_mcp_servers.items():
-            try:
-                await self._start_http(name, url)
-            except Exception as exc:
-                logger.warning("外部 MCP '%s' 连接失败: %s", name, exc)
+            ready = asyncio.Event()
+            stop = asyncio.Event()
+            self._ready_events[name] = ready
+            self._stop_events[name] = stop
+            self._conn_tasks[name] = asyncio.create_task(
+                self._run_connection(
+                    name=name,
+                    kind="http",
+                    url=url,
+                    ready=ready,
+                    stop=stop,
+                )
+            )
+        if self._ready_events:
+            await asyncio.gather(
+                *(event.wait() for event in self._ready_events.values())
+            )
         return list(self._handles.keys())
 
     async def stop_all(self) -> None:
-        await self._stack.aclose()
+        """通知各连接任务自行关闭（保证退出动作发生在进入时的同一任务）。"""
+        for event in self._stop_events.values():
+            event.set()
+        tasks = list(self._conn_tasks.values())
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._conn_tasks.clear()
+        self._stop_events.clear()
+        self._ready_events.clear()
         self._handles.clear()
 
     # ---------------- 连接建立 ----------------
@@ -75,21 +109,58 @@ class McpClientManager:
             "time": (settings.mcp_time_server_cmd, [settings.mcp_time_server_args]),
         }
 
-    async def _start_stdio(self, name: str, cmd: str, args: list[str]) -> None:
+    async def _run_connection(
+        self,
+        name: str,
+        kind: str,
+        ready: asyncio.Event,
+        stop: asyncio.Event,
+        cmd: str = "",
+        args: list[str] | None = None,
+        url: str = "",
+    ) -> None:
+        """单个 MCP 连接任务：连接成功后等待关闭信号，由本任务自行清理。"""
+        stack = AsyncExitStack()
+        try:
+            if kind == "http":
+                await self._connect_http(stack, name, url)
+            else:
+                await self._connect_stdio(stack, name, cmd, args or [])
+        except Exception as exc:
+            logger.warning("MCP '%s' 启动失败: %s", name, exc)
+        finally:
+            ready.set()
+            try:
+                await stop.wait()
+            finally:
+                await stack.aclose()
+
+    async def _connect_stdio(
+        self,
+        stack: AsyncExitStack,
+        name: str,
+        cmd: str,
+        args: list[str],
+    ) -> None:
         params = StdioServerParameters(command=cmd, args=args, cwd=str(BASE_DIR))
         ctx = stdio_client(params)
-        read, write = await self._stack.enter_async_context(ctx)
-        session = await self._stack.enter_async_context(ClientSession(read, write))
+        read, write = await stack.enter_async_context(ctx)
+        session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         tools = (await session.list_tools()).tools
         self._handles[name] = McpServerHandle(name=name, transport="stdio", session=session, tools=tools)
         logger.info("MCP stdio 服务器 '%s' 已连接，工具数: %d", name, len(tools))
 
-    async def _start_http(self, name: str, url: str) -> None:
+    async def _connect_http(
+        self,
+        stack: AsyncExitStack,
+        name: str,
+        url: str,
+    ) -> None:
         # streamable_http_client 返回 3 元组：read / write / get_session_id
         ctx = make_http_client(url)
-        read, write, _get_session_id = await self._stack.enter_async_context(ctx)
-        session = await self._stack.enter_async_context(ClientSession(read, write))
+        read, write, _get_session_id = await stack.enter_async_context(ctx)
+        session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         tools = (await session.list_tools()).tools
         self._handles[name] = McpServerHandle(name=name, transport="http", session=session, tools=tools)

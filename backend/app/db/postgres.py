@@ -47,6 +47,8 @@ def run_migrations() -> bool:
                 from alembic.config import Config
 
                 cfg = Config(str(BASE_DIR / "alembic.ini"))
+                # 应用内跑迁移时不重配 logging，避免 alembic.ini 吞掉启动日志
+                cfg.attributes["configure_logging"] = False
                 command.upgrade(cfg, "head")
                 return True
             finally:

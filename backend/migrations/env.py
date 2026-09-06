@@ -39,7 +39,13 @@ Table(
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.postgres_dsn)
 
-if config.config_file_name is not None:
+# 应用启动时通过 run_migrations() 调用本环境文件：跳过日志重配置，
+# 避免 alembic.ini 把根 logger 重置为 WARNING 而吞掉应用启动日志。
+# 仅命令行执行 alembic 时才使用 ini 的 logging 配置。
+if (
+    config.config_file_name is not None
+    and config.attributes.get("configure_logging", True)
+):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

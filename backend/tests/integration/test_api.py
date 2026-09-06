@@ -56,6 +56,7 @@ def test_health(client):
     assert body["postgres"]["ok"] is True
     assert body["milvus"]["connected"] is True
     assert "redis" in body
+    assert {"db", "time"}.issubset(set(body["mcp_servers"]))
 
 
 # ---------------- 会话 ----------------
