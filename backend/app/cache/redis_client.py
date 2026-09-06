@@ -28,18 +28,19 @@ def _new_client() -> Any:
     """按配置创建惰性 Redis 客户端（连接真正发生时才会建立）。"""
     import redis
 
-    common = {
-        "socket_timeout": settings.redis_socket_timeout,
-        "socket_connect_timeout": settings.redis_socket_timeout,
-    }
     if settings.redis_url.strip():
-        return redis.Redis.from_url(settings.redis_url.strip(), **common)
+        return redis.Redis.from_url(
+            settings.redis_url.strip(),
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_socket_timeout,
+        )
     return redis.Redis(
         host=settings.redis_host,
         port=settings.redis_port,
         db=settings.redis_db,
         password=settings.redis_password or None,  # 空密码按无认证处理，避免 redis-py 发送空 AUTH
-        **common,
+        socket_timeout=settings.redis_socket_timeout,
+        socket_connect_timeout=settings.redis_socket_timeout,
     )
 
 
@@ -75,6 +76,9 @@ def init_redis() -> None:
         return
     try:
         client = get_redis()
+        if client is None:
+            logger.warning("Redis 客户端不可用（跳过启动探测）")
+            return
         client.ping()
         endpoint = (
             settings.redis_url.strip()
@@ -96,6 +100,9 @@ def redis_health() -> dict:
         return {"enabled": False}
     try:
         client = get_redis()
+        if client is None:
+            logger.warning("Redis 客户端不可用")
+            return {"enabled": True, "ok": False, "error": "客户端不可用"}
         client.ping()
         return {"enabled": True, "ok": True}
     except Exception as exc:  # noqa: BLE001
