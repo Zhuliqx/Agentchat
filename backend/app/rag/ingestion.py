@@ -238,9 +238,8 @@ def ingest_file(
     vectors: list = []
     new_chunks: list = []
     if to_write:
-        from app.rag.embedding import get_embedder
+        from app.rag.embedding import embed_texts_cached
 
-        embedder = get_embedder()
         _progress(40, "生成向量嵌入")
         new_chunks = [c for _, c in to_write]
         texts = [c["text"] for c in new_chunks]
@@ -250,7 +249,7 @@ def ingest_file(
         batch = max(1, int(settings.embed_batch_size or 32))
         n = len(texts)
         for i in range(0, n, batch):
-            vectors.extend(embedder.embed_texts(texts[i : i + batch]))
+            vectors.extend(embed_texts_cached(texts[i : i + batch]))
             _progress(40 + int(40 * min(1, (i + batch) / max(1, n))),
                       f"嵌入 {min(i + batch, n)}/{n}")
 

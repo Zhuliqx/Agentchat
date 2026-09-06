@@ -107,7 +107,7 @@ def _sync_pending_vectors(limit: int = 200) -> tuple[int, int]:
     from app.db.models import Document, utcnow
     from app.db.postgres import SessionLocal
     from app.rag import vector_store
-    from app.rag.embedding import get_embedder
+    from app.rag.embedding import embed_texts_cached
 
     with SessionLocal() as db:
         pending = (
@@ -128,7 +128,6 @@ def _sync_pending_vectors(limit: int = 200) -> tuple[int, int]:
         groups: dict[tuple[str, str], list] = {}
         for r in rows:
             groups.setdefault((r.user_id, r.source), []).append(r)
-        embedder = get_embedder()
         ok = 0
         errors = 0
         for (user_id, source), items in groups.items():
@@ -138,7 +137,7 @@ def _sync_pending_vectors(limit: int = 200) -> tuple[int, int]:
                     for r in items
                 ]
                 doc_ids = [r.id for r in items]
-                vectors = embedder.embed_texts([c["text"] for c in chunks])
+                vectors = embed_texts_cached([c["text"] for c in chunks])
                 vector_store.sync_chunks(
                     chunks,
                     doc_ids=doc_ids,
@@ -173,11 +172,10 @@ def _reconcile_sources(max_sources: int = 20) -> tuple[int, int, int]:
     from app.db.models import Document, utcnow
     from app.db.postgres import SessionLocal, distinct_document_sources
     from app.rag import vector_store
-    from app.rag.embedding import get_embedder
+    from app.rag.embedding import embed_texts_cached
 
     pairs = distinct_document_sources()
     ghosts = written = 0
-    embedder = get_embedder()
     for user_id, source in pairs[:max_sources]:
         with SessionLocal() as db:
             rows = (
@@ -205,7 +203,7 @@ def _reconcile_sources(max_sources: int = 20) -> tuple[int, int, int]:
                     for r in items
                 ]
                 doc_ids = [r.id for r in items]
-                vectors = embedder.embed_texts([c["text"] for c in chunks])
+                vectors = embed_texts_cached([c["text"] for c in chunks])
                 vector_store.sync_chunks(
                     chunks,
                     doc_ids=doc_ids,

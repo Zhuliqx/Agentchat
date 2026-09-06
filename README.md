@@ -245,6 +245,7 @@ python run.py
 | `HISTORY_SUMMARY_MAX_INPUT_TOKENS` | `3000` | 喂给摘要模型的输入截断上限 |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地向量模型 |
 | `EMBEDDING_DEVICE` | `auto` | 推理设备：auto=有 CUDA 用 cuda 否则 cpu（embedding 与 rerank 共用），或显式 cuda/cpu |
+| `EMBEDDING_CACHE_ENABLED` | `false` | 跨 worker 共享 embedding 向量（仅存向量，不存原文） |
 | `INJECTION_DETECTION_ENABLED` | `true` | Prompt 注入检测（外部内容命中→剔除，用户 query 命中→400） |
 | `INJECTION_LLM_REVIEW` | `false` | 规则命中后用 LLM 复核再剔除（降误报，有成本） |
 | `INJECTION_OUTPUT_FILTER` | `true` | 输出泄露检测（系统提示词片段/密钥模式，仅告警） |

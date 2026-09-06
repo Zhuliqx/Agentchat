@@ -6,7 +6,8 @@
 - 启用但连接失败：启动不阻断、健康检查报 degraded，由具体调用方决定降级策略。
 
 当前已接入：登录失败计数（`app/api/routes/auth.py`）、摄入任务进度
-（`app/api/routes/rag.py`）、BM25 文档集签名（`app/rag/hybrid.py`）。
+（`app/api/routes/rag.py`）、BM25 文档集签名（`app/rag/hybrid.py`）、
+embedding 向量缓存（`app/rag/embedding.py`，仅存向量不存原文）。
 """
 from __future__ import annotations
 

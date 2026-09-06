@@ -85,6 +85,8 @@ class EmbeddingSection(BaseModel):
     embedding_provider: str = "local"           # local | openai
     embedding_dim: int = 512                    # 向量维度（与模型对齐）
     embedding_device: str = "auto"              # auto=有 CUDA 用 cuda 否则 cpu；或显式 cuda / cpu
+    embedding_cache_enabled: bool = False       # 跨 worker 共享 embedding 结果（默认关）
+    embedding_cache_ttl_seconds: int = 86400    # embedding 缓存保留时长（秒）
 
 
 class LLMSection(BaseModel):

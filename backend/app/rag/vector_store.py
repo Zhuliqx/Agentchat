@@ -14,7 +14,7 @@ from typing import Any, Optional, cast
 from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
 
 from app.config import settings
-from app.rag.embedding import embed_query_cached, get_embedder
+from app.rag.embedding import embed_query_cached, embed_texts_cached
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +194,7 @@ def add_chunks(
         raise ValueError("chunk_indexes 与 chunks 长度不一致")
 
     if vectors is None:
-        embedder = get_embedder()
-        vectors = embedder.embed_texts([c["text"] for c in chunks])
+        vectors = embed_texts_cached([c["text"] for c in chunks])
 
     rows: list[dict[str, Any]] = []
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
