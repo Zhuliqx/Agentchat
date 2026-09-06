@@ -62,7 +62,7 @@ flowchart TB
 | 向量库 | Milvus + pymilvus | 文档块向量存储与相似度检索；source 标量索引加速删除/过滤 |
 | 检索 | 向量 + BM25 + RRF 混合检索；CrossEncoder rerank；查询改写（rule/llm，可开关） | 两路召回融合 + 精排 + 可选改写，提升召回与 top-k 质量 |
 | 关系库 | PostgreSQL + SQLAlchemy | 会话、消息历史、文档元数据（BM25 文本源） |
-| 跨进程状态（可选） | Redis + redis-py | 默认关闭（`REDIS_ENABLED=false`）；登录失败计数、摄入任务进度、BM25 文档集签名与 embedding 向量缓存已支持 Redis（启用后多 worker 共享）；事实源仍为 Postgres |
+| 跨进程状态（可选） | Redis + redis-py | 默认关闭（`REDIS_ENABLED=false`）；登录失败计数、摄入任务进度、BM25 文档集签名、embedding 向量缓存与检索结果 identity 缓存已支持 Redis（启用后多 worker 共享）；事实源仍为 Postgres |
 | 记忆 | LangGraph Checkpointer + Store（Postgres） | 短期=thread 状态；长期=跨线程 namespace |
 | 嵌入 | sentence-transformers / OpenAI | 文本向量化（默认 `bge-small-zh-v1.5`） |
 | 联网搜索 | Tavily (`langchain-tavily`) | 直接 Tavily 搜索工具（非子 Agent），Supervisor 单次调用后自行总结 |

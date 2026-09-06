@@ -260,6 +260,8 @@ class RetrievalEnhancementsSection(BaseModel):
     rerank_section_context: bool = False        # rerank pair 文本带上章节/文件名前缀
     rag_front_load_best: bool = False           # 相关块前置（lost-in-the-middle 缓解）
     pdf_page_meta: bool = False                 # PDF 按页分块并记录 metadata["page"]
+    retrieval_cache_enabled: bool = False       # 跨 worker 检索结果缓存（默认关；不缓存正文）
+    retrieval_cache_ttl_seconds: int = 30       # 检索结果缓存保留时长（秒）
 
 
 class InjectionSection(BaseModel):

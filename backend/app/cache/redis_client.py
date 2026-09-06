@@ -7,7 +7,8 @@
 
 当前已接入：登录失败计数（`app/api/routes/auth.py`）、摄入任务进度
 （`app/api/routes/rag.py`）、BM25 文档集签名（`app/rag/hybrid.py`）、
-embedding 向量缓存（`app/rag/embedding.py`，仅存向量不存原文）。
+embedding 向量缓存（`app/rag/embedding.py`，仅存向量不存原文）、
+检索结果 identity 缓存（`app/rag/retrieval_cache.py`，正文仍从 Postgres 重建）。
 """
 from __future__ import annotations
 

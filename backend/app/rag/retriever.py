@@ -13,7 +13,7 @@ from langchain_core.retrievers import BaseRetriever
 from pydantic import PrivateAttr
 
 from app.config import settings
-from app.rag import hybrid, vector_store
+from app.rag import hybrid, retrieval_cache, vector_store
 from app.rag.postprocess import (
     _apply_total_budget,
     _best_score,
@@ -55,6 +55,23 @@ class MilvusRetriever(BaseRetriever):
         return vector_store.user_filter_expr(self.user_id)
 
     def _get_relevant_documents(self, query: str) -> list[LCDocument]:
+        """检索入口：缓存开启时先查 identity 缓存，未命中才走完整检索管线。"""
+        if settings.retrieval_cache_enabled and not settings.image_dual_channel:
+            signature = hybrid._docs_signature(self.user_id)
+            cached = retrieval_cache.load_cached_docs(
+                self.user_id, query, signature
+            )
+            if cached is not None:
+                return cached
+            docs = self._retrieve_uncached(query)
+            retrieval_cache.store_cached_docs(
+                self.user_id, query, signature, docs
+            )
+            return docs
+        return self._retrieve_uncached(query)
+
+    def _retrieve_uncached(self, query: str) -> list[LCDocument]:
+        """完整检索管线：意图路由/改写/双路/rerank/去重/预算/截断。"""
         # 意图路由：按 query 类型调整 top_k / threshold / 是否改写 / 是否拆多路
         if settings.intent_routing:
             from app.rag.intent import classify, split_compare
