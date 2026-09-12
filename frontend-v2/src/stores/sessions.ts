@@ -11,8 +11,7 @@ export const useSessionsStore = defineStore("sessions", {
     loading: false,
   }),
   getters: {
-    current: (s): Session | null =>
-      s.list.find((x) => x.id === s.currentId) || null,
+    current: (s): Session | null => s.list.find((x) => x.id === s.currentId) || null,
   },
   actions: {
     async load() {

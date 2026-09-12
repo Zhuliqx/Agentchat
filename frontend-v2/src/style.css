@@ -26,7 +26,8 @@
   --color-err: #e5534b;
   --color-code-bg: #0e1014;
   --color-code: #d6dbe6;
-  --font-sans: "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-sans:
+    "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
@@ -230,7 +231,9 @@ select:focus-visible {
   opacity: 0;
 }
 .pop-enter-active {
-  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    opacity 0.18s ease,
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .pop-enter-from {
   opacity: 0;
@@ -398,4 +401,3 @@ select:focus-visible {
   max-width: 100%;
   border-radius: 8px;
 }
-

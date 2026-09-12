@@ -13,8 +13,8 @@ function focusableItems(): HTMLElement[] {
   if (!root) return [];
   return Array.from(
     root.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-    )
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+    ),
   );
 }
 
@@ -61,7 +61,7 @@ watch(
       restorePageState();
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 onBeforeUnmount(restorePageState);
@@ -86,14 +86,23 @@ onBeforeUnmount(restorePageState);
             :class="small ? 'max-w-[400px]' : 'max-w-[600px]'"
             @keydown="onKeydown"
           >
-            <div class="flex flex-shrink-0 items-center justify-between border-b border-line px-5 py-3.5">
+            <div
+              class="flex flex-shrink-0 items-center justify-between border-b border-line px-5 py-3.5"
+            >
               <span :id="titleId" class="text-[14px] font-medium tracking-tight">{{ title }}</span>
               <button
                 class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
                 aria-label="关闭"
                 @click="emit('close')"
               >
-                <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <svg
+                  viewBox="0 0 24 24"
+                  class="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                >
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>

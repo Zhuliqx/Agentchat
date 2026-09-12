@@ -12,10 +12,7 @@ export const useTasksStore = defineStore("tasks", {
     async load() {
       this.loading = true;
       try {
-        const [list, registry] = await Promise.all([
-          tasksApi.list(),
-          tasksApi.registry(),
-        ]);
+        const [list, registry] = await Promise.all([tasksApi.list(), tasksApi.registry()]);
         this.list = list;
         this.registry = registry;
       } finally {

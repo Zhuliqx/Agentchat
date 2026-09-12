@@ -26,9 +26,7 @@ function saveDraft() {
   }
 }
 function loadDraft() {
-  input.value = sessions.currentId
-    ? localStorage.getItem(draftKey(sessions.currentId)) || ""
-    : "";
+  input.value = sessions.currentId ? localStorage.getItem(draftKey(sessions.currentId)) || "" : "";
   autoResize();
 }
 
@@ -39,11 +37,9 @@ watch(
   (newId) => {
     if (lastSid) localStorage.setItem(draftKey(lastSid), input.value);
     lastSid = newId;
-    input.value = newId
-      ? localStorage.getItem(draftKey(newId)) || ""
-      : "";
+    input.value = newId ? localStorage.getItem(draftKey(newId)) || "" : "";
     autoResize();
-  }
+  },
 );
 
 onMounted(() => {

@@ -27,11 +27,9 @@ beforeEach(() => {
 });
 
 function emitFrames(frames: AgentTaskFrame[]) {
-  runStream.mockImplementation(
-    async (_body: unknown, onFrame: (f: AgentTaskFrame) => void) => {
-      for (const f of frames) await onFrame(f);
-    }
-  );
+  runStream.mockImplementation(async (_body: unknown, onFrame: (f: AgentTaskFrame) => void) => {
+    for (const f of frames) await onFrame(f);
+  });
 }
 
 describe("taskAgent store", () => {
@@ -56,7 +54,7 @@ describe("taskAgent store", () => {
     expect(runStream).toHaveBeenCalledWith(
       { goal: "做一个调研" },
       expect.any(Function),
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     expect(store.status).toBe("done");
     expect(store.sessionId).toBe("task-abc");
@@ -110,7 +108,7 @@ describe("taskAgent store", () => {
             final_answer: "答案是 42",
           },
         });
-      }
+      },
     );
     await store.confirm("proceed");
 
@@ -122,7 +120,7 @@ describe("taskAgent store", () => {
         source: undefined,
       },
       expect.any(Function),
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     // 恢复后的事件进入轨迹（HITL 之后不再只有“重新规划/人工确认”）
     expect(store.events.map((e) => e.kind)).toContain("execute");
@@ -187,7 +185,7 @@ describe("taskAgent store", () => {
             final_answer: "答案是 42",
           },
         });
-      }
+      },
     );
     await store.confirm("proceed");
     expect(store.events.filter((e) => e.kind === "hitl")).toHaveLength(1);
@@ -225,7 +223,7 @@ describe("taskAgent store", () => {
           signal.addEventListener("abort", () => {
             reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
           });
-        })
+        }),
     );
     const p = store.run("长任务");
     expect(store.status).toBe("running");
@@ -242,7 +240,13 @@ describe("taskAgent store", () => {
     emitFrames([
       {
         type: "result",
-        data: { session_id: "task-abc", status: "done", plan: null, findings: [], final_answer: "x" },
+        data: {
+          session_id: "task-abc",
+          status: "done",
+          plan: null,
+          findings: [],
+          final_answer: "x",
+        },
       },
     ]);
     await store.fork("cp-1", "", "新目标");
@@ -255,12 +259,14 @@ describe("taskAgent store", () => {
         checkpoint_ns: "",
       },
       expect.any(Function),
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
 
     historyApi.mockResolvedValue({
       session_id: "task-abc",
-      history: [{ checkpoint_id: "cp-1", created_at: "", next: [], summary: "旧", interrupted: false }],
+      history: [
+        { checkpoint_id: "cp-1", created_at: "", next: [], summary: "旧", interrupted: false },
+      ],
     });
     await store.loadHistory();
     expect(store.history).toHaveLength(1);

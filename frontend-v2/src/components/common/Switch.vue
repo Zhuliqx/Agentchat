@@ -13,11 +13,7 @@ const emit = defineEmits<{ "update:modelValue": [v: boolean] }>();
   >
     <span
       class="relative h-[16px] w-[28px] flex-shrink-0 rounded-full border transition-colors"
-      :class="
-        modelValue
-          ? 'border-accent bg-accent'
-          : 'border-line-2 bg-surface-3'
-      "
+      :class="modelValue ? 'border-accent bg-accent' : 'border-line-2 bg-surface-3'"
     >
       <span
         class="absolute top-1/2 h-[10px] w-[10px] -translate-y-1/2 rounded-full transition-all"

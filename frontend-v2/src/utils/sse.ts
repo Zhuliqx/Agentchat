@@ -3,7 +3,7 @@ import type { SSEEvent } from "@/types/api";
 
 export async function readSSEStream(
   res: Response,
-  onEvent: (ev: SSEEvent) => void | Promise<void>
+  onEvent: (ev: SSEEvent) => void | Promise<void>,
 ): Promise<void> {
   if (!res.body) throw new Error("当前浏览器不支持流式响应");
   const reader = res.body.getReader();

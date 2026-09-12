@@ -36,7 +36,7 @@ export function createMarkdownRenderer() {
         const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
         return hljs.highlight(code, { language }).value;
       },
-    })
+    }),
   );
 
   marked.setOptions({
@@ -85,4 +85,3 @@ export type MarkdownRenderer = ReturnType<typeof createMarkdownRenderer>;
 
 // 全局单例：marked.use 是全局配置，多次调用会重复注册插件
 export const md = createMarkdownRenderer();
-

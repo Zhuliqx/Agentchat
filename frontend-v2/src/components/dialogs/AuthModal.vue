@@ -73,14 +73,22 @@ async function guest() {
     <div class="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-line bg-surface-2 p-1">
       <button
         class="rounded-md py-1.5 text-[13px] transition"
-        :class="auth.authTab === 'login' ? 'bg-surface-3 font-medium text-ink' : 'text-ink-faint hover:text-ink-dim'"
+        :class="
+          auth.authTab === 'login'
+            ? 'bg-surface-3 font-medium text-ink'
+            : 'text-ink-faint hover:text-ink-dim'
+        "
         @click="setTab('login')"
       >
         登录
       </button>
       <button
         class="rounded-md py-1.5 text-[13px] transition"
-        :class="auth.authTab === 'register' ? 'bg-surface-3 font-medium text-ink' : 'text-ink-faint hover:text-ink-dim'"
+        :class="
+          auth.authTab === 'register'
+            ? 'bg-surface-3 font-medium text-ink'
+            : 'text-ink-faint hover:text-ink-dim'
+        "
         @click="setTab('register')"
       >
         注册

@@ -131,7 +131,7 @@ export const useChatStore = defineStore("chat", {
         useMemory?: boolean;
         resume?: "confirmed" | "cancelled";
         checkpointId?: string;
-      } = {}
+      } = {},
     ): Record<string, unknown> {
       const options = useChatOptionsStore();
       const payload: Record<string, unknown> = {
@@ -178,12 +178,17 @@ export const useChatStore = defineStore("chat", {
       const userMsg = this.findLastUserMsg();
       if (!userMsg) return;
       // 复用 interrupt 时的消息（仍在 DOM/列表里）
-      const agentMsg = this.hitlMsgId
-        ? this.messages.find((m) => m.id === this.hitlMsgId)
-        : null;
+      const agentMsg = this.hitlMsgId ? this.messages.find((m) => m.id === this.hitlMsgId) : null;
       const target: ChatMsg =
         agentMsg ||
-        reactive({ id: nid(), role: "assistant", content: "", streaming: true, orbit: [], hitl: null });
+        reactive({
+          id: nid(),
+          role: "assistant",
+          content: "",
+          streaming: true,
+          orbit: [],
+          hitl: null,
+        });
       if (!agentMsg) this.messages.push(target);
       target.hitl = null;
       target.streaming = true;
@@ -255,13 +260,9 @@ export const useChatStore = defineStore("chat", {
     /** 重发前清理被截断消息的服务端记录；删除失败不阻塞重发（best-effort）。 */
     async _deleteBackendMessages(msgs: ChatMsg[]) {
       const sessionId = useSessionsStore().currentId;
-      const ids = msgs
-        .map((m) => m.backendId)
-        .filter((id): id is string => !!id);
+      const ids = msgs.map((m) => m.backendId).filter((id): id is string => !!id);
       if (!sessionId || !ids.length) return;
-      await Promise.allSettled(
-        ids.map((id) => sessionsApi.deleteMessage(sessionId, id))
-      );
+      await Promise.allSettled(ids.map((id) => sessionsApi.deleteMessage(sessionId, id)));
     },
 
     async _runStream(payload: Record<string, unknown>, agentMsg: ChatMsg) {
@@ -272,7 +273,7 @@ export const useChatStore = defineStore("chat", {
         await streamChat(
           payload as never,
           (ev: SSEEvent) => this._handleEvent(ev, agentMsg),
-          controller.signal
+          controller.signal,
         );
       } catch (e: unknown) {
         if ((e as Error).name === "AbortError") {
@@ -334,10 +335,7 @@ export const useChatStore = defineStore("chat", {
           const label = orbitLabel(t, ev.content);
           // 同标签去重：后端对同一工具会推送 agent("调用 xxx") + tool("工具: xxx")，
           // 两者解析出的轨道标签相同，避免轨道出现重复节点
-          if (
-            (t === "agent" || t === "tool") &&
-            agentMsg.orbit.some((n) => n.label === label)
-          )
+          if ((t === "agent" || t === "tool") && agentMsg.orbit.some((n) => n.label === label))
             return;
           if (t === "tool") {
             // 新工具调用：前一个停止闪烁，当前节点开始闪烁（执行中）

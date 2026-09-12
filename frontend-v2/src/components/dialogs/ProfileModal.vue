@@ -152,7 +152,7 @@ async function deleteAccount() {
   }
   if (
     !(await ui.confirm(
-      "注销将永久删除该账号的全部会话、消息、记忆与知识库文档，且不可恢复。确定继续？"
+      "注销将永久删除该账号的全部会话、消息、记忆与知识库文档，且不可恢复。确定继续？",
     ))
   )
     return;
@@ -197,7 +197,9 @@ async function deleteAccount() {
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <span class="text-[16px] font-semibold tracking-tight">{{ st.username }}</span>
-            <span class="rounded-full bg-ok/12 px-2 py-0.5 text-[10px] font-medium text-ok">已登录</span>
+            <span class="rounded-full bg-ok/12 px-2 py-0.5 text-[10px] font-medium text-ok"
+              >已登录</span
+            >
           </div>
           <div class="mt-0.5 truncate font-mono text-[11px] text-ink-faint">{{ me?.id }}</div>
         </div>
@@ -226,17 +228,23 @@ async function deleteAccount() {
         <div class="flex items-center gap-2.5 bg-surface-2 px-3.5 py-2.5">
           <Icon name="clock" :size="14" class="flex-shrink-0 text-ink-faint" />
           <span class="flex-1 text-[12px] text-ink-faint">注册时间</span>
-          <span class="text-[12px] text-ink-dim">{{ new Date(st.created_at).toLocaleString() }}</span>
+          <span class="text-[12px] text-ink-dim">{{
+            new Date(st.created_at).toLocaleString()
+          }}</span>
         </div>
         <div class="flex items-center gap-2.5 border-t border-line bg-surface-2 px-3.5 py-2.5">
           <Icon name="key" :size="14" class="flex-shrink-0 text-ink-faint" />
           <span class="flex-1 text-[12px] text-ink-faint">用户 ID</span>
-          <span class="max-w-[220px] break-all font-mono text-[11px] text-ink-dim">{{ me?.id }}</span>
+          <span class="max-w-[220px] break-all font-mono text-[11px] text-ink-dim">{{
+            me?.id
+          }}</span>
         </div>
         <div class="flex items-center gap-2.5 border-t border-line bg-surface-2 px-3.5 py-2.5">
           <Icon name="stats" :size="14" class="flex-shrink-0 text-ink-faint" />
           <span class="flex-1 text-[12px] text-ink-faint">内容估算</span>
-          <span class="text-[12px] text-ink-dim">约 {{ st.token_estimate.toLocaleString() }} tokens</span>
+          <span class="text-[12px] text-ink-dim"
+            >约 {{ st.token_estimate.toLocaleString() }} tokens</span
+          >
         </div>
       </div>
       <!-- 资料 -->
@@ -258,7 +266,11 @@ async function deleteAccount() {
                 :key="key"
                 type="button"
                 class="grid h-8 w-8 place-items-center rounded-full transition hover:scale-110 active:scale-95"
-                :class="selectedColor === key ? 'ring-2 ring-ink-dim ring-offset-2 ring-offset-surface' : ''"
+                :class="
+                  selectedColor === key
+                    ? 'ring-2 ring-ink-dim ring-offset-2 ring-offset-surface'
+                    : ''
+                "
                 :title="AVATAR_COLORS[key].label"
                 @click="pickColor(key)"
               >

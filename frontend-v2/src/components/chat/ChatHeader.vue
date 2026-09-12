@@ -18,7 +18,9 @@ const title = computed(() => sessions.current?.title || "新会话");
 </script>
 
 <template>
-  <header class="flex h-[48px] flex-shrink-0 items-center gap-1 border-b border-line bg-bg/80 px-3 backdrop-blur">
+  <header
+    class="flex h-[48px] flex-shrink-0 items-center gap-1 border-b border-line bg-bg/80 px-3 backdrop-blur"
+  >
     <div class="min-w-0 flex-1 truncate px-2">
       <h2 class="truncate text-[13.5px] font-medium tracking-tight text-ink">{{ title }}</h2>
     </div>

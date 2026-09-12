@@ -25,7 +25,7 @@ function emitStream(events: unknown[]) {
   (streamChat as unknown as ReturnType<typeof vi.fn>).mockImplementation(
     async (_payload: unknown, onEvent: (ev: unknown) => void) => {
       for (const ev of events) await onEvent(ev);
-    }
+    },
   );
 }
 
@@ -35,7 +35,10 @@ describe("chat store", () => {
     const sessions = useSessionsStore();
     sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
     sessions.currentId = "s1";
-    emitStream([{ type: "token", content: "你" }, { type: "token", content: "好" }]);
+    emitStream([
+      { type: "token", content: "你" },
+      { type: "token", content: "好" },
+    ]);
     await chat.send("hi");
     expect(chat.messages.length).toBe(2);
     expect(chat.messages[0].role).toBe("user");
@@ -97,7 +100,7 @@ describe("chat store", () => {
           signal.addEventListener("abort", () => {
             reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
           });
-        })
+        }),
     );
     const p = chat.send("hi");
     expect(chat.sending).toBe(true);
@@ -143,7 +146,7 @@ describe("chat store", () => {
           signal.addEventListener("abort", () => {
             reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
           });
-        })
+        }),
     );
     const p = chat.send("问题A");
     expect(chat.sending).toBe(true);
@@ -169,10 +172,7 @@ describe("chat store", () => {
 
     expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "u1");
     expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "a1");
-    expect(chat.messages.map((m) => m.content)).toEqual([
-      "问题A",
-      "重试后的回答",
-    ]);
+    expect(chat.messages.map((m) => m.content)).toEqual(["问题A", "重试后的回答"]);
   });
 
   it("editAndResend() replaces the user message without duplicating it", async () => {
@@ -190,10 +190,7 @@ describe("chat store", () => {
 
     expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "u1");
     expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "a1");
-    expect(chat.messages.map((m) => m.content)).toEqual([
-      "问题A（改）",
-      "编辑后的回答",
-    ]);
+    expect(chat.messages.map((m) => m.content)).toEqual(["问题A（改）", "编辑后的回答"]);
     expect(chat.messages.filter((m) => m.role === "user")).toHaveLength(1);
   });
 
@@ -202,12 +199,8 @@ describe("chat store", () => {
     let resolveFirst!: (v: unknown) => void;
     let resolveSecond!: (v: unknown) => void;
     (sessionsApi.history as unknown as ReturnType<typeof vi.fn>)
-      .mockImplementationOnce(
-        () => new Promise((resolve) => (resolveFirst = resolve))
-      )
-      .mockImplementationOnce(
-        () => new Promise((resolve) => (resolveSecond = resolve))
-      );
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = resolve)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveSecond = resolve)));
 
     const first = chat.loadHistory("s1");
     const second = chat.loadHistory("s2");
@@ -222,7 +215,7 @@ describe("chat store", () => {
   it("records history failures instead of rejecting callers", async () => {
     const chat = useChatStore();
     (sessionsApi.history as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error("加载失败")
+      new Error("加载失败"),
     );
 
     await expect(chat.loadHistory("s1")).resolves.toBeUndefined();
@@ -240,7 +233,7 @@ describe("chat store", () => {
           signal.addEventListener("abort", () => {
             reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
           });
-        })
+        }),
     );
     const pending = chat.send("hi");
     expect(chat.sending).toBe(true);
@@ -268,7 +261,7 @@ describe("chat store", () => {
           signal.addEventListener("abort", () => {
             reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
           });
-        })
+        }),
     );
     const pending = chat.send("hi");
     expect(chat.sending).toBe(true);

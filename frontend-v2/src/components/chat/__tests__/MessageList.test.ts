@@ -7,7 +7,7 @@ import { useChatStore } from "@/stores/chat";
 
 function setScrollMetrics(
   el: HTMLElement,
-  metrics: { scrollHeight: number; clientHeight: number; scrollTop: number }
+  metrics: { scrollHeight: number; clientHeight: number; scrollTop: number },
 ) {
   Object.defineProperty(el, "scrollHeight", {
     value: metrics.scrollHeight,
@@ -27,9 +27,7 @@ describe("MessageList auto scroll", () => {
 
   it("does not pull the user back down when they scrolled up", async () => {
     const chat = useChatStore();
-    chat.messages = [
-      { id: "m1", role: "assistant", content: "第一段", streaming: true },
-    ];
+    chat.messages = [{ id: "m1", role: "assistant", content: "第一段", streaming: true }];
     const wrapper = mount(MessageList, {
       global: { stubs: { MessageItem: true } },
     });

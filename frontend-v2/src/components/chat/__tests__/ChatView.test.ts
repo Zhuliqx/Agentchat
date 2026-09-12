@@ -27,7 +27,7 @@ describe("ChatView lazy dialogs", () => {
     setActivePinia(pinia);
     const HeaderStub = defineComponent({
       emits: ["stats"],
-      template: '<button @click="$emit(\'stats\')">stats</button>',
+      template: "<button @click=\"$emit('stats')\">stats</button>",
     });
     expect(state.statsImported).toBe(false);
 

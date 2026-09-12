@@ -42,11 +42,7 @@ function switchAccount() {
 </script>
 
 <template>
-  <Dropdown
-    :open="auth.menuOpen"
-    align="right"
-    @close="auth.closeMenu()"
-  >
+  <Dropdown :open="auth.menuOpen" align="right" @close="auth.closeMenu()">
     <template #trigger>
       <button
         v-if="auth.user"
@@ -78,7 +74,10 @@ function switchAccount() {
     <div class="p-1">
       <button
         class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-ink transition hover:bg-surface-2"
-        @click="auth.closeMenu(); emit('profile')"
+        @click="
+          auth.closeMenu();
+          emit('profile');
+        "
       >
         <Icon name="user" :size="14" class="text-ink-dim" />
         个人主页
@@ -86,14 +85,20 @@ function switchAccount() {
       <button
         v-if="auth.user?.is_admin"
         class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-ink transition hover:bg-surface-2"
-        @click="auth.closeMenu(); emit('admin')"
+        @click="
+          auth.closeMenu();
+          emit('admin');
+        "
       >
         <Icon name="shield" :size="14" class="text-ink-dim" />
         管理后台
       </button>
       <button
         class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-ink transition hover:bg-surface-2"
-        @click="auth.closeMenu(); switchAccount()"
+        @click="
+          auth.closeMenu();
+          switchAccount();
+        "
       >
         <Icon name="switch" :size="14" class="text-ink-dim" />
         切换账号
@@ -101,7 +106,10 @@ function switchAccount() {
       <div class="mx-1 my-1 h-px bg-line" />
       <button
         class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-err transition hover:bg-err/10"
-        @click="auth.closeMenu(); afterLogout()"
+        @click="
+          auth.closeMenu();
+          afterLogout();
+        "
       >
         <Icon name="logout" :size="14" />
         退出登录

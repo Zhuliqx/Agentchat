@@ -12,12 +12,8 @@ import { useDocsStore } from "@/stores/docs";
 import { useMemoryStore } from "@/stores/memory";
 import { useChatStore } from "@/stores/chat";
 
-const ProfileModal = defineAsyncComponent(
-  () => import("@/components/dialogs/ProfileModal.vue")
-);
-const AdminModal = defineAsyncComponent(
-  () => import("@/components/dialogs/AdminModal.vue")
-);
+const ProfileModal = defineAsyncComponent(() => import("@/components/dialogs/ProfileModal.vue"));
+const AdminModal = defineAsyncComponent(() => import("@/components/dialogs/AdminModal.vue"));
 
 const auth = useAuthStore();
 const sessions = useSessionsStore();
@@ -50,7 +46,8 @@ async function refreshHealth() {
   try {
     const h = await healthApi.get();
     healthOk.value = h.status === "ok";
-    healthText.value = h.status === "ok" ? `服务正常 · MCP: ${h.mcp_servers.length} 个` : "部分组件异常";
+    healthText.value =
+      h.status === "ok" ? `服务正常 · MCP: ${h.mcp_servers.length} 个` : "部分组件异常";
   } catch {
     healthOk.value = false;
     healthText.value = "后端不可达";

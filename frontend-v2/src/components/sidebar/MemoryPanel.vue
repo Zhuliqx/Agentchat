@@ -30,7 +30,11 @@ async function remove(id: string) {
   <div class="flex min-h-0 flex-1 flex-col">
     <div class="flex-none">
       <div class="relative mb-1.5">
-        <Icon name="search" :size="12" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint" />
+        <Icon
+          name="search"
+          :size="12"
+          class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint"
+        />
         <input
           v-model="search"
           type="text"

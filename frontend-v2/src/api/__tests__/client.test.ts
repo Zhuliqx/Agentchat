@@ -32,7 +32,7 @@ describe("apiRaw 401 refresh", () => {
         mockResponse(200, {
           token: "new-token",
           refresh_token: "new-refresh",
-        })
+        }),
       )
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
     vi.stubGlobal("fetch", fetchMock);
@@ -47,9 +47,7 @@ describe("apiRaw 401 refresh", () => {
 
   it("keeps caller-provided headers", async () => {
     localStorage.setItem("agentchat_token", "token");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(200, { ok: true }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockResponse(200, { ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
     await apiRaw("/sessions", {

@@ -170,8 +170,7 @@ function startPanelResize(which: "doc" | "mem", e: MouseEvent) {
   let statusH = 46;
   if (aside) {
     const statusEl = Array.from(aside.querySelectorAll("div")).find(
-      (d) =>
-        (d.textContent || "").includes("MCP") && (d.className || "").includes("border-t"),
+      (d) => (d.textContent || "").includes("MCP") && (d.className || "").includes("border-t"),
     );
     if (statusEl) statusH = statusEl.offsetHeight;
   }
@@ -192,19 +191,13 @@ function startPanelResize(which: "doc" | "mem", e: MouseEvent) {
   // 最小高度：能容纳面板头部内容（文档=上传区，记忆=搜索/添加区）
   const MIN = which === "doc" ? 88 : 96;
   // 当前面板内容区可用高度 = 状态栏顶部 - 顶部固定 - 会话最小 - 底部额外 - 另一面板总高 - 当前面板头
-  const maxH = Math.max(
-    MIN,
-    statusTopOffset - topH - SESSION_MIN - EXTRA - otherH - PANEL_HEADER,
-  );
+  const maxH = Math.max(MIN, statusTopOffset - topH - SESSION_MIN - EXTRA - otherH - PANEL_HEADER);
 
   panelResizeStartY = e.clientY;
   panelResizeStartH = meta.h.value ?? Math.round(window.innerHeight * meta.fallback);
   const onMove = (ev: MouseEvent) => {
     const h = Math.round(
-      Math.min(
-        Math.max(panelResizeStartH + (panelResizeStartY - ev.clientY), MIN),
-        maxH,
-      ),
+      Math.min(Math.max(panelResizeStartH + (panelResizeStartY - ev.clientY), MIN), maxH),
     );
     meta.h.value = h;
     localStorage.setItem(meta.key, String(h));
@@ -227,12 +220,16 @@ function resetPanelH(which: "doc" | "mem") {
 <template>
   <aside
     class="relative flex flex-col overflow-hidden border-r border-line bg-surface"
-    :class="widthDragging ? 'transition-none' : 'transition-[width,min-width] duration-300 ease-in-out'"
+    :class="
+      widthDragging ? 'transition-none' : 'transition-[width,min-width] duration-300 ease-in-out'
+    "
     :style="{ width: (width ?? 0) + 'px', minWidth: (width ?? 0) + 'px' }"
   >
     <!-- 品牌 + 收起 -->
     <div class="flex items-center gap-2.5 px-4 pt-4 pb-3">
-      <div class="grid h-8 w-8 flex-shrink-0 place-items-center rounded-[9px] bg-accent/15 text-accent">
+      <div
+        class="grid h-8 w-8 flex-shrink-0 place-items-center rounded-[9px] bg-accent/15 text-accent"
+      >
         <Icon name="agents" :size="16" />
       </div>
       <div class="min-w-0">
@@ -334,7 +331,10 @@ function resetPanelH(which: "doc" | "mem") {
     <div class="no-scrollbar flex min-h-[56px] flex-1 flex-col px-2.5 pb-1">
       <section class="mb-1 flex min-h-0 flex-1 flex-col">
         <div class="flex items-center gap-1.5 px-1.5 py-1.5">
-          <button class="flex items-center gap-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim" @click="toggle('sessions')">
+          <button
+            class="flex items-center gap-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+            @click="toggle('sessions')"
+          >
             <Icon
               name="chevron"
               :size="11"
@@ -342,7 +342,10 @@ function resetPanelH(which: "doc" | "mem") {
               :class="folded.sessions ? '-rotate-90' : ''"
             />
             {{ sessions.batchMode ? "批量选择" : "会话" }}
-            <span class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim">{{ sessions.list.length }}</span>
+            <span
+              class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim"
+              >{{ sessions.list.length }}</span
+            >
           </button>
           <button
             class="ml-auto text-ink-faint transition hover:text-ink-dim"
@@ -354,7 +357,12 @@ function resetPanelH(which: "doc" | "mem") {
           </button>
         </div>
         <div v-if="sessions.batchMode" class="mb-1 flex gap-1 px-1.5">
-          <button class="rounded border border-line-2 px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:text-ink" @click="sessions.toggleSelectAll()">全选</button>
+          <button
+            class="rounded border border-line-2 px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:text-ink"
+            @click="sessions.toggleSelectAll()"
+          >
+            全选
+          </button>
           <button
             class="rounded border border-err/40 px-1.5 py-0.5 text-[10.5px] text-err disabled:opacity-40"
             :disabled="!sessions.selected.size"
@@ -385,7 +393,9 @@ function resetPanelH(which: "doc" | "mem") {
           @mousedown="startPanelResize('doc', $event)"
           @dblclick="resetPanelH('doc')"
         >
-          <span class="h-[3px] w-9 rounded-full bg-line-2 transition-colors group-hover:bg-accent/60" />
+          <span
+            class="h-[3px] w-9 rounded-full bg-line-2 transition-colors group-hover:bg-accent/60"
+          />
         </div>
         <div class="flex items-center">
           <button
@@ -399,7 +409,10 @@ function resetPanelH(which: "doc" | "mem") {
               :class="folded.docs ? '-rotate-90' : ''"
             />
             <span class="min-w-0 flex-1 truncate">文档</span>
-            <span class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim">{{ docsCount }}</span>
+            <span
+              class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim"
+              >{{ docsCount }}</span
+            >
           </button>
           <Switch
             class="flex-shrink-0"
@@ -410,8 +423,10 @@ function resetPanelH(which: "doc" | "mem") {
         </div>
         <div
           class="flex min-h-0 flex-col overflow-hidden"
-          :class="panelDragging ? 'transition-none' : 'transition-[height] duration-300 ease-in-out'"
-          :style="{ height: folded.docs ? '0px' : (docPanelH ? docPanelH + 'px' : '18vh') }"
+          :class="
+            panelDragging ? 'transition-none' : 'transition-[height] duration-300 ease-in-out'
+          "
+          :style="{ height: folded.docs ? '0px' : docPanelH ? docPanelH + 'px' : '18vh' }"
         >
           <DocPanel />
         </div>
@@ -427,7 +442,9 @@ function resetPanelH(which: "doc" | "mem") {
           @mousedown="startPanelResize('mem', $event)"
           @dblclick="resetPanelH('mem')"
         >
-          <span class="h-[3px] w-9 rounded-full bg-line-2 transition-colors group-hover:bg-accent/60" />
+          <span
+            class="h-[3px] w-9 rounded-full bg-line-2 transition-colors group-hover:bg-accent/60"
+          />
         </div>
         <div class="flex items-center">
           <button
@@ -441,7 +458,10 @@ function resetPanelH(which: "doc" | "mem") {
               :class="folded.memory ? '-rotate-90' : ''"
             />
             <span class="min-w-0 flex-1 truncate">记忆</span>
-            <span class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim">{{ memoryCount }}</span>
+            <span
+              class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim"
+              >{{ memoryCount }}</span
+            >
           </button>
           <Switch
             class="flex-shrink-0"
@@ -452,8 +472,10 @@ function resetPanelH(which: "doc" | "mem") {
         </div>
         <div
           class="flex min-h-0 flex-col overflow-hidden"
-          :class="panelDragging ? 'transition-none' : 'transition-[height] duration-300 ease-in-out'"
-          :style="{ height: folded.memory ? '0px' : (memPanelH ? memPanelH + 'px' : '14vh') }"
+          :class="
+            panelDragging ? 'transition-none' : 'transition-[height] duration-300 ease-in-out'
+          "
+          :style="{ height: folded.memory ? '0px' : memPanelH ? memPanelH + 'px' : '14vh' }"
         >
           <MemoryPanel />
         </div>
@@ -462,7 +484,9 @@ function resetPanelH(which: "doc" | "mem") {
 
     <!-- 底部状态 / 用户 -->
     <div class="flex items-center gap-2 border-t border-line px-3 py-2.5">
-      <span :class="['h-[7px] w-[7px] flex-shrink-0 rounded-full', healthOk ? 'bg-ok' : 'bg-warn']" />
+      <span
+        :class="['h-[7px] w-[7px] flex-shrink-0 rounded-full', healthOk ? 'bg-ok' : 'bg-warn']"
+      />
       <span class="min-w-0 flex-1 truncate text-[11px] text-ink-faint">{{ healthText }}</span>
       <button
         class="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"

@@ -24,9 +24,8 @@ export const useModelStore = defineStore("model", {
     _resolveId(current: { provider: string; model: string } | null): string {
       if (!current) return "";
       return (
-        this.models.find(
-          (m) => m.provider === current.provider && m.model === current.model
-        )?.id || ""
+        this.models.find((m) => m.provider === current.provider && m.model === current.model)?.id ||
+        ""
       );
     },
     async load() {

@@ -38,11 +38,7 @@ export const useDialogStore = defineStore("dialog", {
         };
       });
     },
-    prompt(
-      message: string,
-      defaultValue = "",
-      title = "输入"
-    ): Promise<string | null> {
+    prompt(message: string, defaultValue = "", title = "输入"): Promise<string | null> {
       return new Promise((resolve) => {
         this.current = {
           kind: "prompt",

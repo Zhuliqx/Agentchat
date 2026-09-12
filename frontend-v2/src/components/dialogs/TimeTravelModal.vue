@@ -54,7 +54,9 @@ function forkAt(cid: string) {
       <div v-for="(c, i) in list" :key="c.checkpoint_id" class="relative flex gap-3 pb-1">
         <!-- 时间线 -->
         <div class="flex w-5 flex-shrink-0 flex-col items-center">
-          <span class="mt-2 grid h-5 w-5 place-items-center rounded-full border border-line-2 bg-surface-2 text-[10px] font-medium text-ink-dim">
+          <span
+            class="mt-2 grid h-5 w-5 place-items-center rounded-full border border-line-2 bg-surface-2 text-[10px] font-medium text-ink-dim"
+          >
             {{ list.length - i }}
           </span>
           <span v-if="i < list.length - 1" class="w-px flex-1 bg-line" />
@@ -63,21 +65,34 @@ function forkAt(cid: string) {
         <!-- 节点内容 -->
         <div class="min-w-0 flex-1 pb-4">
           <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span class="text-ink-faint">{{ c.created_at ? new Date(c.created_at).toLocaleTimeString() : "" }}</span>
-            <span v-if="c.interrupted" class="flex items-center gap-1 rounded-full bg-warn/10 px-2 py-0.5 text-[10.5px] text-warn">
+            <span class="text-ink-faint">{{
+              c.created_at ? new Date(c.created_at).toLocaleTimeString() : ""
+            }}</span>
+            <span
+              v-if="c.interrupted"
+              class="flex items-center gap-1 rounded-full bg-warn/10 px-2 py-0.5 text-[10.5px] text-warn"
+            >
               <Icon name="warn" :size="11" />
               待确认
             </span>
-            <span v-else-if="c.next && c.next.length" class="flex items-center gap-1 rounded-full bg-orbit/10 px-2 py-0.5 text-[10.5px] text-orbit">
+            <span
+              v-else-if="c.next && c.next.length"
+              class="flex items-center gap-1 rounded-full bg-orbit/10 px-2 py-0.5 text-[10.5px] text-orbit"
+            >
               <Icon name="zap" :size="10" />
               下一步：{{ c.next.map(nodeLabel).join(", ") }}
             </span>
-            <span v-else class="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] text-ok">
+            <span
+              v-else
+              class="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] text-ok"
+            >
               <Icon name="check" :size="10" />
               完成
             </span>
           </div>
-          <div class="mt-1.5 truncate text-[12px] text-ink-dim">{{ (c.summary || "(无文本步骤)").slice(0, 72) }}</div>
+          <div class="mt-1.5 truncate text-[12px] text-ink-dim">
+            {{ (c.summary || "(无文本步骤)").slice(0, 72) }}
+          </div>
           <div class="mt-2 flex items-center gap-2">
             <input
               :id="`fork-${c.checkpoint_id}`"

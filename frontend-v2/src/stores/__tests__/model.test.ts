@@ -31,11 +31,9 @@ const RESP: ModelListResponse = {
 };
 
 function mockApi(m: { list?: unknown; setCurrent?: unknown }) {
-  (modelsApi.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    m.list ?? RESP
-  );
+  (modelsApi.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(m.list ?? RESP);
   (modelsApi.setCurrent as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    m.setCurrent ?? RESP
+    m.setCurrent ?? RESP,
   );
 }
 
@@ -79,7 +77,7 @@ describe("model store", () => {
 
     // 切换失败 → 回滚到之前的选择
     (modelsApi.setCurrent as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("fail")
+      new Error("fail"),
     );
     await store.set("dashscope:qwen-max");
     expect(store.currentId).toBe("deepseek:deepseek-chat");

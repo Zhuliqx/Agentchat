@@ -8,12 +8,7 @@ import type {
   AgentTaskRunBody,
 } from "@/types/api";
 
-export type TaskAgentStatus =
-  | "idle"
-  | "running"
-  | "awaiting_confirm"
-  | "done"
-  | "error";
+export type TaskAgentStatus = "idle" | "running" | "awaiting_confirm" | "done" | "error";
 
 export interface TaskTraceItem {
   id: number;
@@ -38,7 +33,7 @@ let traceId = 0;
 
 function traceFrom(
   kind: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ): { label: string; detail: string; ok?: boolean } {
   const label = KIND_LABEL[kind] || kind;
   switch (kind) {
@@ -47,9 +42,7 @@ function traceFrom(
       if (typeof data.subtasks === "number") {
         return {
           label,
-          detail: `拆分为 ${data.subtasks} 个子任务${
-            data.fallback ? "（直答降级）" : ""
-          }`,
+          detail: `拆分为 ${data.subtasks} 个子任务${data.fallback ? "（直答降级）" : ""}`,
         };
       }
       return {
@@ -122,11 +115,7 @@ export const useTaskAgentStore = defineStore("taskAgent", {
       const controller = new AbortController();
       this.abortController = controller;
       try {
-        await agentTasksApi.runStream(
-          body,
-          (frame) => this._onFrame(frame),
-          controller.signal
-        );
+        await agentTasksApi.runStream(body, (frame) => this._onFrame(frame), controller.signal);
       } catch (e) {
         if ((e as Error).name === "AbortError") {
           this.error = "已停止";
@@ -165,11 +154,7 @@ export const useTaskAgentStore = defineStore("taskAgent", {
       });
     },
 
-    async confirm(
-      verb: "proceed" | "edit" | "skip",
-      action?: string,
-      source?: string
-    ) {
+    async confirm(verb: "proceed" | "edit" | "skip", action?: string, source?: string) {
       if (!this.sessionId || this.running) return;
       this.status = "running";
       const controller = new AbortController();
@@ -179,7 +164,7 @@ export const useTaskAgentStore = defineStore("taskAgent", {
         await agentTasksApi.confirmStream(
           { session_id: this.sessionId, verb, action, source },
           (frame) => this._onFrame(frame),
-          controller.signal
+          controller.signal,
         );
       } catch (e) {
         if ((e as Error).name === "AbortError") {
@@ -234,9 +219,7 @@ export const useTaskAgentStore = defineStore("taskAgent", {
           // 与当前 pending 相同则视为重复（避免轨迹出现两条“人工确认”/状态抖动）。
           const next = String(frame.data.next_action || "");
           const src = String(frame.data.expected_source || "default");
-          const dup =
-            this.pending?.next_action === next &&
-            this.pending?.expected_source === src;
+          const dup = this.pending?.next_action === next && this.pending?.expected_source === src;
           if (!dup) {
             this.pending = {
               next_action: next,

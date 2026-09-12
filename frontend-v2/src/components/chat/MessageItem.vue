@@ -25,13 +25,9 @@ const render = useThrottleFn(
       : md.render(props.msg.content);
   },
   60,
-  true
+  true,
 );
-watch(
-  () => [props.msg.content, props.msg.streaming],
-  render,
-  { immediate: true }
-);
+watch(() => [props.msg.content, props.msg.streaming], render, { immediate: true });
 
 const copied = ref(false);
 let copyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,12 +151,20 @@ async function deleteMsg() {
       <!-- 助手消息 -->
       <div v-else class="flex flex-col gap-1">
         <div class="rounded-2xl rounded-tl-md px-0.5 text-[13.5px] leading-[1.7] text-ink">
-          <div v-if="msg.content || msg.streaming" class="md" :class="{ 'typing-caret': msg.streaming }" v-html="html" />
+          <div
+            v-if="msg.content || msg.streaming"
+            class="md"
+            :class="{ 'typing-caret': msg.streaming }"
+            v-html="html"
+          />
           <div v-else class="text-ink-faint">正在思考…</div>
         </div>
 
         <!-- HITL 人工确认卡片 -->
-        <div v-if="msg.hitl" class="mt-1.5 max-w-[520px] rounded-xl border border-warn/25 bg-warn/5 p-3.5">
+        <div
+          v-if="msg.hitl"
+          class="mt-1.5 max-w-[520px] rounded-xl border border-warn/25 bg-warn/5 p-3.5"
+        >
           <div class="mb-2.5 flex items-start gap-2 text-[13px] text-ink">
             <Icon name="warn" :size="15" class="mt-0.5 flex-shrink-0 text-warn" />
             <span>{{ msg.hitl.question }}</span>

@@ -24,10 +24,8 @@ export async function parseError(res: Response): Promise<ApiError> {
   try {
     const data = await res.json();
     // pydantic validator 的 detail 带 "Value error, " 前缀，剥离后展示更干净
-    if (typeof data.detail === "string")
-      detail = data.detail.replace(/^Value error, /, "");
-    else if (data.detail && typeof data.detail.message === "string")
-      detail = data.detail.message;
+    if (typeof data.detail === "string") detail = data.detail.replace(/^Value error, /, "");
+    else if (data.detail && typeof data.detail.message === "string") detail = data.detail.message;
     else if (data.message) detail = data.message;
     if (data.code) code = data.code;
   } catch {
@@ -86,10 +84,7 @@ function shouldRefresh(path: string): boolean {
 }
 
 /** 原始 fetch（带 /api 前缀 + 认证头），供需要 Response 的场景（SSE/文件）复用。 */
-export async function apiRaw(
-  path: string,
-  options: RequestInit = {}
-): Promise<Response> {
+export async function apiRaw(path: string, options: RequestInit = {}): Promise<Response> {
   const headers: Record<string, string> = { ...authHeaders() };
   if (options.headers) {
     for (const [key, value] of new Headers(options.headers).entries()) {
@@ -99,13 +94,10 @@ export async function apiRaw(
       headers[key] = value;
     }
   }
-  const hasContentType = Object.keys(headers).some(
-    (key) => key.toLowerCase() === "content-type"
-  );
+  const hasContentType = Object.keys(headers).some((key) => key.toLowerCase() === "content-type");
   if (!(options.body instanceof FormData) && !hasContentType)
     headers["Content-Type"] = "application/json";
-  const attempt = (h: Record<string, string>) =>
-    fetch("/api" + path, { ...options, headers: h });
+  const attempt = (h: Record<string, string>) => fetch("/api" + path, { ...options, headers: h });
 
   let res = await attempt(headers);
   if (
@@ -125,10 +117,7 @@ export async function apiRaw(
   return res;
 }
 
-export async function api<T = unknown>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await apiRaw(path, options);
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return null as T;

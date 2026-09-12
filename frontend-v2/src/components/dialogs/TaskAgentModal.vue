@@ -52,7 +52,15 @@ const statusCls = computed(() => {
 });
 
 const traceIcon = (kind: string) =>
-  ({ plan: "sparkle", replan: "refresh", execute: "zap", check: "check", verify: "refresh", hitl: "warn", final: "check" })[kind] || "sparkle";
+  ({
+    plan: "sparkle",
+    replan: "refresh",
+    execute: "zap",
+    check: "check",
+    verify: "refresh",
+    hitl: "warn",
+    final: "check",
+  })[kind] || "sparkle";
 const traceCls = (t: TaskTraceItem) =>
   t.kind === "hitl"
     ? "text-warn"
@@ -140,7 +148,12 @@ async function copyAnswer() {
         </div>
         <div class="flex max-h-[180px] flex-col gap-1.5 overflow-y-auto pr-1">
           <div v-for="t in store.events" :key="t.id" class="flex items-start gap-2 text-[12px]">
-            <Icon :name="traceIcon(t.kind)" :size="13" class="mt-0.5 flex-shrink-0" :class="traceCls(t)" />
+            <Icon
+              :name="traceIcon(t.kind)"
+              :size="13"
+              class="mt-0.5 flex-shrink-0"
+              :class="traceCls(t)"
+            />
             <span class="min-w-0 flex-1">
               <span class="font-medium text-ink-dim">{{ t.label }}</span>
               <span v-if="t.detail" class="ml-1.5 break-all text-ink-faint">{{ t.detail }}</span>
@@ -166,7 +179,9 @@ async function copyAnswer() {
               v-if="store.pending.expected_source"
               class="mt-1 inline-block rounded bg-surface-3 px-1.5 py-0.5 text-[10.5px] text-ink-faint"
             >
-              信息源：{{ SOURCE_LABEL[store.pending.expected_source] || store.pending.expected_source }}
+              信息源：{{
+                SOURCE_LABEL[store.pending.expected_source] || store.pending.expected_source
+              }}
             </span>
           </span>
         </div>
@@ -183,7 +198,9 @@ async function copyAnswer() {
               v-model="editSource"
               class="h-8 flex-1 rounded-lg border border-line-2 bg-surface px-2 text-[12px] text-ink outline-none focus:border-accent"
             >
-              <option v-for="(label, key) in SOURCE_LABEL" :key="key" :value="key">{{ label }}</option>
+              <option v-for="(label, key) in SOURCE_LABEL" :key="key" :value="key">
+                {{ label }}
+              </option>
             </select>
             <button
               class="h-8 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition hover:brightness-110 disabled:opacity-40"
@@ -224,9 +241,14 @@ async function copyAnswer() {
       </div>
 
       <!-- 结果 -->
-      <div v-if="store.plan || store.findings.length || store.finalAnswer" class="flex flex-col gap-3">
+      <div
+        v-if="store.plan || store.findings.length || store.finalAnswer"
+        class="flex flex-col gap-3"
+      >
         <div v-if="store.plan" class="rounded-xl border border-line p-3">
-          <div class="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">计划</div>
+          <div class="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+            计划
+          </div>
           <div class="md text-[12.5px]" v-html="md.render(store.plan)" />
         </div>
         <div v-if="store.findings.length" class="rounded-xl border border-line p-3">
@@ -239,14 +261,18 @@ async function copyAnswer() {
               :key="i"
               class="flex items-start gap-1.5 text-[12px] text-ink-dim"
             >
-              <span class="mt-px flex-shrink-0 font-mono text-[10px] text-ink-faint">{{ i + 1 }}.</span>
+              <span class="mt-px flex-shrink-0 font-mono text-[10px] text-ink-faint"
+                >{{ i + 1 }}.</span
+              >
               <span class="min-w-0 break-all leading-relaxed">{{ f }}</span>
             </div>
           </div>
         </div>
         <div v-if="store.finalAnswer" class="rounded-xl border border-line bg-surface-2/40 p-3">
           <div class="mb-1.5 flex items-center justify-between">
-            <span class="text-[11px] font-medium uppercase tracking-wide text-ink-faint">最终答案</span>
+            <span class="text-[11px] font-medium uppercase tracking-wide text-ink-faint"
+              >最终答案</span
+            >
             <button
               class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
               :title="copied ? '已复制' : '复制'"
@@ -279,7 +305,11 @@ async function copyAnswer() {
           </button>
         </div>
         <div v-if="store.history.length" class="max-h-[220px] overflow-y-auto p-2">
-          <div v-for="(c, i) in store.history" :key="c.checkpoint_id" class="relative flex gap-2.5 pb-2">
+          <div
+            v-for="(c, i) in store.history"
+            :key="c.checkpoint_id"
+            class="relative flex gap-2.5 pb-2"
+          >
             <div class="flex w-4 flex-shrink-0 flex-col items-center">
               <span
                 class="mt-1 grid h-4 w-4 place-items-center rounded-full border border-line-2 bg-surface-2 text-[9px] font-medium text-ink-faint"
@@ -290,7 +320,9 @@ async function copyAnswer() {
             </div>
             <div class="min-w-0 flex-1 pb-1.5">
               <div class="flex flex-wrap items-center gap-1.5 text-[10.5px]">
-                <span v-if="c.created_at" class="text-ink-faint">{{ new Date(c.created_at).toLocaleString() }}</span>
+                <span v-if="c.created_at" class="text-ink-faint">{{
+                  new Date(c.created_at).toLocaleString()
+                }}</span>
                 <span
                   v-if="c.interrupted"
                   class="flex items-center gap-0.5 rounded-full bg-warn/10 px-1.5 py-px text-[10px] text-warn"
@@ -304,19 +336,27 @@ async function copyAnswer() {
                 >
                   下一步：{{ c.next.join(", ") }}
                 </span>
-                <span v-else class="rounded-full bg-ok/10 px-1.5 py-px text-[10px] text-ok">完成</span>
+                <span v-else class="rounded-full bg-ok/10 px-1.5 py-px text-[10px] text-ok"
+                  >完成</span
+                >
               </div>
-              <div class="mt-0.5 line-clamp-2 break-all text-[11.5px] text-ink-dim">{{ c.summary || "（无文本步骤）" }}</div>
+              <div class="mt-0.5 line-clamp-2 break-all text-[11.5px] text-ink-dim">
+                {{ c.summary || "（无文本步骤）" }}
+              </div>
               <div class="mt-1 flex items-center gap-1.5">
                 <input
                   v-model="forkGoals[c.checkpoint_id]"
                   class="h-6 min-w-0 flex-1 rounded-md border border-line-2 bg-surface-2 px-1.5 text-[11px] text-ink outline-none placeholder:text-ink-faint/60 focus:border-accent"
                   placeholder="新目标，从此处分叉…"
-                  @keydown.enter="store.fork(c.checkpoint_id, c.checkpoint_ns || '', forkGoals[c.checkpoint_id])"
+                  @keydown.enter="
+                    store.fork(c.checkpoint_id, c.checkpoint_ns || '', forkGoals[c.checkpoint_id])
+                  "
                 />
                 <button
                   class="h-6 flex-shrink-0 rounded-md border border-line-2 px-1.5 text-[10.5px] text-ink-dim transition hover:border-accent/50 hover:text-ink"
-                  @click="store.fork(c.checkpoint_id, c.checkpoint_ns || '', forkGoals[c.checkpoint_id])"
+                  @click="
+                    store.fork(c.checkpoint_id, c.checkpoint_ns || '', forkGoals[c.checkpoint_id])
+                  "
                 >
                   分叉
                 </button>

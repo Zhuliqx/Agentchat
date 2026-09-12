@@ -68,8 +68,7 @@ export const authApi = {
 // ---------- 会话 ----------
 export const sessionsApi = {
   list: () => api<Session[]>("/sessions"),
-  create: () =>
-    api<Session>("/sessions", { method: "POST" }),
+  create: () => api<Session>("/sessions", { method: "POST" }),
   history: (id: string) => api<Message[]>(`/sessions/${id}`),
   rename: (id: string, title: string) =>
     api<Session>(`/sessions/${id}`, {
@@ -81,8 +80,7 @@ export const sessionsApi = {
       method: "PATCH",
       body: JSON.stringify({ pinned }),
     }),
-  remove: (id: string) =>
-    api<void>(`/sessions/${id}`, { method: "DELETE" }),
+  remove: (id: string) => api<void>(`/sessions/${id}`, { method: "DELETE" }),
   batchDelete: (ids: string[]) =>
     api<{ deleted: number; requested: number }>("/sessions/batch-delete", {
       method: "POST",
@@ -102,7 +100,7 @@ export const docsApi = {
   search: (query: string, topK = 4) =>
     api<{ query: string; hits: { text: string; source: string }[] }>(
       `/rag/search?query=${encodeURIComponent(query)}&top_k=${topK}`,
-      { method: "POST" }
+      { method: "POST" },
     ),
   upload: (files: File[]) => {
     const form = new FormData();
@@ -130,7 +128,7 @@ export const docsApi = {
   batchRemove: (sources: string[]) =>
     api<{ deleted: number; items: { source: string; deleted_chunks: number }[] }>(
       "/rag/documents/batch-delete",
-      { method: "POST", body: JSON.stringify({ sources }) }
+      { method: "POST", body: JSON.stringify({ sources }) },
     ),
   setTag: (source: string, tag: string | null) =>
     api<{ source: string; tag: string | null }>("/rag/documents/tag", {
@@ -140,9 +138,7 @@ export const docsApi = {
   fileUrl: (source: string, download = false) =>
     `/api/rag/documents/file?source=${encodeURIComponent(source)}${download ? "&download=1" : ""}`,
   preview: async (source: string): Promise<{ text: string; binary: boolean }> => {
-    const res = await apiRaw(
-      `/rag/documents/file?source=${encodeURIComponent(source)}`
-    );
+    const res = await apiRaw(`/rag/documents/file?source=${encodeURIComponent(source)}`);
     if (!res.ok) throw await parseError(res);
     const ct = res.headers.get("content-type") || "";
     if (!ct.includes("text")) return { text: "", binary: true };
@@ -153,9 +149,7 @@ export const docsApi = {
 // ---------- 长期记忆 ----------
 export const memoryApi = {
   list: (query = "") =>
-    api<Memory[]>(
-      query ? `/memory?query=${encodeURIComponent(query)}` : "/memory"
-    ),
+    api<Memory[]>(query ? `/memory?query=${encodeURIComponent(query)}` : "/memory"),
   add: (content: string) =>
     api<Memory>("/memory", {
       method: "POST",
@@ -185,8 +179,7 @@ export const adminApi = {
       total_tokens: number;
     }>("/admin/usage"),
   users: () => api<AdminUser[]>("/admin/users"),
-  deleteUser: (userId: string) =>
-    api<void>(`/admin/users/${userId}`, { method: "DELETE" }),
+  deleteUser: (userId: string) => api<void>(`/admin/users/${userId}`, { method: "DELETE" }),
   settings: () => api<{ items: AdminSettingItem[] }>("/admin/settings"),
   saveSettings: (values: Record<string, string | number | boolean>) =>
     api<{ items: AdminSettingItem[] }>("/admin/settings", {
@@ -195,18 +188,14 @@ export const adminApi = {
     }),
   eval: () =>
     api<{ docs: EvalDoc[]; builtin: EvalCase[]; auto: EvalCase[]; custom: EvalCase[] }>(
-      "/admin/eval"
+      "/admin/eval",
     ),
   saveEvalCases: (cases: { query: string; keywords: string[] }[]) =>
     api<{ custom: EvalCase[] }>("/admin/eval/custom", {
       method: "PUT",
       body: JSON.stringify({ cases }),
     }),
-  runEval: (body: {
-    include_auto?: boolean;
-    include_builtin?: boolean;
-    custom_only?: boolean;
-  }) =>
+  runEval: (body: { include_auto?: boolean; include_builtin?: boolean; custom_only?: boolean }) =>
     api<{
       results: EvalCase[];
       hit: number;
@@ -256,7 +245,7 @@ export interface ChatPayload {
 export async function streamChat(
   payload: ChatPayload,
   onEvent: (ev: SSEEvent) => void | Promise<void>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await apiRaw("/chat/stream", {
     method: "POST",
@@ -285,7 +274,7 @@ export const agentTasksApi = {
   runStream: async (
     body: AgentTaskRunBody,
     onFrame: (frame: AgentTaskFrame) => void | Promise<void>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> => {
     const res = await apiRaw("/agent-tasks/run/stream", {
       method: "POST",
@@ -296,10 +285,10 @@ export const agentTasksApi = {
     await readSSEStream(res, (ev) => onFrame(ev as unknown as AgentTaskFrame));
   },
   history: (sessionId: string, limit = 30) =>
-    api<{ session_id: string; history: AgentTaskHistoryItem[] }>(
-      "/agent-tasks/history",
-      { method: "POST", body: JSON.stringify({ session_id: sessionId, limit }) }
-    ),
+    api<{ session_id: string; history: AgentTaskHistoryItem[] }>("/agent-tasks/history", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, limit }),
+    }),
   confirm: (body: AgentTaskConfirmBody) =>
     api<AgentTaskResult>("/agent-tasks/confirm", {
       method: "POST",
@@ -309,7 +298,7 @@ export const agentTasksApi = {
   confirmStream: async (
     body: AgentTaskConfirmBody,
     onFrame: (frame: AgentTaskFrame) => void | Promise<void>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> => {
     const res = await apiRaw("/agent-tasks/confirm", {
       method: "POST",

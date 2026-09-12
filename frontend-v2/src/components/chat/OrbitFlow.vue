@@ -35,28 +35,10 @@ const isPulsing = (n: OrbitNode) => !!n.active;
             v-if="isPulsing(n)"
             class="absolute -inset-0.5 animate-ping rounded-full bg-orbit/40"
           />
-          <Icon
-            v-if="n.type === 'start'"
-            name="orbit"
-            :size="13"
-            class="relative"
-          />
-          <Icon
-            v-else-if="n.type === 'end'"
-            name="check"
-            :size="12"
-            class="relative"
-          />
-          <Icon
-            v-else-if="n.type === 'error'"
-            name="x"
-            :size="12"
-            class="relative"
-          />
-          <span
-            v-else
-            class="relative h-1.5 w-1.5 rounded-full bg-orbit"
-          />
+          <Icon v-if="n.type === 'start'" name="orbit" :size="13" class="relative" />
+          <Icon v-else-if="n.type === 'end'" name="check" :size="12" class="relative" />
+          <Icon v-else-if="n.type === 'error'" name="x" :size="12" class="relative" />
+          <span v-else class="relative h-1.5 w-1.5 rounded-full bg-orbit" />
         </span>
         <span class="tracking-tight">{{ n.label }}</span>
       </span>

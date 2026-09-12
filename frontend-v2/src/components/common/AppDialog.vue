@@ -15,7 +15,7 @@ watch(
     await nextTick();
     inputEl.value?.focus();
     inputEl.value?.select();
-  }
+  },
 );
 
 function accept() {
@@ -34,12 +34,7 @@ function cancel() {
 </script>
 
 <template>
-  <Modal
-    :open="!!dialog.current"
-    :title="dialog.current?.title || ''"
-    small
-    @close="cancel"
-  >
+  <Modal :open="!!dialog.current" :title="dialog.current?.title || ''" small @close="cancel">
     <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-dim">
       {{ dialog.current?.message }}
     </p>

@@ -18,7 +18,7 @@ describe("SSE frame parsing", () => {
 
   it("parses interrupt frame with data", () => {
     const ev = parseFrame(
-      'data: {"type":"interrupt","content":"确认？","data":{"session_id":"abc"}}'
+      'data: {"type":"interrupt","content":"确认？","data":{"session_id":"abc"}}',
     );
     expect(ev?.type).toBe("interrupt");
     expect(ev?.data?.session_id).toBe("abc");
@@ -31,8 +31,8 @@ describe("SSE frame parsing", () => {
         controller.enqueue(
           encoder.encode(
             'data: {"type":"token","content":"第"}\r\n\r\n' +
-              'data: {"type":"token","content":"二"}\r\n\r\n'
-          )
+              'data: {"type":"token","content":"二"}\r\n\r\n',
+          ),
         );
         controller.close();
       },

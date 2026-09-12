@@ -50,25 +50,32 @@ watch(open, async (v) => {
           <span class="text-[10.5px] text-ink-faint">对话回合</span>
         </div>
         <div class="rounded-lg border border-line bg-surface-2 px-1 py-2.5 text-center">
-          <b class="block text-[18px] font-semibold text-ink">{{ st.user_count }} / {{ st.assistant_count }}</b>
+          <b class="block text-[18px] font-semibold text-ink"
+            >{{ st.user_count }} / {{ st.assistant_count }}</b
+          >
           <span class="text-[10.5px] text-ink-faint">用户 / 助手</span>
         </div>
         <div class="rounded-lg border border-line bg-surface-2 px-1 py-2.5 text-center">
-          <b class="block text-[18px] font-semibold text-ink">{{ st.est_tokens.toLocaleString() }}</b>
+          <b class="block text-[18px] font-semibold text-ink">{{
+            st.est_tokens.toLocaleString()
+          }}</b>
           <span class="text-[10.5px] text-ink-faint">约 Token 数</span>
         </div>
       </div>
       <table class="w-full border-collapse text-[12.5px]">
         <tbody>
-          <tr v-for="row in [
-            ['内容总量', st.total_chars.toLocaleString() + ' 字符'],
-            ['平均用户消息', st.avg_user_chars + ' 字符'],
-            ['平均助手回复', st.avg_assistant_chars + ' 字符'],
-            ['最长单次回复', st.longest_response_chars + ' 字符'],
-            ['首次消息', fmtTime(st.first_at)],
-            ['最后消息', fmtTime(st.last_at)],
-            ['对话时长', fmtDur(st.duration_sec)],
-          ]" :key="row[0]">
+          <tr
+            v-for="row in [
+              ['内容总量', st.total_chars.toLocaleString() + ' 字符'],
+              ['平均用户消息', st.avg_user_chars + ' 字符'],
+              ['平均助手回复', st.avg_assistant_chars + ' 字符'],
+              ['最长单次回复', st.longest_response_chars + ' 字符'],
+              ['首次消息', fmtTime(st.first_at)],
+              ['最后消息', fmtTime(st.last_at)],
+              ['对话时长', fmtDur(st.duration_sec)],
+            ]"
+            :key="row[0]"
+          >
             <td class="w-[38%] border-b border-line py-2 pr-2 text-ink-faint">{{ row[0] }}</td>
             <td class="border-b border-line py-2">{{ row[1] }}</td>
           </tr>

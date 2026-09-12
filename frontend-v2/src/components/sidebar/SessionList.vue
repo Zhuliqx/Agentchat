@@ -94,12 +94,7 @@ function onDblClickTitle(e: MouseEvent, id: string) {
         @click.stop
         @change="sessions.toggleSelect(s.id)"
       />
-      <Icon
-        v-if="s.pinned"
-        name="bookmark"
-        :size="11"
-        class="flex-shrink-0 text-accent"
-      />
+      <Icon v-if="s.pinned" name="bookmark" :size="11" class="flex-shrink-0 text-accent" />
       <span
         class="min-w-0 flex-1 truncate"
         :title="s.title"

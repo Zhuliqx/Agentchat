@@ -138,7 +138,7 @@ async function saveCustom() {
           .split(/[,，、]/)
           .map((s) => s.trim())
           .filter(Boolean),
-      }))
+      })),
     );
     if (evalData.value) evalData.value.custom = r.custom;
   } catch (e) {
@@ -156,7 +156,7 @@ async function del(user: AdminUser) {
   const ui = useDialogStore();
   if (
     !(await ui.confirm(
-      `确定删除用户「${user.username}」？将删除其全部会话、消息、记忆与知识库文档。`
+      `确定删除用户「${user.username}」？将删除其全部会话、消息、记忆与知识库文档。`,
     ))
   )
     return;
@@ -173,7 +173,9 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
 
 <template>
   <Modal :open="open" title="管理后台" @close="open = false">
-    <div v-if="error" class="mb-3 rounded-lg bg-err/10 px-3 py-2 text-[12.5px] text-err">{{ error }}</div>
+    <div v-if="error" class="mb-3 rounded-lg bg-err/10 px-3 py-2 text-[12.5px] text-err">
+      {{ error }}
+    </div>
     <div v-if="stats" class="mb-4 grid grid-cols-4 gap-2">
       <div class="rounded-lg border border-line bg-surface-2 px-1 py-2.5 text-center">
         <b class="block text-[16px] font-semibold text-ink">{{ stats.user_count }}</b>
@@ -196,9 +198,12 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
     <!-- 用量趋势 -->
     <div v-if="usage" class="mb-4 rounded-lg border border-line p-3">
       <div class="mb-2 flex items-center justify-between">
-        <span class="text-[12px] font-medium text-ink-dim">消息趋势（近 {{ usage.items.length }} 天）</span>
+        <span class="text-[12px] font-medium text-ink-dim"
+          >消息趋势（近 {{ usage.items.length }} 天）</span
+        >
         <span class="text-[11px] text-ink-faint">
-          共 {{ usage.total_messages.toLocaleString() }} 条 · 约 {{ usage.total_tokens.toLocaleString() }} tokens
+          共 {{ usage.total_messages.toLocaleString() }} 条 · 约
+          {{ usage.total_tokens.toLocaleString() }} tokens
         </span>
       </div>
       <div class="flex h-24 items-end justify-between gap-2">
@@ -217,9 +222,7 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
             :style="{ height: barHeight(u.messages) }"
             :title="`${u.date}: ${u.messages} 条`"
           />
-          <span
-            class="text-[9px] text-ink-faint transition group-hover:text-ink-dim"
-          >
+          <span class="text-[9px] text-ink-faint transition group-hover:text-ink-dim">
             {{ u.date.slice(5) }}
           </span>
         </div>
@@ -331,9 +334,13 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
 
         <!-- 知识库文档 -->
         <div v-if="evalData?.docs.length">
-          <div class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint">
+          <div
+            class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint"
+          >
             知识库文档
-            <span class="rounded bg-surface-3 px-1 py-px text-[9px] font-normal">{{ evalData.docs.length }}</span>
+            <span class="rounded bg-surface-3 px-1 py-px text-[9px] font-normal">{{
+              evalData.docs.length
+            }}</span>
           </div>
           <div class="flex flex-wrap gap-1">
             <span
@@ -349,26 +356,47 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
 
         <!-- 自动适配案例 -->
         <div v-if="evalData?.auto.length">
-          <div class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint">
+          <div
+            class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint"
+          >
             自动适配案例
-            <span class="rounded bg-accent/10 px-1 py-px text-[9px] font-normal text-accent">{{ evalData.auto.length }}</span>
-            <span class="ml-auto font-normal normal-case tracking-normal">验证每个文档能否被检索</span>
+            <span class="rounded bg-accent/10 px-1 py-px text-[9px] font-normal text-accent">{{
+              evalData.auto.length
+            }}</span>
+            <span class="ml-auto font-normal normal-case tracking-normal"
+              >验证每个文档能否被检索</span
+            >
           </div>
-          <div class="flex flex-col gap-0.5 rounded-md border border-line bg-surface-2/30 px-1.5 py-1">
-            <div v-for="(c, i) in evalData.auto" :key="i" class="flex items-center gap-1.5 py-0.5 text-[11px] text-ink-dim">
+          <div
+            class="flex flex-col gap-0.5 rounded-md border border-line bg-surface-2/30 px-1.5 py-1"
+          >
+            <div
+              v-for="(c, i) in evalData.auto"
+              :key="i"
+              class="flex items-center gap-1.5 py-0.5 text-[11px] text-ink-dim"
+            >
               <Icon name="sparkle" :size="10" class="flex-shrink-0 text-accent/70" />
               <span class="truncate">「{{ c.query }}」</span>
-              <span class="ml-auto flex-shrink-0 truncate rounded bg-surface-3 px-1 py-px text-[9px] text-ink-faint">{{ c.doc }}</span>
+              <span
+                class="ml-auto flex-shrink-0 truncate rounded bg-surface-3 px-1 py-px text-[9px] text-ink-faint"
+                >{{ c.doc }}</span
+              >
             </div>
           </div>
         </div>
 
         <!-- 自定义案例（可编辑） -->
         <div>
-          <div class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint">
+          <div
+            class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint"
+          >
             自定义案例
-            <span class="rounded bg-accent/10 px-1 py-px text-[9px] font-normal text-accent">{{ customEdit.length }}</span>
-            <span class="ml-auto font-normal normal-case tracking-normal">命中 = 检索结果含关键词</span>
+            <span class="rounded bg-accent/10 px-1 py-px text-[9px] font-normal text-accent">{{
+              customEdit.length
+            }}</span>
+            <span class="ml-auto font-normal normal-case tracking-normal"
+              >命中 = 检索结果含关键词</span
+            >
           </div>
           <div class="flex flex-col gap-1">
             <div v-for="(c, i) in customEdit" :key="i" class="flex items-center gap-1">
@@ -423,7 +451,11 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
 
         <!-- 评估结果 -->
         <div v-if="evalResults" class="rounded-md border border-line bg-surface-2/30 p-2">
-          <div v-for="(r, i) in evalResults.results" :key="i" class="flex items-center gap-1.5 py-1 text-[11px]">
+          <div
+            v-for="(r, i) in evalResults.results"
+            :key="i"
+            class="flex items-center gap-1.5 py-1 text-[11px]"
+          >
             <span
               class="grid h-4 w-4 flex-shrink-0 place-items-center rounded-full text-[9px] font-bold"
               :class="r.hit ? 'bg-ok/15 text-ok' : 'bg-err/15 text-err'"
@@ -431,11 +463,19 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
               {{ r.hit ? "✓" : "✗" }}
             </span>
             <span class="min-w-0 flex-1 truncate text-ink-dim">{{ r.query }}</span>
-            <span v-if="r.doc" class="max-w-[30%] flex-shrink-0 truncate text-[9.5px] text-ink-faint">{{ r.doc }}</span>
-            <span class="flex-shrink-0 rounded bg-surface-3 px-1 py-px text-[9.5px] text-ink-faint">{{ r.hits }} 条</span>
+            <span
+              v-if="r.doc"
+              class="max-w-[30%] flex-shrink-0 truncate text-[9.5px] text-ink-faint"
+              >{{ r.doc }}</span
+            >
+            <span class="flex-shrink-0 rounded bg-surface-3 px-1 py-px text-[9.5px] text-ink-faint"
+              >{{ r.hits }} 条</span
+            >
           </div>
           <div class="mt-1 flex items-center justify-between border-t border-line pt-1.5">
-            <span class="text-[11px] text-ink-faint">{{ evalResults.hit }}/{{ evalResults.total }} 通过</span>
+            <span class="text-[11px] text-ink-faint"
+              >{{ evalResults.hit }}/{{ evalResults.total }} 通过</span
+            >
             <span
               class="text-[12.5px] font-semibold tabular-nums"
               :class="(evalHitRate ?? 0) >= 75 ? 'text-ok' : 'text-warn'"
@@ -448,7 +488,8 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
           v-else-if="!evalRunning"
           class="rounded-md border border-dashed border-line px-2 py-2.5 text-center text-[11px] text-ink-faint/80"
         >
-          自动从知识库文档生成案例 + 自定义案例，后端跑完整检索链路（向量 + BM25 + Rerank）验证召回质量。
+          自动从知识库文档生成案例 + 自定义案例，后端跑完整检索链路（向量 + BM25 +
+          Rerank）验证召回质量。
         </div>
       </div>
     </div>
@@ -467,47 +508,53 @@ const initial = (u: AdminUser) => (u.username || "?").slice(0, 1).toUpperCase();
           />
           用户列表
         </button>
-        <span v-if="!foldedPanel.users" class="text-[11px] text-ink-faint">{{ users.length }} 个</span>
+        <span v-if="!foldedPanel.users" class="text-[11px] text-ink-faint"
+          >{{ users.length }} 个</span
+        >
       </div>
       <div v-if="!foldedPanel.users" class="flex flex-col gap-px p-2">
-      <div
-        v-for="u in users"
-        :key="u.id"
-        class="flex items-center gap-2.5 rounded-md px-1.5 py-2 text-[12px] transition hover:bg-surface-2"
-      >
-        <span
-          class="grid h-7 w-7 flex-shrink-0 place-items-center rounded-full text-[11px] font-semibold"
-          :class="[avatarColor(u).bg, avatarColor(u).text]"
+        <div
+          v-for="u in users"
+          :key="u.id"
+          class="flex items-center gap-2.5 rounded-md px-1.5 py-2 text-[12px] transition hover:bg-surface-2"
         >
-          {{ initial(u) }}
-        </span>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-1.5">
-            <span class="truncate font-medium text-ink">{{ u.username }}</span>
-            <span
-              v-if="u.is_admin"
-              class="rounded-full bg-accent/12 px-1.5 py-px text-[9.5px] font-medium text-accent"
-            >管理员</span>
-            <span
-              v-if="u.id === auth.user?.id"
-              class="rounded-full bg-ok/12 px-1.5 py-px text-[9.5px] font-medium text-ok"
-            >我</span>
+          <span
+            class="grid h-7 w-7 flex-shrink-0 place-items-center rounded-full text-[11px] font-semibold"
+            :class="[avatarColor(u).bg, avatarColor(u).text]"
+          >
+            {{ initial(u) }}
+          </span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="truncate font-medium text-ink">{{ u.username }}</span>
+              <span
+                v-if="u.is_admin"
+                class="rounded-full bg-accent/12 px-1.5 py-px text-[9.5px] font-medium text-accent"
+                >管理员</span
+              >
+              <span
+                v-if="u.id === auth.user?.id"
+                class="rounded-full bg-ok/12 px-1.5 py-px text-[9.5px] font-medium text-ok"
+                >我</span
+              >
+            </div>
+            <div class="mt-0.5 text-[10.5px] text-ink-faint">
+              会话 {{ u.session_count }} · 消息 {{ u.message_count }} · 文档 {{ u.document_count }}
+            </div>
           </div>
-          <div class="mt-0.5 text-[10.5px] text-ink-faint">
-            会话 {{ u.session_count }} · 消息 {{ u.message_count }} · 文档 {{ u.document_count }}
-          </div>
+          <span class="flex-shrink-0 text-[10.5px] text-ink-faint">{{
+            new Date(u.created_at).toLocaleDateString()
+          }}</span>
+          <button
+            class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err disabled:cursor-not-allowed disabled:opacity-30"
+            title="删除用户"
+            :disabled="u.id === auth.user?.id"
+            @click="del(u)"
+          >
+            <Icon name="trash" :size="12" />
+          </button>
         </div>
-        <span class="flex-shrink-0 text-[10.5px] text-ink-faint">{{ new Date(u.created_at).toLocaleDateString() }}</span>
-        <button
-          class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err disabled:cursor-not-allowed disabled:opacity-30"
-          title="删除用户"
-          :disabled="u.id === auth.user?.id"
-          @click="del(u)"
-        >
-          <Icon name="trash" :size="12" />
-        </button>
       </div>
-    </div>
     </div>
   </Modal>
 </template>

@@ -9,17 +9,13 @@ import ChatInput from "./ChatInput.vue";
 import { useTaskAgentStore } from "@/stores/taskAgent";
 import { useDialogStore } from "@/stores/dialog";
 
-const StatsModal = defineAsyncComponent(
-  () => import("@/components/dialogs/StatsModal.vue")
-);
-const TasksModal = defineAsyncComponent(
-  () => import("@/components/dialogs/TasksModal.vue")
-);
+const StatsModal = defineAsyncComponent(() => import("@/components/dialogs/StatsModal.vue"));
+const TasksModal = defineAsyncComponent(() => import("@/components/dialogs/TasksModal.vue"));
 const TimeTravelModal = defineAsyncComponent(
-  () => import("@/components/dialogs/TimeTravelModal.vue")
+  () => import("@/components/dialogs/TimeTravelModal.vue"),
 );
 const TaskAgentModal = defineAsyncComponent(
-  () => import("@/components/dialogs/TaskAgentModal.vue")
+  () => import("@/components/dialogs/TaskAgentModal.vue"),
 );
 
 const chat = useChatStore();
