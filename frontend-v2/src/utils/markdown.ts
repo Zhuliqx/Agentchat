@@ -67,8 +67,9 @@ export function createMarkdownRenderer() {
       const text = String(src ?? "");
       const fences: number[] = [];
       let from = 0;
-      let idx = -1;
-      while ((idx = text.indexOf("```", from)) !== -1) {
+      for (;;) {
+        const idx = text.indexOf("```", from);
+        if (idx === -1) break;
         fences.push(idx);
         from = idx + 3;
       }

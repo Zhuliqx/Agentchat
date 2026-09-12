@@ -196,7 +196,11 @@ npm run dev          # http://localhost:5173，/api 自动代理到 :8000
 | `npm run dev` | 开发服务器（:5173，`/api` 代理 → :8000） |
 | `npm run build` | 生产构建（`vue-tsc -b` 类型检查 + `vite build` → `dist/`） |
 | `npm run typecheck` | 仅类型检查 |
-| `npm run test` | Vitest 单元测试（SSE 解析 / markdown / chat store） |
+| `npm run test` | Vitest 单元/组件测试（store / SSE / markdown / 关键组件） |
+| `npm run lint` | ESLint 静态检查（Vue 3 + TypeScript） |
+| `npm run format` | Prettier 格式化 `src/` 与根配置文件 |
+| `npm run format:check` | 只检查格式，不写文件（CI 用） |
+| `npm run verify` | 一键：format:check → lint → typecheck → test → build |
 
 > 侧边栏底部 ☀/🌙 图标可切换暗/亮主题（localStorage 持久化）；侧边栏可拖拽调宽、收窄自动折叠。
 > 开发模式下请先启动后端（第 6 节），否则聊天/会话等接口会失败。

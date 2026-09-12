@@ -2,13 +2,11 @@
 import { computed } from "vue";
 import { useSessionsStore } from "@/stores/sessions";
 import { useChatStore } from "@/stores/chat";
-import { useAuthStore } from "@/stores/auth";
 import { useDialogStore } from "@/stores/dialog";
 import Icon from "@/components/common/Icon.vue";
 
 const sessions = useSessionsStore();
 const chat = useChatStore();
-const auth = useAuthStore();
 const ui = useDialogStore();
 
 const sorted = computed(() => [...sessions.list]);

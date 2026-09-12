@@ -4,7 +4,7 @@
 import type { OrbitNode } from "@/stores/chat";
 import Icon from "@/components/common/Icon.vue";
 
-const props = defineProps<{ nodes: OrbitNode[]; streaming?: boolean }>();
+defineProps<{ nodes: OrbitNode[]; streaming?: boolean }>();
 
 const nodeCls = (type: OrbitNode["type"]) =>
   type === "start"

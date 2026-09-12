@@ -20,11 +20,6 @@ const modelOpen = ref(false);
 
 // ---- 输入草稿：按会话持久化到 localStorage（刷新/切换不丢失） ----
 const draftKey = (sid: string) => `chat_draft_${sid}`;
-function saveDraft() {
-  if (sessions.currentId) {
-    localStorage.setItem(draftKey(sessions.currentId), input.value);
-  }
-}
 function loadDraft() {
   input.value = sessions.currentId ? localStorage.getItem(draftKey(sessions.currentId)) || "" : "";
   autoResize();

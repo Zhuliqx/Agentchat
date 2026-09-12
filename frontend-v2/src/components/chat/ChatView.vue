@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, ref } from "vue";
 import { sessionsApi } from "@/api";
-import { useChatStore } from "@/stores/chat";
 import { useSessionsStore } from "@/stores/sessions";
 import ChatHeader from "./ChatHeader.vue";
 import MessageList from "./MessageList.vue";
@@ -18,7 +17,6 @@ const TaskAgentModal = defineAsyncComponent(
   () => import("@/components/dialogs/TaskAgentModal.vue"),
 );
 
-const chat = useChatStore();
 const sessions = useSessionsStore();
 const taskAgent = useTaskAgentStore();
 const ui = useDialogStore();
@@ -40,8 +38,6 @@ async function exportSession() {
   a.click();
   URL.revokeObjectURL(url);
 }
-
-const headerRef = ref<InstanceType<typeof ChatHeader> | null>(null);
 </script>
 
 <template>
