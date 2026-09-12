@@ -43,6 +43,8 @@ def test_add_image_channel_off(monkeypatch):
 
 
 def test_write_image_vectors(monkeypatch):
+    from pathlib import Path
+
     monkeypatch.setattr(settings, "image_dual_channel", True)
     monkeypatch.setattr(settings, "image_vlm_enabled", False)
 
@@ -57,11 +59,46 @@ def test_write_image_vectors(monkeypatch):
     monkeypatch.setattr(vector_store, "add_image_vectors", lambda recs: (added.extend(recs), recs)[1])
 
     n = _write_image_vectors([object(), object()], "s.pdf", "default")
+    expected_source = str(Path("s.pdf").resolve())
     assert n == 2
-    assert deleted.get("src") == "s.pdf"               # 先删旧图片向量（幂等覆盖）
+    assert deleted.get("src") == expected_source       # 先删旧图片向量（幂等覆盖）
+    assert added[0]["source"] == expected_source
     assert added[0]["embedding"] == [0.1] * 8
     assert added[0]["caption"].startswith("[图片]")     # 默认 caption 兜底
     assert added[1]["metadata"]["image_index"] == 1
+
+
+def test_write_image_vectors_normalizes_relative_source(monkeypatch, tmp_path):
+    """相对路径必须先归一化：避免 Milvus 图片 source 与 Postgres 绝对路径失配。"""
+    from pathlib import Path
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings, "image_dual_channel", True)
+    monkeypatch.setattr(settings, "image_vlm_enabled", False)
+
+    class E:
+        def encode_image(self, img):
+            return [0.1] * 8
+
+    monkeypatch.setattr("app.rag.image_embedding.get_image_embedder", lambda: E())
+    deleted = {}
+    added: list = []
+    monkeypatch.setattr(
+        vector_store,
+        "delete_image_by_source",
+        lambda s, u: deleted.update(src=s, uid=u),
+    )
+    monkeypatch.setattr(
+        vector_store, "add_image_vectors", lambda recs: (added.extend(recs), recs)[1]
+    )
+
+    relative = "data/eval/img_source/annual_report_2023.pdf"
+    expected = str(Path(relative).resolve())
+    _write_image_vectors([object()], relative, "default")
+
+    assert deleted.get("src") == expected
+    assert added[0]["source"] == expected
+    assert added[0]["metadata"]["source"] == expected
 
 
 def test_write_image_vectors_disabled(monkeypatch):

@@ -201,3 +201,45 @@ def wait_milvus_converged(
             return got
         time.sleep(1.0)
     return milvus_source_rows(source)
+
+
+def milvus_user_count(user_id: str) -> int:
+    """返回 Milvus 主集合中某用户的可见向量数（最终一致性下的当前值）。"""
+    from app.config import settings
+    from app.rag import vector_store
+
+    rows = vector_store._client().query(
+        settings.milvus_collection,
+        filter=vector_store.user_filter_expr(user_id),
+        output_fields=["count(*)"],
+    )
+    return int(rows[0].get("count(*)", 0)) if rows else 0
+
+
+def purge_test_user(user_id: str, timeout: float = 30.0) -> None:
+    """彻底清理测试用户：Milvus 向量 + Postgres documents，并等待向量收敛。
+
+    集成测试的 teardown 统一走这里：删除后必须等 Milvus 可见行数归零，
+    否则下一轮测试可能在删除尚未生效时重新写入，形成幽灵向量。
+    """
+    import time
+
+    from app.db.models import Document
+    from app.db.postgres import SessionLocal
+    from app.rag import vector_store
+
+    vector_store.delete_by_user(user_id)
+    with SessionLocal() as db:
+        db.query(Document).filter(Document.user_id == user_id).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if milvus_user_count(user_id) == 0:
+            return
+        time.sleep(1.0)
+    raise AssertionError(
+        f"Milvus 用户 {user_id} 的向量在 {timeout:.0f}s 内未清理干净"
+    )

@@ -10,6 +10,7 @@ import pytest
 from helpers import (
     db_available,
     milvus_source_texts,
+    purge_test_user,
     wait_milvus_converged,
 )
 
@@ -25,21 +26,9 @@ TEST_USER = "test-rag-incremental"
 @pytest.fixture(scope="module", autouse=True)
 def _isolate_test_user() -> Generator[None, None, None]:
     """模块级隔离：开始前清掉上一轮残留，结束后清掉本模块全部测试数据。"""
-    from app.db.models import Document
-    from app.db.postgres import SessionLocal
-    from app.rag import vector_store
-
-    def _clean() -> None:
-        vector_store.delete_by_user(TEST_USER)
-        with SessionLocal() as db:
-            db.query(Document).filter(Document.user_id == TEST_USER).delete(
-                synchronize_session=False
-            )
-            db.commit()
-
-    _clean()
+    purge_test_user(TEST_USER)
     yield
-    _clean()
+    purge_test_user(TEST_USER)
 
 # 两段内容：章节 1 不变、章节 2 内容变化 → 增量摄入只改 chunk1
 # （内容 < chunk_size=800 时 RecursiveCharacterTextSplitter 会合并为单块，
@@ -123,16 +112,7 @@ def test_incremental_reupload_consistency(tmp_path: Path) -> None:
         )
         assert hits2, "更新后的内容未被检索到"
     finally:
-        # 清理，避免污染其他检索回归用例
-        vector_store.delete_by_source(source, user_id=TEST_USER)
-        wait_milvus_converged(source, [])  # 等删除收敛，防止幽灵向量累积挤占 top-K
-        with SessionLocal() as db:
-            db.query(Document).filter(
-                Document.source == source, Document.user_id == TEST_USER
-            ).delete(
-                synchronize_session=False
-            )
-            db.commit()
+        purge_test_user(TEST_USER)
 
 
 # ---- 多块部分更新：未变块保留 doc_id，变更块写原始 chunk_index ----
@@ -214,15 +194,7 @@ def test_incremental_partial_update_preserves_chunk_indexes(tmp_path: Path) -> N
             f"PG: {pg_pairs}\nMV: {sorted(mv)}"
         )
     finally:
-        vector_store.delete_by_source(source, user_id=TEST_USER)
-        wait_milvus_converged(source, [])  # 等删除收敛，防止幽灵向量累积挤占 top-K
-        with SessionLocal() as db:
-            db.query(Document).filter(
-                Document.source == source, Document.user_id == TEST_USER
-            ).delete(
-                synchronize_session=False
-            )
-            db.commit()
+        purge_test_user(TEST_USER)
 
 
 def _big_section(prefix: str, word: str) -> str:
@@ -291,11 +263,5 @@ def test_incremental_shifted_prefix_does_not_collide() -> None:
         r3 = ingest_file(doc, user_id=TEST_USER)
         assert r3.get("unchanged"), r3
     finally:
-        vector_store.delete_by_source(source, user_id=TEST_USER)
-        wait_milvus_converged(source, [])
-        with SessionLocal() as db:
-            db.query(Document).filter(
-                Document.source == source, Document.user_id == TEST_USER
-            ).delete(synchronize_session=False)
-            db.commit()
+        purge_test_user(TEST_USER)
         doc.unlink(missing_ok=True)

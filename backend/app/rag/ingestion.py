@@ -62,6 +62,10 @@ def _write_image_vectors(images: list, source: str, user_id: str) -> int:
     """
     if not settings.image_dual_channel:
         return 0
+    # 统一绝对路径：否则图片向量 source 可能与 documents.source 相对/绝对不一致，
+    # 按 source 删除时清不掉，形成孤儿图片向量。
+    if "://" not in source:
+        source = str(Path(source).resolve())
     try:
         from app.rag.image_embedding import get_image_embedder
 

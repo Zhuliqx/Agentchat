@@ -7,7 +7,7 @@ from collections.abc import Generator
 
 import pytest
 
-from helpers import db_available, wait_milvus_converged
+from helpers import db_available, purge_test_user, wait_milvus_converged
 
 BACKEND = Path(__file__).resolve().parent.parent.parent
 if str(BACKEND) not in sys.path:
@@ -20,21 +20,9 @@ TEST_USER = "test-vector-reconcile"
 @pytest.fixture(scope="module", autouse=True)
 def _isolate_test_user() -> Generator[None, None, None]:
     """模块级隔离：开始前清掉上一轮残留，结束后清掉本模块全部测试数据。"""
-    from app.db.models import Document
-    from app.db.postgres import SessionLocal
-    from app.rag import vector_store
-
-    def _clean() -> None:
-        vector_store.delete_by_user(TEST_USER)
-        with SessionLocal() as db:
-            db.query(Document).filter(Document.user_id == TEST_USER).delete(
-                synchronize_session=False
-            )
-            db.commit()
-
-    _clean()
+    purge_test_user(TEST_USER)
     yield
-    _clean()
+    purge_test_user(TEST_USER)
 
 
 pytestmark = pytest.mark.skipif(
@@ -117,11 +105,4 @@ def test_reconcile_syncs_pending_and_cleans_ghosts(
         assert pending_id in mv_ids, "pending 行应被对账补写进 Milvus"
         assert ghost_id not in mv_ids, "幽灵 doc_id 应被对账清理"
     finally:
-        vector_store.delete_by_source(source, user_id=TEST_USER)
-        with SessionLocal() as db:
-            db.query(Document).filter(
-                Document.source == source, Document.user_id == TEST_USER
-            ).delete(
-                synchronize_session=False
-            )
-            db.commit()
+        purge_test_user(TEST_USER)
