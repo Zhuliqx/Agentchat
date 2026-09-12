@@ -13,12 +13,13 @@ export async function readSSEStream(
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const frame = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
+    let match = buffer.match(/\r?\n\r?\n/);
+    while (match && match.index !== undefined) {
+      const frame = buffer.slice(0, match.index);
+      buffer = buffer.slice(match.index + match[0].length);
       const ev = parseFrame(frame);
       if (ev) await onEvent(ev);
+      match = buffer.match(/\r?\n\r?\n/);
     }
   }
   if (buffer.trim()) {

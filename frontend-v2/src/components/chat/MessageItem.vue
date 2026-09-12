@@ -4,6 +4,7 @@ import { useThrottleFn } from "@vueuse/core";
 import { useChatStore, type ChatMsg } from "@/stores/chat";
 import { md } from "@/utils/markdown";
 import { useAuthStore } from "@/stores/auth";
+import { useDialogStore } from "@/stores/dialog";
 import { docsApi } from "@/api";
 import OrbitFlow from "./OrbitFlow.vue";
 import Icon from "@/components/common/Icon.vue";
@@ -12,6 +13,7 @@ import { avatarColor } from "@/utils/avatar";
 const props = defineProps<{ msg: ChatMsg }>();
 const chat = useChatStore();
 const auth = useAuthStore();
+const ui = useDialogStore();
 
 const userInitial = computed(() => (auth.user?.username || "我").slice(0, 1).toUpperCase());
 
@@ -23,7 +25,7 @@ const render = useThrottleFn(
       : md.render(props.msg.content);
   },
   60,
-  false
+  true
 );
 watch(
   () => [props.msg.content, props.msg.streaming],
@@ -65,10 +67,10 @@ function saveEdit() {
   editing.value = false;
 }
 
-function deleteMsg() {
+async function deleteMsg() {
   if (chat.sending) return;
-  if (!confirm("确定删除这条消息？")) return;
-  chat.deleteMessage(props.msg);
+  if (!(await ui.confirm("确定删除这条消息？"))) return;
+  await chat.deleteMessage(props.msg);
 }
 </script>
 

@@ -66,7 +66,7 @@ function traceFrom(
     case "hitl":
       return { label, detail: String(data.next_action || "") };
     case "check":
-      return { label, detail: data.ok ? "已完成" : "继续执行" };
+      return { label, detail: data.done ? "已完成" : "继续执行" };
     case "replan":
       return { label, detail: String(data.action || data.source || "") };
     case "final":

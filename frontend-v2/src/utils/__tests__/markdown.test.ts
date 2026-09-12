@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { marked } from "marked";
+import hljs from "highlight.js/lib/core";
 import { md } from "@/utils/markdown";
 
 describe("markdown render", () => {
@@ -24,6 +26,28 @@ describe("markdown render", () => {
   it("sanitizes script injection", () => {
     const html = md.render("<script>alert(1)</script>");
     expect(html).not.toContain("<script");
+  });
+
+  it("caches rendered markdown for repeated content", () => {
+    const parseSpy = vi.spyOn(marked, "parse");
+    const src = "# 缓存用例\n\n同一段内容只解析一次";
+
+    md.render(src);
+    const callsAfterFirst = parseSpy.mock.calls.length;
+    md.render(src);
+
+    expect(parseSpy.mock.calls.length).toBe(callsAfterFirst);
+    parseSpy.mockRestore();
+  });
+
+  it("does not auto-highlight unknown languages", () => {
+    const autoSpy = vi.spyOn(hljs, "highlightAuto");
+
+    const html = md.render("```not-a-real-lang\nconst a = 1;\n```");
+
+    expect(html).toContain("const a = 1;");
+    expect(autoSpy).not.toHaveBeenCalled();
+    autoSpy.mockRestore();
   });
 });
 

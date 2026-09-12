@@ -1,6 +1,70 @@
 <script setup lang="ts">
-defineProps<{ title: string; open: boolean; small?: boolean }>();
+import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
+
+const props = defineProps<{ title: string; open: boolean; small?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
+const panel = ref<HTMLElement | null>(null);
+const titleId = useId();
+let previousFocus: HTMLElement | null = null;
+let previousOverflow = "";
+
+function focusableItems(): HTMLElement[] {
+  const root = panel.value;
+  if (!root) return [];
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+    )
+  );
+}
+
+function restorePageState() {
+  document.body.style.overflow = previousOverflow;
+  if (previousFocus?.isConnected) previousFocus.focus();
+  previousFocus = null;
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    emit("close");
+    return;
+  }
+  if (e.key !== "Tab") return;
+  const items = focusableItems();
+  if (!items.length) {
+    e.preventDefault();
+    panel.value?.focus();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+watch(
+  () => props.open,
+  async (open) => {
+    if (open) {
+      previousFocus = document.activeElement as HTMLElement | null;
+      previousOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      await nextTick();
+      (focusableItems()[0] ?? panel.value)?.focus();
+    } else {
+      restorePageState();
+    }
+  },
+  { immediate: true }
+);
+
+onBeforeUnmount(restorePageState);
 </script>
 
 <template>
@@ -13,11 +77,17 @@ const emit = defineEmits<{ close: [] }>();
       >
         <Transition name="pop" appear>
           <div
-            class="flex max-h-[86vh] w-full flex-col overflow-hidden rounded-xl border border-line-2 bg-surface shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
+            ref="panel"
+            role="dialog"
+            aria-modal="true"
+            :aria-labelledby="titleId"
+            tabindex="-1"
+            class="flex max-h-[86vh] w-full flex-col overflow-hidden rounded-xl border border-line-2 bg-surface shadow-[0_24px_64px_rgba(0,0,0,0.5)] outline-none"
             :class="small ? 'max-w-[400px]' : 'max-w-[600px]'"
+            @keydown="onKeydown"
           >
             <div class="flex flex-shrink-0 items-center justify-between border-b border-line px-5 py-3.5">
-              <span class="text-[14px] font-medium tracking-tight">{{ title }}</span>
+              <span :id="titleId" class="text-[14px] font-medium tracking-tight">{{ title }}</span>
               <button
                 class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
                 aria-label="关闭"

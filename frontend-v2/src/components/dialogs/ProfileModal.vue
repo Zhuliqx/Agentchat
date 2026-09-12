@@ -8,6 +8,7 @@ import { useSessionsStore } from "@/stores/sessions";
 import { useMemoryStore } from "@/stores/memory";
 import { useDocsStore } from "@/stores/docs";
 import { useChatStore } from "@/stores/chat";
+import { useDialogStore } from "@/stores/dialog";
 import { setStoredUser } from "@/api/token";
 import { AVATAR_COLORS, AVATAR_ORDER, avatarColor } from "@/utils/avatar";
 import type { AuthStats, User } from "@/types/api";
@@ -140,8 +141,9 @@ async function exportData() {
 }
 
 async function deleteAccount() {
+  const ui = useDialogStore();
   const username = auth.user?.username || "";
-  const input = prompt(`请输入用户名「${username}」以确认注销：`);
+  const input = await ui.prompt(`请输入用户名「${username}」以确认注销：`);
   if (!input) return;
   if (input !== username) {
     formMsg.value = "用户名不匹配，已取消注销";
@@ -149,7 +151,9 @@ async function deleteAccount() {
     return;
   }
   if (
-    !confirm("注销将永久删除该账号的全部会话、消息、记忆与知识库文档，且不可恢复。确定继续？")
+    !(await ui.confirm(
+      "注销将永久删除该账号的全部会话、消息、记忆与知识库文档，且不可恢复。确定继续？"
+    ))
   )
     return;
   try {
@@ -170,7 +174,7 @@ async function deleteAccount() {
     } else {
       await sessions.create();
     }
-    alert("账号已注销");
+    await ui.alert("账号已注销");
   } catch (e) {
     formMsg.value = (e as Error).message;
     formOk.value = false;

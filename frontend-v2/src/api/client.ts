@@ -91,7 +91,18 @@ export async function apiRaw(
   options: RequestInit = {}
 ): Promise<Response> {
   const headers: Record<string, string> = { ...authHeaders() };
-  if (!(options.body instanceof FormData))
+  if (options.headers) {
+    for (const [key, value] of new Headers(options.headers).entries()) {
+      for (const existing of Object.keys(headers)) {
+        if (existing.toLowerCase() === key.toLowerCase()) delete headers[existing];
+      }
+      headers[key] = value;
+    }
+  }
+  const hasContentType = Object.keys(headers).some(
+    (key) => key.toLowerCase() === "content-type"
+  );
+  if (!(options.body instanceof FormData) && !hasContentType)
     headers["Content-Type"] = "application/json";
   const attempt = (h: Record<string, string>) =>
     fetch("/api" + path, { ...options, headers: h });
@@ -105,7 +116,7 @@ export async function apiRaw(
     (await refreshOnce())
   ) {
     // access 过期 → refresh 成功 → 用新 access 重放一次原请求
-    res = await attempt({ ...authHeaders(), ...headers });
+    res = await attempt({ ...headers, ...authHeaders() });
   }
   if (res.status === 401 && getToken() && shouldRefresh(path)) {
     clearAuth();

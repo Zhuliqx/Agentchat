@@ -3,11 +3,13 @@ import { computed } from "vue";
 import { useSessionsStore } from "@/stores/sessions";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
+import { useDialogStore } from "@/stores/dialog";
 import Icon from "@/components/common/Icon.vue";
 
 const sessions = useSessionsStore();
 const chat = useChatStore();
 const auth = useAuthStore();
+const ui = useDialogStore();
 
 const sorted = computed(() => [...sessions.list]);
 
@@ -16,6 +18,7 @@ function openSession(id: string) {
     sessions.toggleSelect(id);
     return;
   }
+  if (id === sessions.currentId) return; // 点击当前会话不应重载并中止在途回答
   sessions.currentId = id;
   chat.loadHistory(id);
 }
@@ -24,10 +27,11 @@ function rename(id: string, title: string) {
   sessions.rename(id, title);
 }
 
-function remove(id: string) {
-  if (!confirm("确定删除该会话？")) return;
-  sessions.remove(id);
-  if (sessions.currentId === id) {
+async function remove(id: string) {
+  if (!(await ui.confirm("确定删除该会话？"))) return;
+  const wasCurrent = sessions.currentId === id;
+  await sessions.remove(id);
+  if (wasCurrent) {
     chat.clear();
     if (sessions.currentId) chat.loadHistory(sessions.currentId);
   }

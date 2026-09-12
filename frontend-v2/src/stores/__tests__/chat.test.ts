@@ -8,11 +8,12 @@ vi.mock("@/api", () => ({
   sessionsApi: {
     history: vi.fn(async () => []),
     list: vi.fn(async () => []),
+    deleteMessage: vi.fn(async () => undefined),
   },
   streamChat: vi.fn(),
 }));
 
-import { streamChat } from "@/api";
+import { sessionsApi, streamChat } from "@/api";
 import { useSessionsStore } from "@/stores/sessions";
 
 beforeEach(() => {
@@ -151,5 +152,131 @@ describe("chat store", () => {
     expect(chat.messages.length).toBe(before); // 未变化
     chat.abortController?.abort();
     await p;
+  });
+
+  it("retry() deletes the replaced exchange on the backend", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    emitStream([{ type: "token", content: "第一次回答" }]);
+    await chat.send("问题A");
+    chat.messages[0].backendId = "u1";
+    chat.messages[1].backendId = "a1";
+
+    emitStream([{ type: "token", content: "重试后的回答" }]);
+    await chat.retry(chat.messages[1]);
+
+    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "u1");
+    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "a1");
+    expect(chat.messages.map((m) => m.content)).toEqual([
+      "问题A",
+      "重试后的回答",
+    ]);
+  });
+
+  it("editAndResend() replaces the user message without duplicating it", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    emitStream([{ type: "token", content: "第一次回答" }]);
+    await chat.send("问题A");
+    chat.messages[0].backendId = "u1";
+    chat.messages[1].backendId = "a1";
+
+    emitStream([{ type: "token", content: "编辑后的回答" }]);
+    await chat.editAndResend(chat.messages[0], "问题A（改）");
+
+    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "u1");
+    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "a1");
+    expect(chat.messages.map((m) => m.content)).toEqual([
+      "问题A（改）",
+      "编辑后的回答",
+    ]);
+    expect(chat.messages.filter((m) => m.role === "user")).toHaveLength(1);
+  });
+
+  it("keeps only the latest history when session switches overlap", async () => {
+    const chat = useChatStore();
+    let resolveFirst!: (v: unknown) => void;
+    let resolveSecond!: (v: unknown) => void;
+    (sessionsApi.history as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (resolveFirst = resolve))
+      )
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (resolveSecond = resolve))
+      );
+
+    const first = chat.loadHistory("s1");
+    const second = chat.loadHistory("s2");
+    resolveSecond([{ id: "b1", role: "assistant", content: "B" }]);
+    await second;
+    resolveFirst([{ id: "a1", role: "assistant", content: "A" }]);
+    await first;
+
+    expect(chat.messages.map((m) => m.content)).toEqual(["B"]);
+  });
+
+  it("records history failures instead of rejecting callers", async () => {
+    const chat = useChatStore();
+    (sessionsApi.history as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("加载失败")
+    );
+
+    await expect(chat.loadHistory("s1")).resolves.toBeUndefined();
+    expect(chat.historyError).toBe("加载失败");
+  });
+
+  it("loadHistory aborts the in-flight stream and frees sending", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    (streamChat as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_payload: unknown, _onEvent: unknown, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        })
+    );
+    const pending = chat.send("hi");
+    expect(chat.sending).toBe(true);
+    (sessionsApi.history as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+
+    await chat.loadHistory("s2");
+
+    expect(chat.sending).toBe(false);
+    expect(chat.messages).toEqual([]);
+    // 新会话可立即发送，旧流的 finally 不会反向清掉新流状态
+    emitStream([{ type: "token", content: "新回答" }]);
+    await chat.send("next");
+    expect(chat.messages[1].content).toBe("新回答");
+    await pending;
+  });
+
+  it("clear() aborts the in-flight stream", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    (streamChat as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_payload: unknown, _onEvent: unknown, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        })
+    );
+    const pending = chat.send("hi");
+    expect(chat.sending).toBe(true);
+
+    chat.clear();
+
+    expect(chat.sending).toBe(false);
+    expect(chat.messages).toEqual([]);
+    await pending;
   });
 });

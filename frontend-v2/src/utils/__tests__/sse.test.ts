@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFrame } from "@/utils/sse";
+import { parseFrame, readSSEStream } from "@/utils/sse";
 
 describe("SSE frame parsing", () => {
   it("parses a valid data frame", () => {
@@ -22,5 +22,27 @@ describe("SSE frame parsing", () => {
     );
     expect(ev?.type).toBe("interrupt");
     expect(ev?.data?.session_id).toBe("abc");
+  });
+
+  it("splits CRLF-delimited frames", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"type":"token","content":"第"}\r\n\r\n' +
+              'data: {"type":"token","content":"二"}\r\n\r\n'
+          )
+        );
+        controller.close();
+      },
+    });
+    const events: unknown[] = [];
+
+    await readSSEStream(new Response(stream), (ev) => {
+      events.push(ev);
+    });
+
+    expect(events).toHaveLength(2);
   });
 });

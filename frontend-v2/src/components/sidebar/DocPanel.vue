@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
-import { docsApi } from "@/api";
+import { onBeforeUnmount, reactive, ref } from "vue";
+import { ApiError, docsApi } from "@/api";
 import { useDocsStore } from "@/stores/docs";
+import { useDialogStore } from "@/stores/dialog";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Icon from "@/components/common/Icon.vue";
 import Modal from "@/components/common/Modal.vue";
@@ -15,6 +16,7 @@ interface UploadItem {
 }
 
 const docs = useDocsStore();
+const ui = useDialogStore();
 const preview = ref<{ title: string; open: boolean; text: string; binary: boolean; source: string }>({
   title: "",
   open: false,
@@ -46,7 +48,8 @@ function toggleAll() {
 }
 async function removeSelected() {
   if (!selected.value.size) return;
-  if (!confirm(`确定从知识库删除选中的 ${selected.value.size} 个文档？`)) return;
+  if (!(await ui.confirm(`确定从知识库删除选中的 ${selected.value.size} 个文档？`)))
+    return;
   await docs.removeMany(Array.from(selected.value));
   selected.value = new Set();
 }
@@ -57,24 +60,61 @@ async function onFiles(e: Event) {
   try {
     await startUpload(Array.from(files));
   } catch (err) {
-    alert(String((err as Error).message));
+    await ui.alert(String((err as Error).message));
   }
 }
 
 // ---- 上传进度（后台任务轮询） ----
 const uploading = ref<UploadItem[]>([]);
+const pollControllers = new Set<AbortController>();
+let activeUploads = 0;
+let disposed = false;
 
-async function pollIngest(item: UploadItem) {
-  // 轮询直到任务结束（每 800ms）；任务过期/服务重启按错误结束
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      if (timer) clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function pollIngest(item: UploadItem, signal: AbortSignal) {
+  // 轮询直到任务结束；瞬时失败指数退避（上限 5s），404/410 直接判过期
+  let delay = 800;
+  let failures = 0;
   for (;;) {
-    await new Promise((r) => setTimeout(r, 800));
+    try {
+      await sleep(delay, signal);
+    } catch {
+      return; // 组件卸载/主动取消
+    }
     let st;
     try {
-      st = await docsApi.ingestStatus(item.taskId);
-    } catch {
-      item.status = "error";
-      item.stage = "任务已过期";
-      break;
+      st = await docsApi.ingestStatus(item.taskId, signal);
+      failures = 0;
+      delay = 800;
+    } catch (err) {
+      if (signal.aborted) return;
+      if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+        item.status = "error";
+        item.stage = "任务已过期";
+        break;
+      }
+      failures += 1;
+      if (failures >= 5) {
+        item.status = "error";
+        item.stage = "状态查询失败";
+        break;
+      }
+      delay = Math.min(delay * 2, 5000);
+      continue;
     }
     item.progress = st.progress;
     item.stage = st.stage;
@@ -90,10 +130,39 @@ async function pollIngest(item: UploadItem) {
       break;
     }
   }
-  // 结束后从列表移除并刷新文档列表
-  uploading.value = uploading.value.filter((u) => u.taskId !== item.taskId);
-  await docs.load();
 }
+
+async function onDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files;
+  if (!files?.length) return;
+  try {
+    await startUpload(Array.from(files));
+  } catch (err) {
+    await ui.alert(String((err as Error).message));
+  }
+}
+
+async function trackIngest(item: UploadItem) {
+  const controller = new AbortController();
+  pollControllers.add(controller);
+  activeUploads += 1;
+  try {
+    await pollIngest(item, controller.signal);
+  } finally {
+    pollControllers.delete(controller);
+    activeUploads -= 1;
+    if (!disposed) {
+      uploading.value = uploading.value.filter((u) => u.taskId !== item.taskId);
+      if (activeUploads === 0) await docs.load(); // 多文件完成只刷新一次
+    }
+  }
+}
+
+onBeforeUnmount(() => {
+  disposed = true;
+  pollControllers.forEach((c) => c.abort());
+  pollControllers.clear();
+});
 
 async function startUpload(files: File[]) {
   const tasks = await docs.upload(Array.from(files));
@@ -106,7 +175,7 @@ async function startUpload(files: File[]) {
       status: "pending",
     });
     uploading.value.push(item);
-    void pollIngest(item);
+    void trackIngest(item);
   }
 }
 
@@ -115,7 +184,7 @@ async function showDoc(source: string, filename: string) {
     const p = await docsApi.preview(source);
     preview.value = { title: filename, open: true, text: p.text, binary: p.binary, source };
   } catch (err) {
-    alert(String((err as Error).message));
+    await ui.alert(String((err as Error).message));
   }
 }
 
@@ -127,12 +196,12 @@ function copyText(t: string) {
 }
 
 async function remove(source: string) {
-  if (!confirm("确定从知识库删除该文档？")) return;
+  if (!(await ui.confirm("确定从知识库删除该文档？"))) return;
   await docs.remove(source);
 }
 
 async function editTag(d: { source: string; tag?: string | null }) {
-  const input = prompt("设置文档标签（留空或取消可清除）：", d.tag || "");
+  const input = await ui.prompt("设置文档标签（留空或取消可清除）：", d.tag || "");
   if (input === null) return; // 取消
   await docs.setTag(d.source, input.trim() || null);
 }
@@ -145,7 +214,7 @@ async function editTag(d: { source: string; tag?: string | null }) {
         class="group mb-1.5 flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-line-2 px-2 py-3 text-center transition hover:border-accent/50 hover:bg-accent/4"
       @click="inputRef?.click()"
       @dragover.prevent
-      @drop.prevent="(e: DragEvent) => { if (e.dataTransfer?.files?.length) startUpload(Array.from(e.dataTransfer.files)); }"
+      @drop.prevent="onDrop"
     >
       <input
         ref="inputRef"

@@ -114,7 +114,7 @@ export const docsApi = {
       body: form,
     });
   },
-  ingestStatus: (taskId: string) =>
+  ingestStatus: (taskId: string, signal?: AbortSignal) =>
     api<{
       status: "pending" | "processing" | "done" | "error";
       progress: number;
@@ -122,7 +122,7 @@ export const docsApi = {
       filename: string;
       result?: { chunks: number } | null;
       error?: string;
-    }>(`/rag/ingest/${taskId}`),
+    }>(`/rag/ingest/${taskId}`, { signal }),
   remove: (source: string) =>
     api<void>(`/rag/documents?source=${encodeURIComponent(source)}`, {
       method: "DELETE",

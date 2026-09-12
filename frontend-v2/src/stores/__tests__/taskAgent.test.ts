@@ -195,6 +195,28 @@ describe("taskAgent store", () => {
     expect(store.finalAnswer).toBe("答案是 42");
   });
 
+  it("renders check completion from the backend done field", async () => {
+    const store = useTaskAgentStore();
+    emitFrames([
+      { type: "event", kind: "check", data: { done: true, step: 1 } },
+      { type: "event", kind: "check", data: { done: false, step: 2 } },
+      {
+        type: "result",
+        data: {
+          session_id: "task-abc",
+          status: "done",
+          plan: null,
+          findings: [],
+          final_answer: "x",
+        },
+      },
+    ]);
+    await store.run("任务");
+
+    const checks = store.events.filter((e) => e.kind === "check");
+    expect(checks.map((e) => e.detail)).toEqual(["已完成", "继续执行"]);
+  });
+
   it("stop() aborts and marks as stopped", async () => {
     const store = useTaskAgentStore();
     runStream.mockImplementation(

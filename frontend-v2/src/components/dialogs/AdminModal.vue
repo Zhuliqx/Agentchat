@@ -5,6 +5,7 @@ import Icon from "@/components/common/Icon.vue";
 import { adminApi } from "@/api";
 import type { AdminSettingItem } from "@/api";
 import { useAuthStore } from "@/stores/auth";
+import { useDialogStore } from "@/stores/dialog";
 import { avatarColor } from "@/utils/avatar";
 import type { AdminStats, AdminUser, EvalCase } from "@/types/api";
 
@@ -152,7 +153,13 @@ watch(open, (v) => {
 });
 
 async function del(user: AdminUser) {
-  if (!confirm(`确定删除用户「${user.username}」？将删除其全部会话、消息、记忆与知识库文档。`)) return;
+  const ui = useDialogStore();
+  if (
+    !(await ui.confirm(
+      `确定删除用户「${user.username}」？将删除其全部会话、消息、记忆与知识库文档。`
+    ))
+  )
+    return;
   try {
     await adminApi.deleteUser(user.id);
     await load();

@@ -60,8 +60,10 @@ watch(searchText, (v) => {
   }, 300);
 });
 function gotoSession(id: string) {
-  sessions.currentId = id;
-  chat.loadHistory(id);
+  if (id !== sessions.currentId) {
+    sessions.currentId = id;
+    chat.loadHistory(id);
+  }
   searchText.value = "";
   searchResults.value = null;
 }

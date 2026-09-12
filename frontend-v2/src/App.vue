@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { defineAsyncComponent, onMounted, ref } from "vue";
 import { healthApi } from "@/api";
 import Sidebar from "@/components/Sidebar.vue";
 import ChatView from "@/components/chat/ChatView.vue";
 import AuthModal from "@/components/dialogs/AuthModal.vue";
-import ProfileModal from "@/components/dialogs/ProfileModal.vue";
-import AdminModal from "@/components/dialogs/AdminModal.vue";
+import AppDialog from "@/components/common/AppDialog.vue";
 import Icon from "@/components/common/Icon.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useSessionsStore } from "@/stores/sessions";
 import { useDocsStore } from "@/stores/docs";
 import { useMemoryStore } from "@/stores/memory";
 import { useChatStore } from "@/stores/chat";
+
+const ProfileModal = defineAsyncComponent(
+  () => import("@/components/dialogs/ProfileModal.vue")
+);
+const AdminModal = defineAsyncComponent(
+  () => import("@/components/dialogs/AdminModal.vue")
+);
 
 const auth = useAuthStore();
 const sessions = useSessionsStore();
@@ -97,7 +103,8 @@ onMounted(async () => {
     />
     <ChatView />
     <AuthModal />
-    <ProfileModal v-model="showProfile" />
-    <AdminModal v-model="showAdmin" />
+    <AppDialog />
+    <ProfileModal v-if="showProfile" v-model="showProfile" />
+    <AdminModal v-if="showAdmin" v-model="showAdmin" />
   </div>
 </template>

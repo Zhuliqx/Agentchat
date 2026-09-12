@@ -1,27 +1,38 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { defineAsyncComponent, ref } from "vue";
 import { sessionsApi } from "@/api";
 import { useChatStore } from "@/stores/chat";
 import { useSessionsStore } from "@/stores/sessions";
 import ChatHeader from "./ChatHeader.vue";
 import MessageList from "./MessageList.vue";
 import ChatInput from "./ChatInput.vue";
-import StatsModal from "@/components/dialogs/StatsModal.vue";
-import TasksModal from "@/components/dialogs/TasksModal.vue";
-import TimeTravelModal from "@/components/dialogs/TimeTravelModal.vue";
-import TaskAgentModal from "@/components/dialogs/TaskAgentModal.vue";
 import { useTaskAgentStore } from "@/stores/taskAgent";
+import { useDialogStore } from "@/stores/dialog";
+
+const StatsModal = defineAsyncComponent(
+  () => import("@/components/dialogs/StatsModal.vue")
+);
+const TasksModal = defineAsyncComponent(
+  () => import("@/components/dialogs/TasksModal.vue")
+);
+const TimeTravelModal = defineAsyncComponent(
+  () => import("@/components/dialogs/TimeTravelModal.vue")
+);
+const TaskAgentModal = defineAsyncComponent(
+  () => import("@/components/dialogs/TaskAgentModal.vue")
+);
 
 const chat = useChatStore();
 const sessions = useSessionsStore();
 const taskAgent = useTaskAgentStore();
+const ui = useDialogStore();
 const showStats = ref(false);
 const showTasks = ref(false);
 const showTimeTravel = ref(false);
 
 async function exportSession() {
   if (!sessions.currentId) {
-    alert("请先选择一个会话");
+    await ui.alert("请先选择一个会话");
     return;
   }
   const r = await sessionsApi.exportMarkdown(sessions.currentId!);
@@ -49,9 +60,9 @@ const headerRef = ref<InstanceType<typeof ChatHeader> | null>(null);
     <MessageList />
     <ChatInput />
 
-    <StatsModal v-model="showStats" />
-    <TasksModal v-model="showTasks" />
-    <TimeTravelModal v-model="showTimeTravel" />
-    <TaskAgentModal />
+    <StatsModal v-if="showStats" v-model="showStats" />
+    <TasksModal v-if="showTasks" v-model="showTasks" />
+    <TimeTravelModal v-if="showTimeTravel" v-model="showTimeTravel" />
+    <TaskAgentModal v-if="taskAgent.open" />
   </main>
 </template>

@@ -28,6 +28,7 @@ const title = computed(() => sessions.current?.title || "新会话");
       <button
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
         title="会话数据分析"
+        aria-label="会话数据分析"
         @click="emit('stats')"
       >
         <Icon name="stats" :size="15" />
@@ -36,6 +37,7 @@ const title = computed(() => sessions.current?.title || "新会话");
         v-if="auth.platformOperator !== false"
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
         title="定时任务"
+        aria-label="定时任务"
         @click="emit('tasks')"
       >
         <Icon name="tasks" :size="15" />
@@ -43,6 +45,7 @@ const title = computed(() => sessions.current?.title || "新会话");
       <button
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
         title="自主任务 Agent"
+        aria-label="自主任务 Agent"
         @click="emit('agenttask')"
       >
         <Icon name="sparkle" :size="15" />
@@ -50,6 +53,7 @@ const title = computed(() => sessions.current?.title || "新会话");
       <button
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
         title="版本历史"
+        aria-label="版本历史"
         @click="emit('timetravel')"
       >
         <Icon name="clock" :size="15" />
@@ -57,6 +61,7 @@ const title = computed(() => sessions.current?.title || "新会话");
       <button
         class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
         title="导出为 Markdown"
+        aria-label="导出为 Markdown"
         @click="emit('export')"
       >
         <Icon name="export" :size="15" />

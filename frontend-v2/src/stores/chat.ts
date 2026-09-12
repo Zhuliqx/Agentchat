@@ -3,6 +3,7 @@ import { reactive } from "vue";
 import { sessionsApi, streamChat } from "@/api";
 import { useSessionsStore } from "./sessions";
 import { useChatOptionsStore } from "./chatOptions";
+import { useDialogStore } from "./dialog";
 import { AGENT_META } from "@/utils/agentMeta";
 import type { Message, SSEEvent } from "@/types/api";
 
@@ -51,6 +52,8 @@ export const useChatStore = defineStore("chat", {
     messages: [] as ChatMsg[],
     sending: false,
     abortController: null as AbortController | null,
+    historySeq: 0,
+    historyError: null as string | null,
     // HITL：interrupt 时记录所在消息 id，确认后在同一个气泡/轨道内继续
     hitlMsgId: null as string | null,
     // 正在发送的用户消息（SSE meta 帧回填其后端 id）
@@ -66,8 +69,19 @@ export const useChatStore = defineStore("chat", {
   },
   actions: {
     async loadHistory(sessionId: string) {
+      this._abortStream();
+      const seq = ++this.historySeq;
       this.messages = [];
-      const msgs = await sessionsApi.history(sessionId);
+      this.historyError = null;
+      let msgs: Message[];
+      try {
+        msgs = await sessionsApi.history(sessionId);
+      } catch (e) {
+        if (seq !== this.historySeq) return;
+        this.historyError = (e as Error).message || "加载会话失败";
+        return;
+      }
+      if (seq !== this.historySeq) return; // 已被更晚的会话切换取代
       msgs.forEach((m: Message) => {
         this.messages.push({
           id: nid(),
@@ -79,7 +93,20 @@ export const useChatStore = defineStore("chat", {
       });
     },
     clear() {
+      this._abortStream();
       this.messages = [];
+      this.historyError = null;
+      this.hitlMsgId = null;
+    },
+
+    /** 切走会话/清空时中止在途流：立即释放 sending，
+     *  旧流的 finally 通过 controller 身份判断，不能反向覆盖新流状态。 */
+    _abortStream() {
+      if (!this.abortController) return;
+      this.abortController.abort();
+      this.abortController = null;
+      this.sending = false;
+      this.pendingUserMsg = null;
       this.hitlMsgId = null;
     },
 
@@ -182,7 +209,7 @@ export const useChatStore = defineStore("chat", {
         try {
           await sessionsApi.deleteMessage(sessions.currentId, msg.backendId);
         } catch (e) {
-          alert(`删除失败：${(e as Error).message}`);
+          await useDialogStore().alert(`删除失败：${(e as Error).message}`);
           return;
         }
       }
@@ -206,8 +233,9 @@ export const useChatStore = defineStore("chat", {
       if (!userMsg) return;
       // 从该用户消息起截断（含其后的所有消息），重新发送
       const start = this.messages.indexOf(userMsg);
-      this.messages.splice(start, this.messages.length - start);
+      const removed = this.messages.splice(start, this.messages.length - start);
       this.hitlMsgId = null;
+      await this._deleteBackendMessages(removed);
       await this.send(userMsg.content);
     },
 
@@ -218,10 +246,22 @@ export const useChatStore = defineStore("chat", {
       if (!text) return;
       const start = this.messages.indexOf(userMsg);
       if (start < 0) return;
-      userMsg.content = text;
-      this.messages.splice(start + 1, this.messages.length - start - 1);
+      const removed = this.messages.splice(start, this.messages.length - start);
       this.hitlMsgId = null;
+      await this._deleteBackendMessages(removed);
       await this.send(text);
+    },
+
+    /** 重发前清理被截断消息的服务端记录；删除失败不阻塞重发（best-effort）。 */
+    async _deleteBackendMessages(msgs: ChatMsg[]) {
+      const sessionId = useSessionsStore().currentId;
+      const ids = msgs
+        .map((m) => m.backendId)
+        .filter((id): id is string => !!id);
+      if (!sessionId || !ids.length) return;
+      await Promise.allSettled(
+        ids.map((id) => sessionsApi.deleteMessage(sessionId, id))
+      );
     },
 
     async _runStream(payload: Record<string, unknown>, agentMsg: ChatMsg) {
@@ -242,10 +282,12 @@ export const useChatStore = defineStore("chat", {
         }
       } finally {
         agentMsg.streaming = false;
-        this.sending = false;
-        this.abortController = null;
-        // 若消息仍处于 HITL 待确认状态，保留 hitlMsgId 供 resume 在同一气泡继续
-        if (!agentMsg.hitl) this.hitlMsgId = null;
+        if (this.abortController === controller) {
+          this.sending = false;
+          this.abortController = null;
+          // 若消息仍处于 HITL 待确认状态，保留 hitlMsgId 供 resume 在同一气泡继续
+          if (!agentMsg.hitl) this.hitlMsgId = null;
+        }
       }
     },
 

@@ -4,9 +4,11 @@ import Modal from "@/components/common/Modal.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Icon from "@/components/common/Icon.vue";
 import { useTasksStore } from "@/stores/tasks";
+import { useDialogStore } from "@/stores/dialog";
 
 const open = defineModel<boolean>({ default: false });
 const tasks = useTasksStore();
+const ui = useDialogStore();
 const showForm = ref(false);
 const form = ref({ name: "", task_type: "", schedule: "interval:3600" });
 
@@ -23,13 +25,16 @@ watch(open, (v) => {
 });
 
 async function saveTask() {
-  if (!form.value.name.trim()) return alert("请填写任务名称");
+  if (!form.value.name.trim()) {
+    await ui.alert("请填写任务名称");
+    return;
+  }
   try {
     await tasks.create(form.value.name.trim(), form.value.task_type, form.value.schedule.trim());
     showForm.value = false;
     form.value = { name: "", task_type: form.value.task_type, schedule: "interval:3600" };
   } catch (e) {
-    alert("创建失败：" + (e as Error).message);
+    await ui.alert("创建失败：" + (e as Error).message);
   }
 }
 </script>

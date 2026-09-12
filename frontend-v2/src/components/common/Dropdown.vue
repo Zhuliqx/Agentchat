@@ -14,10 +14,14 @@ const root = ref<HTMLElement | null>(null);
 onClickOutside(root, () => {
   if (props.open) emit("close");
 });
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && props.open) emit("close");
+}
 </script>
 
 <template>
-  <div ref="root" class="relative inline-flex">
+  <div ref="root" class="relative inline-flex" @keydown="onKeydown">
     <slot name="trigger" />
     <Transition name="pop">
       <div

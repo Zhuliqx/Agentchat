@@ -33,10 +33,8 @@ export function createMarkdownRenderer() {
     markedHighlight({
       langPrefix: "hljs language-",
       highlight(code, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-          return hljs.highlight(code, { language: lang }).value;
-        }
-        return hljs.highlightAuto(code).value;
+        const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
+        return hljs.highlight(code, { language }).value;
       },
     })
   );
@@ -46,11 +44,23 @@ export function createMarkdownRenderer() {
     gfm: true,
   });
 
+  const cache = new Map<string, string>();
+  const CACHE_LIMIT = 100;
+
   return {
     /** 渲染为安全 HTML */
     render(src: string): string {
-      const raw = marked.parse(String(src ?? ""), { async: false }) as string;
-      return DOMPurify.sanitize(raw);
+      const text = String(src ?? "");
+      const cached = cache.get(text);
+      if (cached !== undefined) return cached;
+      const raw = marked.parse(text, { async: false }) as string;
+      const html = DOMPurify.sanitize(raw);
+      if (cache.size >= CACHE_LIMIT) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      cache.set(text, html);
+      return html;
     },
     /** 流式渲染：未闭合代码块（奇数个 ```）时把最后一个未配对的围栏转义为文本，避免内容被吞进代码块 */
     renderStream(src: string): string {
