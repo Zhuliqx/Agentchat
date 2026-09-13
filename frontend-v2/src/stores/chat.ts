@@ -4,7 +4,6 @@ import { reactive } from "vue";
 import { sessionsApi, streamChat } from "@/api";
 import { useSessionsStore } from "./sessions";
 import { useChatOptionsStore } from "./chatOptions";
-import { useDialogStore } from "./dialog";
 import { AGENT_META } from "@/utils/agentMeta";
 import type { Message, SourceRef, SSEEvent } from "@/types/api";
 
@@ -31,7 +30,6 @@ export interface SendOptions {
   useRag?: boolean;
   useSearch?: boolean;
   useMemory?: boolean;
-  checkpointId?: string; // Time Travel 分叉起点
 }
 
 const ORBIT_NAME_RE = new RegExp(Object.keys(AGENT_META).join("|"));
@@ -63,6 +61,8 @@ export const useChatStore = defineStore("chat", {
     historyError: null as string | null,
     // HITL：interrupt 时记录所在消息 id，确认后在同一个气泡/轨道内继续
     hitlMsgId: null as string | null,
+    // 分支点：发送下一条消息前先删除它之后的历史（点击"从这里分支"写入）
+    branchFrom: null as ChatMsg | null,
     // 正在发送的用户消息（SSE meta 帧回填其后端 id）
     pendingUserMsg: null as ChatMsg | null,
     /** 消息列表距底部的距离（由 MessageList 在滚动时写入） */
@@ -86,6 +86,12 @@ export const useChatStore = defineStore("chat", {
     showJumpButton: (s): boolean =>
       s.scrollGap > JUMP_BUTTON_GAP ||
       (s.scrollGap > STICK_TOLERANCE && s.messages.length > s.unseenBase),
+    /** 分支点之后待删除的消息条数（无分支点为 0） */
+    branchAfterCount: (s): number => {
+      if (!s.branchFrom) return 0;
+      const idx = s.messages.indexOf(s.branchFrom);
+      return idx < 0 ? 0 : s.messages.length - idx - 1;
+    },
   },
   actions: {
     /** 由 MessageList 在滚动时调用，维护贴底状态与新消息基准 */
@@ -109,6 +115,7 @@ export const useChatStore = defineStore("chat", {
       const seq = ++this.historySeq;
       this.messages = [];
       this.historyError = null;
+      this.branchFrom = null;
       let msgs: Message[];
       try {
         msgs = await sessionsApi.history(sessionId);
@@ -134,6 +141,7 @@ export const useChatStore = defineStore("chat", {
       this.messages = [];
       this.historyError = null;
       this.hitlMsgId = null;
+      this.branchFrom = null;
     },
 
     /** 切走会话/清空时中止在途流：立即释放 sending，
@@ -167,7 +175,6 @@ export const useChatStore = defineStore("chat", {
         useSearch?: boolean;
         useMemory?: boolean;
         resume?: "confirmed" | "cancelled";
-        checkpointId?: string;
       } = {},
     ): Record<string, unknown> {
       const options = useChatOptionsStore();
@@ -179,13 +186,14 @@ export const useChatStore = defineStore("chat", {
         use_memory: opts.useMemory ?? options.useMemory,
       };
       if (opts.resume) payload.resume = opts.resume;
-      if (opts.checkpointId) payload.checkpoint_id = opts.checkpointId;
       return payload;
     },
 
-    /** 发送消息（SSE 流式）。fromModal 用于 Time Travel 分叉等程序化发送。 */
+    /** 发送消息（SSE 流式） */
     async send(text: string, opts: SendOptions = {}) {
       if (this.sending || !text.trim()) return;
+      // 普通发送/重发都取消未完成的分支状态，避免下次发送误删历史
+      this.branchFrom = null;
       const sessions = useSessionsStore();
       const payload = this._buildPayload(sessions.currentId, text, opts);
 
@@ -249,21 +257,25 @@ export const useChatStore = defineStore("chat", {
       this.abortController?.abort();
     },
 
-    /** 删除消息：调用后端删除后本地移除（无后端 id 时仅本地移除）。 */
-    async deleteMessage(msg: ChatMsg) {
-      const sessions = useSessionsStore();
-      const idx = this.messages.findIndex((m) => m.id === msg.id);
-      if (idx < 0) return;
-      if (msg.backendId && sessions.currentId) {
-        try {
-          await sessionsApi.deleteMessage(sessions.currentId, msg.backendId);
-        } catch (e) {
-          await useDialogStore().alert(`删除失败：${(e as Error).message}`);
-          return;
-        }
-      }
-      this.messages.splice(idx, 1);
-      if (this.hitlMsgId === msg.id) this.hitlMsgId = null;
+    /** 进入分支态：下一条消息发送前，删除该消息之后的所有历史 */
+    startBranch(msg: ChatMsg) {
+      this.branchFrom = msg;
+    },
+
+    cancelBranch() {
+      this.branchFrom = null;
+    },
+
+    /** 发送分支消息：先删掉分支点之后的整段历史，再作为新消息发出 */
+    async branchAndSend(text: string) {
+      const from = this.branchFrom;
+      this.branchFrom = null;
+      if (!from || this.sending || !text.trim()) return;
+      const idx = this.messages.indexOf(from);
+      const next = idx >= 0 ? this.messages[idx + 1] : null;
+      // 保留分支点自身，删除它之后的全部消息；截断失败保留历史并中止发送
+      if (next && !(await this._truncateFrom(next))) return;
+      await this.send(text);
     },
 
     /** 重试：从该助手消息对应的用户问题起原子截断（含该问题），再重新发送它 */

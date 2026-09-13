@@ -13,7 +13,6 @@ const emit = defineEmits<{
   stats: [];
   tasks: [];
   agenttask: [];
-  timetravel: [];
   export: [];
 }>();
 
@@ -65,11 +64,6 @@ const iconBtn =
 
       <!-- 会话操作：作用于当前会话 -->
       <div class="flex flex-shrink-0 items-center gap-0.5">
-        <Tooltip label="版本历史">
-          <button :class="iconBtn" aria-label="版本历史" @click="emit('timetravel')">
-            <Icon name="clock" :size="15" />
-          </button>
-        </Tooltip>
         <Tooltip label="导出为 Markdown">
           <button :class="iconBtn" aria-label="导出为 Markdown" @click="emit('export')">
             <Icon name="export" :size="15" />

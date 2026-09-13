@@ -1,5 +1,5 @@
-// Agent 元数据统一管理：消息轨道（chat.ts）与时间旅行（TimeTravelModal）共用，
-// 避免两处各自维护 name → 标签的映射漂移。
+// Agent 元数据统一管理：消息轨道（chat.ts）与自主任务的执行轨道共用，
+// 避免多处各自维护 name → 标签的映射漂移。
 export interface AgentMeta {
   label: string;
   emoji?: string;

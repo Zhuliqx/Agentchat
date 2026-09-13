@@ -11,7 +11,6 @@ import {
   syncTypingCaret,
 } from "@/utils/markdownEnhance";
 import { useAuthStore } from "@/stores/auth";
-import { useDialogStore } from "@/stores/dialog";
 import { docsApi } from "@/api";
 import OrbitFlow from "./OrbitFlow.vue";
 import SourcePreview from "./SourcePreview.vue";
@@ -23,7 +22,6 @@ import { sourceName, sourceTitle } from "@/utils/sources";
 const props = defineProps<{ msg: ChatMsg }>();
 const chat = useChatStore();
 const auth = useAuthStore();
-const ui = useDialogStore();
 
 const userInitial = computed(() => (auth.user?.username || "我").slice(0, 1).toUpperCase());
 
@@ -125,11 +123,11 @@ function saveEdit() {
   editing.value = false;
 }
 
-async function deleteMsg() {
-  if (chat.sending) return;
-  if (!(await ui.confirm("确定删除这条消息？"))) return;
-  await chat.deleteMessage(props.msg);
-}
+/** 只有后面还有消息时才谈得上分支：最后一条没有可删除的后续内容 */
+const canBranch = computed(() => {
+  const idx = chat.messages.indexOf(props.msg);
+  return idx >= 0 && idx < chat.messages.length - 1;
+});
 </script>
 
 <template>
@@ -153,77 +151,80 @@ async function deleteMsg() {
     <!-- 内容 -->
     <div class="min-w-0 max-w-[82%]">
       <!-- 用户消息 -->
-      <div
-        v-if="msg.role === 'user'"
-        class="group/user relative rounded-2xl rounded-tr-md border px-4 py-2.5 text-base leading-relaxed transition"
-        :class="editing ? 'border-accent/40 bg-surface' : 'border-line bg-surface-2'"
-      >
-        <!-- 编辑态：就地改写问题 -->
-        <template v-if="editing">
-          <textarea
-            v-model="editText"
-            rows="3"
-            class="w-full resize-y rounded-xl border border-line-2 bg-surface px-3.5 py-2.5 text-base leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
-          />
-          <div class="mt-2.5 flex items-center justify-between gap-2">
-            <span class="text-2xs text-ink-faint">修改后将从此处重新生成回复</span>
-            <div class="flex gap-2">
-              <button
-                class="h-8 rounded-lg border border-line-2 px-3.5 text-xs text-ink-dim transition hover:border-line hover:text-ink active:scale-[0.98]"
-                @click="cancelEdit"
-              >
-                取消
-              </button>
-              <button
-                class="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-xs font-medium text-white transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="chat.sending || !editText.trim()"
-                @click="saveEdit"
-              >
-                <Icon name="send" :size="13" />
-                保存并重发
-              </button>
+      <template v-if="msg.role === 'user'">
+        <div
+          class="group/user relative rounded-2xl rounded-tr-md border px-4 py-2 text-base leading-relaxed transition"
+          :class="
+            editing
+              ? 'border-accent/40 bg-surface'
+              : // 按内容收缩并右对齐：否则下方操作条（时间+按钮）会把气泡撑得比文字宽
+                'ml-auto w-fit border-line bg-surface-2'
+          "
+        >
+          <!-- 编辑态：就地改写问题 -->
+          <template v-if="editing">
+            <textarea
+              v-model="editText"
+              rows="3"
+              class="w-full resize-y rounded-xl border border-line-2 bg-surface px-3.5 py-2.5 text-base leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
+            />
+            <div class="mt-2.5 flex items-center justify-between gap-2">
+              <span class="text-2xs text-ink-faint">修改后将从此处重新生成回复</span>
+              <div class="flex gap-2">
+                <button
+                  class="h-8 rounded-lg border border-line-2 px-3.5 text-xs text-ink-dim transition hover:border-line hover:text-ink active:scale-[0.98]"
+                  @click="cancelEdit"
+                >
+                  取消
+                </button>
+                <button
+                  class="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-xs font-medium text-white transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                  :disabled="chat.sending || !editText.trim()"
+                  @click="saveEdit"
+                >
+                  <Icon name="send" :size="13" />
+                  保存并重发
+                </button>
+              </div>
             </div>
-          </div>
-        </template>
-        <!-- 普通态：内容 + hover 编辑/删除按钮 -->
-        <template v-else>
+          </template>
+          <!-- 普通态：气泡内容 -->
           <div
+            v-else
             ref="userBodyRef"
-            class="md"
+            class="md md-user"
             v-html="md.render(msg.content)"
             @click="onMarkdownClick"
           />
-          <span
-            v-if="msg.createdAt"
-            class="msg-stamp pointer-events-none absolute -bottom-4 right-1 text-2xs tabular-nums text-ink-faint"
-          >
+        </div>
+        <!-- 操作条与助手消息一致：气泡下方、右侧对齐，悬停显示 -->
+        <div
+          v-if="!editing && !chat.sending"
+          class="msg-actions mt-1 flex items-center justify-end gap-0.5"
+        >
+          <span v-if="msg.createdAt" class="mr-1 text-2xs tabular-nums text-ink-faint">
             {{ timeLabel(msg.createdAt) }}
           </span>
-          <div
-            v-if="!chat.sending"
-            class="absolute -left-8 top-0.5 flex flex-col gap-0.5 opacity-0 transition group-hover/user:opacity-100"
-          >
-            <Tooltip label="编辑并重新发送">
-              <button
-                class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
-                aria-label="编辑并重新发送"
-                @click="startEdit"
-              >
-                <Icon name="edit" :size="13" />
-              </button>
-            </Tooltip>
-            <Tooltip label="删除消息">
-              <button
-                class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err"
-                aria-label="删除消息"
-                @click="deleteMsg"
-              >
-                <Icon name="trash" :size="13" />
-              </button>
-            </Tooltip>
-          </div>
-        </template>
-      </div>
+          <Tooltip :label="copied ? '已复制' : '复制'">
+            <button
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
+              :aria-label="copied ? '已复制' : '复制'"
+              @click="copyMsg"
+            >
+              <Icon :name="copied ? 'check' : 'copy'" :size="13" :class="copied ? 'text-ok' : ''" />
+            </button>
+          </Tooltip>
+          <Tooltip label="编辑并重新发送">
+            <button
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
+              aria-label="编辑并重新发送"
+              @click="startEdit"
+            >
+              <Icon name="edit" :size="13" />
+            </button>
+          </Tooltip>
+        </div>
+      </template>
 
       <!-- 助手消息 -->
       <div v-else class="flex flex-col gap-1">
@@ -314,14 +315,14 @@ async function deleteMsg() {
               <Icon name="refresh" :size="13" />
             </button>
           </Tooltip>
-          <Tooltip label="删除消息">
+          <Tooltip v-if="canBranch" label="从这里分支">
             <button
-              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="删除消息"
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="从这里分支"
               :disabled="chat.sending"
-              @click="deleteMsg"
+              @click="chat.startBranch(msg)"
             >
-              <Icon name="trash" :size="13" />
+              <Icon name="branch" :size="13" />
             </button>
           </Tooltip>
         </div>

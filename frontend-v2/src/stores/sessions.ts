@@ -9,6 +9,8 @@ export const useSessionsStore = defineStore("sessions", {
     batchMode: false,
     selected: new Set<string>(),
     loading: false,
+    /** 最近一次加载失败的原因（成功后清空），供界面提示与重试 */
+    error: null as string | null,
   }),
   getters: {
     current: (s): Session | null => s.list.find((x) => x.id === s.currentId) || null,
@@ -18,6 +20,10 @@ export const useSessionsStore = defineStore("sessions", {
       this.loading = true;
       try {
         this.list = await sessionsApi.list();
+        this.error = null;
+      } catch (e) {
+        // 不向上抛：失败原因留在 error 里交给界面提示，旧列表继续可用
+        this.error = (e as Error).message || "加载会话失败";
       } finally {
         this.loading = false;
       }
@@ -38,8 +44,14 @@ export const useSessionsStore = defineStore("sessions", {
       const idx = this.list.findIndex((x) => x.id === id);
       if (idx >= 0) {
         this.list[idx].pinned = s.pinned;
-        // 置顶排前（稳定排序，非置顶保持原序）
-        this.list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+        // 与服务端同一口径排序（置顶在前，其余按更新时间倒序）：
+        // 只按 pinned 稳定排序的话，取消置顶后这条会留在列表最上方，回不到原位
+        this.list.sort((a, b) => {
+          const pa = a.pinned ? 1 : 0;
+          const pb = b.pinned ? 1 : 0;
+          if (pa !== pb) return pb - pa;
+          return Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "");
+        });
       }
     },
     async remove(id: string) {

@@ -21,7 +21,6 @@ describe("ChatHeader", () => {
   it("图标按会话操作 / 平台工具分组，且列表头只有标题与工具组", () => {
     const wrapper = mountHeader();
 
-    expect(wrapper.find('button[aria-label="版本历史"]').exists()).toBe(true);
     expect(wrapper.find('button[aria-label="导出为 Markdown"]').exists()).toBe(true);
     expect(wrapper.find('button[aria-label="会话数据分析"]').exists()).toBe(true);
     // 两组之间的分隔线

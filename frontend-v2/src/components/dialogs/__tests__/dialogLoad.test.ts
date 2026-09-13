@@ -3,7 +3,6 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import StatsModal from "@/components/dialogs/StatsModal.vue";
 import TasksModal from "@/components/dialogs/TasksModal.vue";
-import TimeTravelModal from "@/components/dialogs/TimeTravelModal.vue";
 import ProfileModal from "@/components/dialogs/ProfileModal.vue";
 import AdminModal from "@/components/dialogs/AdminModal.vue";
 import { adminApi, authApi, sessionsApi, tasksApi } from "@/api";
@@ -27,15 +26,6 @@ vi.mock("@/api", () => ({
       last_at: "2026-09-13T00:10:00Z",
       duration_sec: 600,
     })),
-    checkpoints: vi.fn(async () => [
-      {
-        checkpoint_id: "c1",
-        created_at: "2026-09-13T00:00:00Z",
-        next: [],
-        summary: "工具调用完成",
-        interrupted: false,
-      },
-    ]),
   },
   authApi: {
     me: vi.fn(async () => ({
@@ -73,7 +63,6 @@ vi.mock("@/api", () => ({
 }));
 
 const statsApi = sessionsApi.stats as unknown as ReturnType<typeof vi.fn>;
-const checkpointsApi = sessionsApi.checkpoints as unknown as ReturnType<typeof vi.fn>;
 const meApi = authApi.me as unknown as ReturnType<typeof vi.fn>;
 const authStatsApi = authApi.stats as unknown as ReturnType<typeof vi.fn>;
 const adminStatsApi = adminApi.stats as unknown as ReturnType<typeof vi.fn>;
@@ -103,16 +92,6 @@ describe("弹窗挂载即打开时加载数据", () => {
     expect(statsApi).toHaveBeenCalledWith("s1");
     expect(wrapper.text()).toContain("总消息数");
     expect(wrapper.text()).toContain("4");
-  });
-
-  it("版本历史拉取检查点而不是展示空态", async () => {
-    useSessionsStore().currentId = "s1";
-    const wrapper = mountDialog(TimeTravelModal, pinia);
-    await flushPromises();
-
-    expect(checkpointsApi).toHaveBeenCalledWith("s1");
-    expect(wrapper.text()).not.toContain("该会话暂无版本历史");
-    expect(wrapper.text()).toContain("工具调用完成");
   });
 
   it("定时任务拉取列表与类型注册表", async () => {

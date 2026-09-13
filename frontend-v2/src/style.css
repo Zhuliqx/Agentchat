@@ -31,7 +31,7 @@
     "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Consolas, monospace;
 
-  /* 字号体系：6 档，替代逐处写死的 text-[Npx] */
+  /* 字号体系：7 档（15px 专供消息正文，14px 在气泡里偏小），替代逐处写死的 text-[Npx] */
   --text-2xs: 11px;
   --text-2xs--line-height: 1.45;
   --text-xs: 12px;
@@ -40,6 +40,8 @@
   --text-sm--line-height: 1.55;
   --text-base: 14px;
   --text-base--line-height: 1.65;
+  --text-md: 15px;
+  --text-md--line-height: 1.6;
   --text-lg: 16px;
   --text-lg--line-height: 1.4;
   --text-xl: 18px;
@@ -257,18 +259,20 @@ button:disabled {
 .sb-panel--dragging {
   transition: none;
 }
+/* 底部面板折叠动画期间：会话列表跟随容器瞬时变化，避免二次缓动造成"慢一拍" */
+.sb-panel--follow {
+  transition: none;
+}
 
 /* ---------- 消息 hover 显隐 ----------
    只在支持 hover 的设备上默认隐藏：触屏没有 hover，隐藏后就再也唤不出来 */
 @media (hover: hover) {
-  .msg-actions,
-  .msg-stamp {
+  .msg-actions {
     opacity: 0;
     transition: opacity 150ms ease;
   }
   .msg-in:hover .msg-actions,
-  .msg-actions:focus-within,
-  .msg-in:hover .msg-stamp {
+  .msg-actions:focus-within {
     opacity: 1;
   }
 }
@@ -493,6 +497,19 @@ select:focus-visible {
 .md img {
   max-width: 100%;
   border-radius: 8px;
+}
+
+/* 用户气泡正文：字号比文档型回答略大，且首尾段落不留外边距——
+   否则 .md p 的 8px 上下外边距会让"你好"这类短消息显得框大内容小 */
+.md-user {
+  font-size: var(--text-md);
+  line-height: 1.6;
+}
+.md-user > :first-child {
+  margin-top: 0;
+}
+.md-user > :last-child {
+  margin-bottom: 0;
 }
 
 /* ---------- 动效降级 ----------

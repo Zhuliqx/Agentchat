@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useElementSize } from "@vueuse/core";
 import { searchApi } from "@/api";
 import { usePointerDrag } from "@/composables/usePointerDrag";
@@ -80,7 +80,6 @@ function gotoSession(id: string) {
   searchResults.value = null;
 }
 
-// 折叠状态
 const folded = ref<Record<string, boolean>>({
   sessions: localStorage.getItem("fold-sessions") === "1",
   docs: localStorage.getItem("fold-docs") === "1",
@@ -91,7 +90,24 @@ function toggle(key: string) {
   localStorage.setItem(`fold-${key}`, folded.value[key] ? "1" : "0");
 }
 
+// 底部面板（文档/记忆）折叠期间容器高度在动画：此时会话列表的 max-height 要立刻跟随实测高度，
+// 否则它会再用 300ms 缓动追一次，观感是"文档栏收完了，会话列表才慢一拍地长出来"
+const panelsAnimating = ref(false);
+let panelsAnimatingTimer: number | undefined;
+watch(
+  () => [folded.value.docs, folded.value.memory],
+  () => {
+    panelsAnimating.value = true;
+    clearTimeout(panelsAnimatingTimer);
+    panelsAnimatingTimer = window.setTimeout(() => (panelsAnimating.value = false), 340);
+  },
+);
+onBeforeUnmount(() => clearTimeout(panelsAnimatingTimer));
+
 async function newSession() {
+  // 当前会话还是空的（刚建完还没发消息）：复用而不是再建一个，
+  // 否则连点"新建会话"会堆出一串空会话
+  if (sessions.currentId && !chat.messages.length) return;
   await sessions.create();
   // 切换到新会话：清空聊天区（避免仍显示旧会话消息）
   chat.clear();
@@ -105,8 +121,11 @@ let widthCollapsed = false; // 本次拖拽中是否已触发折叠
 
 const startResize = usePointerDrag({
   onStart: () => {
-    widthStartW = props.width ?? SIDEBAR_DEFAULT_WIDTH;
-    widthCollapsed = false;
+    // 折叠态从最小宽度起步，并复用"反向拖回自动展开"分支：
+    // 这样在左边缘往右拖一点点就能把侧栏拉出来，不用先拖过 180px 死区
+    const collapsed = props.open === false;
+    widthStartW = collapsed ? SIDEBAR_MIN_WIDTH : (props.width ?? SIDEBAR_DEFAULT_WIDTH);
+    widthCollapsed = collapsed;
     widthDragging.value = true;
   },
   onMove: (e, ctx) => {
@@ -424,6 +443,7 @@ function resetPanelH(which: "doc" | "mem") {
           </div>
           <div
             class="sb-panel no-scrollbar min-h-0 flex-1 overflow-y-auto"
+            :class="panelsAnimating ? 'sb-panel--follow' : ''"
             :style="{
               maxHeight: folded.sessions ? '0px' : sessionsAreaH ? sessionsAreaH + 'px' : '100vh',
             }"
@@ -437,16 +457,17 @@ function resetPanelH(which: "doc" | "mem") {
       <div class="flex flex-shrink-0 flex-col gap-1.5 border-t border-line px-2.5 pt-1 pb-1">
         <!-- 知识库文档 -->
         <div class="relative">
-          <!-- 拖拽条贴在卡片上边框上（不占布局高度），只控制文档面板高度，折叠时不显示 -->
+          <!-- 拖拽条紧贴卡片上边框（交接线）：命中区只在线上方 5px——
+               既不越界到上方内容，也不压住卡片标题（折叠按钮）；悬停时线上亮一条细线 -->
           <div
             v-if="!folded.docs"
-            class="group absolute inset-x-0 -top-[6px] z-10 flex h-[13px] cursor-row-resize touch-none select-none items-center justify-center"
+            class="group absolute inset-x-0 -top-[5px] z-10 h-[5px] cursor-row-resize touch-none select-none"
             title="拖拽调整文档面板高度 · 双击恢复默认"
             @pointerdown="startDocResize"
             @dblclick="resetPanelH('doc')"
           >
             <span
-              class="h-[3px] w-10 rounded-full bg-line-2 opacity-50 transition group-hover:bg-accent/70 group-hover:opacity-100"
+              class="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
             />
           </div>
           <section class="overflow-hidden rounded-lg border border-line">
@@ -480,16 +501,16 @@ function resetPanelH(which: "doc" | "mem") {
 
         <!-- 长期记忆 -->
         <div class="relative">
-          <!-- 拖拽条贴在卡片上边框上（不占布局高度），只控制记忆面板高度，折叠时不显示 -->
+          <!-- 同上：命中区贴住记忆卡片的上边框，不与内容/标题抢点击 -->
           <div
             v-if="!folded.memory"
-            class="group absolute inset-x-0 -top-[6px] z-10 flex h-[13px] cursor-row-resize touch-none select-none items-center justify-center"
+            class="group absolute inset-x-0 -top-[5px] z-10 h-[5px] cursor-row-resize touch-none select-none"
             title="拖拽调整记忆面板高度 · 双击恢复默认"
             @pointerdown="startMemResize"
             @dblclick="resetPanelH('mem')"
           >
             <span
-              class="h-[3px] w-10 rounded-full bg-line-2 opacity-50 transition group-hover:bg-accent/70 group-hover:opacity-100"
+              class="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
             />
           </div>
           <section class="overflow-hidden rounded-lg border border-line">
@@ -548,12 +569,21 @@ function resetPanelH(which: "doc" | "mem") {
       </div>
     </div>
 
-    <!-- 拖拽调整宽度手柄（悬停变双箭头） -->
+    <!-- 拖拽调整宽度手柄：
+         fixed 定位（aside 有 overflow-hidden，绝对定位会被裁掉）；
+         命中区紧贴"内容区 / 侧栏"的交接线——展开态落在侧栏内最后一列、不覆盖消息区，
+         折叠态贴在屏幕左边缘；悬停时只在交接线上亮一条细线，所见即所拖 -->
     <div
-      v-if="!overlay && open !== false"
-      class="absolute -right-[3px] top-0 z-20 h-full w-[7px] cursor-col-resize touch-none transition-colors hover:bg-accent/25"
+      v-if="!overlay"
+      class="group fixed top-0 z-30 h-full w-[5px] cursor-col-resize touch-none"
+      :style="{ left: (open === false ? 0 : Math.max(0, (width ?? 0) - 5)) + 'px' }"
       title="拖拽调整宽度"
       @pointerdown="startResize"
-    ></div>
+    >
+      <span
+        class="pointer-events-none absolute top-0 h-full w-[2px] bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        :class="open === false ? 'left-0' : 'right-0'"
+      ></span>
+    </div>
   </aside>
 </template>

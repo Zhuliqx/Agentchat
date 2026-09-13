@@ -8,7 +8,6 @@ vi.mock("@/api", () => ({
   sessionsApi: {
     history: vi.fn(async () => []),
     list: vi.fn(async () => []),
-    deleteMessage: vi.fn(async () => undefined),
     truncate: vi.fn(async () => ({ deleted: 2 })),
   },
   streamChat: vi.fn(),
@@ -329,6 +328,31 @@ describe("chat store", () => {
     expect(truncate).toHaveBeenCalledWith("s1", "u1");
     expect(chat.messages.map((m) => m.content)).toEqual(["问题A（改）", "编辑后的回答"]);
     expect(chat.messages.filter((m) => m.role === "user")).toHaveLength(1);
+  });
+
+  it("branchAndSend() 在分支点后截断旧历史，再发送新消息", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    chat.messages = [
+      { id: "m1", role: "user", content: "问题", backendId: "u1" },
+      { id: "m2", role: "assistant", content: "旧答案", backendId: "a1" },
+      { id: "m3", role: "user", content: "旧追问", backendId: "u2" },
+      { id: "m4", role: "assistant", content: "旧追问的答案", backendId: "a2" },
+    ];
+    const truncate = sessionsApi.truncate as unknown as ReturnType<typeof vi.fn>;
+    truncate.mockReset();
+    truncate.mockResolvedValue({ deleted: 2 });
+    emitStream([{ type: "token", content: "新答案" }]);
+
+    chat.startBranch(chat.messages[1]); // 在"旧答案"处分支
+    await chat.branchAndSend("新的追问");
+
+    // 删除的是分支点之后的第一条（含它自己），分支点本身保留
+    expect(truncate).toHaveBeenCalledWith("s1", "u2");
+    expect(chat.messages.map((m) => m.content)).toEqual(["问题", "旧答案", "新的追问", "新答案"]);
+    expect(chat.branchFrom).toBeNull();
   });
 
   it("keeps only the latest history when session switches overlap", async () => {

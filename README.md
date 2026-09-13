@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-06（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-13（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -63,7 +63,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
   - 支持**语义检索**（pgvector 索引）与**写入去重**（相似记忆合并覆盖）
 - **流式输出（SSE）**：`POST /api/chat/stream` **token 级流式**——Agent 调度事件实时推送，工具调用前先一次性推送完整开场白、工具完成后的答案逐 token 推送（自动去重重复前缀），前端实时渲染；同步 DB 调用放线程池，不阻塞事件循环
 - **人工确认（HITL）**：基于 LangGraph `interrupt`/`Command(resume)` 机制，前端弹出确认卡片，用户确认/取消后从断点继续（同一 `thread_id`）。**默认 LLM 自主判定**（类似 Claude Code/Codex）：由模型根据操作影响自主决定是否请求用户授权（`request_confirmation` 工具）；也可配置 `HITL_ACTIONS` 切换为**强制确认**（调用前无条件中断；有开关的动作在开关打开时自动豁免）
-- **版本历史（Time Travel）**：基于 Checkpointer 的 checkpoint 版本链，前端可查看会话**每一步的历史状态**（时间线 + 摘要），并**从任意历史步骤分叉重新生成**（产生新分支，不影响原历史）；`GET /api/sessions/{id}/checkpoints` 拉取历史，`/api/chat(/stream)` 传 `checkpoint_id` 触发分叉
+- **时间旅行与消息内分支（Time Travel）**：后端基于 Checkpointer 保留 checkpoint 版本链，`GET /api/sessions/{id}/checkpoints` 可拉取时间线，`/api/chat(/stream)` 传 `checkpoint_id` 可从任意检查点分叉；前端不再提供检查点弹窗，改为**消息内分支**——在回答上点「从这里分支」，发送新消息时先原子截断其后的历史（`POST /api/sessions/{id}/truncate`）再从该点续写
 - **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未携带 Authorization 头时归入 `default` 访客（不破坏单用户体验），带过期/无效 token 则返回 401；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
 - **知识库按用户隔离**：文档（Postgres + Milvus 向量）按 `user_id` 隔离，不同用户的知识库互不可见（上传/检索/删除/预览均校验归属）；`ingest_docs.py` 可用 `--user` 指定归属用户
 - **Prompt 注入防护**：检索/搜索外部内容按「不可信数据块」隔离；中英规则库检测命中即剔除+告警，用户 query 含注入指令直接拒绝（`INJECTION_DETECTION_ENABLED`）；可选 LLM 复核降误报（`INJECTION_LLM_REVIEW`）；输出侧泄露检测（系统提示词片段/密钥模式，`INJECTION_OUTPUT_FILTER`）
@@ -74,7 +74,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **统一错误响应**：所有异常统一返回 JSON `{"detail", "code"}`，前端可读、不出现 HTML 500
 - **健壮性**：单轮请求超时（默认 120s）、LLM 请求超时/重试、rerank 模型后台预热
 - **容错**：模型调用统一 `middleware`（超时 + 耗时日志）、LLM 客户端网络重试（`LLM_MAX_RETRIES`）、子 Agent 调用自动重试（`SUBAGENT_RETRIES`）、图执行/LLM 提示缓存（`AGENT_CACHE_ENABLED`）、模型**离线加载**（`HF_OFFLINE=true`，HF 网络不可达时直接走本地缓存不联网检查）
-- **现代前端（frontend-v2）**：Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia；marked 官方 highlight 集成（marked-highlight + highlight.js 按需注册）+ DOMPurify 消毒；SSE 流式渲染、Agent 编排轨道（Orbit）、HITL 确认卡片、Time Travel 分叉；Vitest 单元测试。构建产物由 FastAPI 托管
+- **现代前端（frontend-v2）**：Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia；marked 官方 highlight 集成（marked-highlight + highlight.js 按需注册）+ DOMPurify 消毒；SSE 流式渲染、Agent 编排轨道（Orbit）、HITL 确认卡片、消息内分支（保留分支点、截断其后历史再续写）；Vitest 单元测试。构建产物由 FastAPI 托管
 
 ## 技术栈
 
@@ -207,7 +207,7 @@ python run.py
 | GET/POST | `/api/sessions` | 会话列表 / 新建会话（按登录用户隔离） |
 | GET/PATCH/DELETE | `/api/sessions/{id}` | 会话历史 / 重命名 / 删除 |
 | GET | `/api/sessions/{id}/stats` | **会话数据分析**（消息数/回合/token/时长等） |
-| GET | `/api/sessions/{id}/checkpoints` | **版本历史（Time Travel）**：会话 checkpoint 时间线 |
+| GET | `/api/sessions/{id}/checkpoints` | 会话 checkpoint 时间线（Time Travel 后端能力，前端未提供入口） |
 | GET | `/api/sessions/{id}/export` | 导出会话为 Markdown |
 | POST | `/api/sessions/batch-delete` | 批量删除会话（含消息与 checkpoint） |
 | GET/POST | `/api/tasks` | 定时任务列表（公开）/ 新建（需平台操作员权限） |

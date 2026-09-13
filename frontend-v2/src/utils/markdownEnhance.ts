@@ -80,11 +80,12 @@ export function syncTypingCaret(root: HTMLElement | null, streaming: boolean): v
 }
 
 /**
- * 引用编号联动：把正文里的 [n] 换成可点击标记，点击后高亮下方第 n 个来源。
- * sourceCount 用于挡掉越界编号（模型可能写出不存在的来源号）。
+ * 引用编号处理：范围内的 [n] 换成可点击标记（点击高亮下方第 n 个来源）；
+ * 悬空编号（越界，或整条消息没有来源列表——如联网搜索的回答）直接删除，
+ * 否则正文里会留下无指向的 "[1][4]" 噪音。
  */
 export function decorateCitations(root: HTMLElement | null, sourceCount: number): void {
-  if (!root || sourceCount <= 0) return;
+  if (!root) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
@@ -101,12 +102,20 @@ export function decorateCitations(root: HTMLElement | null, sourceCount: number)
     const text = node.nodeValue || "";
     const frag = document.createDocumentFragment();
     let cursor = 0;
-    let replaced = false;
+    let changed = false;
     CITATION_RE.lastIndex = 0; // matchAll 会读 lastIndex，先归零避免漏匹配
     for (const match of text.matchAll(CITATION_RE)) {
       const index = Number(match[1]);
-      if (index < 1 || index > sourceCount) continue; // 越界编号原样保留
       const start = match.index ?? 0;
+      const end = start + match[0].length;
+      if (index < 1 || index > sourceCount) {
+        // 悬空编号：连同紧邻的前导空格一起去掉
+        const cut = start > cursor && text[start - 1] === " " ? start - 1 : start;
+        frag.append(text.slice(cursor, cut));
+        cursor = end;
+        changed = true;
+        continue;
+      }
       frag.append(text.slice(cursor, start));
       const mark = document.createElement("button");
       mark.type = "button";
@@ -114,10 +123,10 @@ export function decorateCitations(root: HTMLElement | null, sourceCount: number)
       mark.className = "citation-mark";
       mark.textContent = match[0];
       frag.append(mark);
-      cursor = start + match[0].length;
-      replaced = true;
+      cursor = end;
+      changed = true;
     }
-    if (!replaced) continue;
+    if (!changed) continue;
     frag.append(text.slice(cursor));
     node.replaceWith(frag);
   }

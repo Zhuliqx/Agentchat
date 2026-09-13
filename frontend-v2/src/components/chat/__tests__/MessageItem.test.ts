@@ -3,7 +3,7 @@ import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick, reactive } from "vue";
 import MessageItem from "@/components/chat/MessageItem.vue";
-import type { ChatMsg } from "@/stores/chat";
+import { useChatStore, type ChatMsg } from "@/stores/chat";
 
 vi.mock("@/api", () => ({
   docsApi: {
@@ -62,7 +62,7 @@ describe("MessageItem streaming render", () => {
     wrapper.unmount();
   });
 
-  it("用户消息在气泡下方显示时间，且带 hover 显隐类", () => {
+  it("用户消息的操作条在气泡下方，含时间、复制与编辑", () => {
     const msg = reactive<ChatMsg>({
       id: "m3",
       role: "user",
@@ -71,9 +71,12 @@ describe("MessageItem streaming render", () => {
     });
     const wrapper = mount(MessageItem, { props: { msg } });
 
-    const stamp = wrapper.find(".msg-stamp");
-    expect(stamp.exists()).toBe(true);
-    expect(stamp.text()).toMatch(/\d{2}:\d{2}/);
+    const actions = wrapper.find(".msg-actions");
+    expect(actions.exists()).toBe(true);
+    expect(actions.classes()).toContain("justify-end"); // 右对齐在气泡下方
+    expect(actions.text()).toMatch(/\d{2}:\d{2}/);
+    expect(actions.find('button[aria-label="复制"]').exists()).toBe(true);
+    expect(actions.find('button[aria-label="编辑并重新发送"]').exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -129,6 +132,54 @@ describe("MessageItem streaming render", () => {
     // teleport 被 stub，弹窗内容渲染在组件内
     expect(wrapper.text()).toContain("文件内容");
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("助手消息有后续内容时提供分支入口，且不再提供删除", async () => {
+    const chat = useChatStore();
+    const first = reactive<ChatMsg>({ id: "m9", role: "assistant", content: "第一条答案" });
+    const second = reactive<ChatMsg>({ id: "m10", role: "user", content: "后续追问" });
+    chat.messages = [first, second];
+
+    const wrapper = mount(MessageItem, {
+      props: { msg: first },
+      global: { stubs: { teleport: true } },
+    });
+
+    expect(wrapper.find('[aria-label="删除消息"]').exists()).toBe(false);
+    const branch = wrapper.find('[aria-label="从这里分支"]');
+    expect(branch.exists()).toBe(true);
+
+    await branch.trigger("click");
+    expect(chat.branchFrom?.id).toBe("m9");
+    wrapper.unmount();
+
+    // 最后一条消息没有可删除的后续内容 → 不显示分支入口
+    chat.cancelBranch();
+    const lastWrapper = mount(MessageItem, {
+      props: { msg: second },
+      global: { stubs: { teleport: true } },
+    });
+    expect(lastWrapper.find('[aria-label="从这里分支"]').exists()).toBe(false);
+    expect(lastWrapper.find('[aria-label="删除消息"]').exists()).toBe(false);
+    lastWrapper.unmount();
+  });
+
+  it("用户消息也提供复制按钮，点击写入剪贴板", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const msg = reactive<ChatMsg>({ id: "m11", role: "user", content: "复制我" });
+
+    const wrapper = mount(MessageItem, {
+      props: { msg },
+      global: { stubs: { teleport: true } },
+    });
+
+    const copy = wrapper.find('button[aria-label="复制"]');
+    expect(copy.exists()).toBe(true);
+    await copy.trigger("click");
+    await nextTick();
+    expect(writeText).toHaveBeenCalledWith("复制我");
     wrapper.unmount();
   });
 });

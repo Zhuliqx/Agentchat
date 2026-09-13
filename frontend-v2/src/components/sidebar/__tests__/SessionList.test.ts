@@ -44,4 +44,23 @@ describe("SessionList", () => {
     expect(sessionsApi.history).toHaveBeenLastCalledWith("s2");
     wrapper.unmount();
   });
+
+  it("列表行显示相对时间，便于区分同名会话", async () => {
+    const sessions = useSessionsStore();
+    sessions.list = [
+      {
+        id: "s1",
+        title: "同名会话",
+        created_at: "",
+        updated_at: new Date(Date.now() - 3 * 60_000).toISOString(),
+      },
+    ];
+    sessions.currentId = "s1";
+
+    const wrapper = mount(SessionList);
+
+    expect(wrapper.text()).toContain("3 分钟前");
+    expect(wrapper.text()).toContain("同名会话");
+    wrapper.unmount();
+  });
 });

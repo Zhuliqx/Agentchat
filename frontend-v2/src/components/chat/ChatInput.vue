@@ -38,6 +38,14 @@ watch(
   },
 );
 
+// 进入分支态时把光标交给输入框，用户直接输入新消息即可
+watch(
+  () => chat.branchFrom,
+  (branch) => {
+    if (branch) inputEl.value?.focus();
+  },
+);
+
 onMounted(() => {
   model.load();
   loadDraft();
@@ -65,6 +73,10 @@ async function send() {
   // 发送后清除该会话草稿
   if (sessions.currentId) {
     localStorage.removeItem(draftKey(sessions.currentId));
+  }
+  if (chat.branchFrom) {
+    await chat.branchAndSend(text);
+    return;
   }
   await chat.send(text, {
     useRag: options.useRag,
@@ -104,6 +116,26 @@ async function chooseModel(id: string) {
           {{ chat.unseen > 0 ? `${chat.unseen} 条新消息` : "回到最新" }}
         </button>
       </div>
+      <!-- 分支态：说明发送后会被删除的后续消息，可随时取消 -->
+      <div
+        v-if="chat.branchFrom"
+        data-testid="branch-bar"
+        class="mb-2 flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-1.5 text-2xs text-ink-dim"
+      >
+        <Icon name="branch" :size="12" class="flex-shrink-0 text-accent" />
+        <span class="min-w-0 flex-1 truncate">
+          正在从此消息分支{{
+            chat.branchAfterCount ? `，发送后将删除其后的 ${chat.branchAfterCount} 条消息` : ""
+          }}
+        </span>
+        <button
+          class="flex-shrink-0 rounded-md px-1.5 py-0.5 transition hover:bg-surface-2 hover:text-ink"
+          aria-label="取消分支"
+          @click="chat.cancelBranch()"
+        >
+          取消
+        </button>
+      </div>
       <div
         class="relative flex items-end gap-2 rounded-2xl border border-line/60 bg-surface-2/50 shadow-[0_8px_32px_rgba(0,0,0,0.28)] backdrop-blur-xl transition focus-within:border-accent focus-within:bg-surface-2/70 focus-within:shadow-[0_0_0_3px_rgba(74,125,255,0.15),0_8px_32px_rgba(0,0,0,0.28)]"
       >
@@ -112,7 +144,11 @@ async function chooseModel(id: string) {
           v-model="input"
           rows="1"
           class="min-h-[46px] flex-1 resize-none bg-transparent px-4 py-[13px] text-base leading-relaxed text-ink outline-none placeholder:text-ink-faint"
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+          :placeholder="
+            chat.branchFrom
+              ? '输入新消息，发送后从这里开始新分支'
+              : '输入消息，Enter 发送，Shift+Enter 换行'
+          "
           @input="onInput"
           @keydown="onKeydown"
         />

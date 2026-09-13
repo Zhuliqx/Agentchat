@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import ChatInput from "@/components/chat/ChatInput.vue";
 import { useChatOptionsStore } from "@/stores/chatOptions";
-import { useChatStore } from "@/stores/chat";
+import { useChatStore, type ChatMsg } from "@/stores/chat";
 
 vi.mock("@/api", () => ({
   modelsApi: {
@@ -64,5 +64,28 @@ describe("ChatInput 能力开关", () => {
     await jump.trigger("click");
     expect(chat.scrollNonce).toBe(before + 1);
     expect(chat.atBottom).toBe(true);
+  });
+
+  it("分支态：显示提示条，发送走分支逻辑", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const chat = useChatStore();
+    const branchPoint: ChatMsg = { id: "b1", role: "assistant", content: "旧答案" };
+    chat.messages = [branchPoint, { id: "b2", role: "user", content: "旧追问" }];
+    chat.startBranch(branchPoint);
+    const branchSend = vi.spyOn(chat, "branchAndSend").mockResolvedValue(undefined);
+
+    const wrapper = mount(ChatInput, {
+      global: { plugins: [pinia], stubs: { teleport: true } },
+    });
+    expect(wrapper.find('[data-testid="branch-bar"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("删除其后的 1 条消息");
+
+    await wrapper.find("textarea").setValue("新的追问");
+    await wrapper.find('button[aria-label="发送"]').trigger("click");
+    await flushPromises();
+
+    expect(branchSend).toHaveBeenCalledWith("新的追问");
+    wrapper.unmount();
   });
 });

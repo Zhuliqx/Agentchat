@@ -11,8 +11,8 @@ import { useAuthStore } from "@/stores/auth";
 import { useSessionsStore } from "@/stores/sessions";
 import { useDocsStore } from "@/stores/docs";
 import { useMemoryStore } from "@/stores/memory";
-import { useChatStore } from "@/stores/chat";
 import { clampSidebarWidth } from "@/utils/sidebarLayout";
+import { bootstrapActiveSession } from "@/composables/useSessionBootstrap";
 
 const ProfileModal = defineAsyncComponent(() => import("@/components/dialogs/ProfileModal.vue"));
 const AdminModal = defineAsyncComponent(() => import("@/components/dialogs/AdminModal.vue"));
@@ -21,7 +21,6 @@ const auth = useAuthStore();
 const sessions = useSessionsStore();
 const docs = useDocsStore();
 const memory = useMemoryStore();
-const chat = useChatStore();
 
 const healthOk = ref(false);
 const healthText = ref("检查中…");
@@ -90,14 +89,11 @@ onMounted(async () => {
   await Promise.all([auth.init(), auth.loadCapabilities()]);
   refreshHealth();
   await Promise.all([sessions.load(), docs.load(), memory.load()]);
-  if (!sessions.currentId) {
-    if (sessions.list.length) {
-      sessions.currentId = sessions.list[0].id;
-      await chat.loadHistory(sessions.currentId);
-    } else {
-      await sessions.create();
-      chat.clear();
-    }
+  try {
+    await bootstrapActiveSession();
+  } catch (e) {
+    // 后端不可达时连"新建会话"也会失败：交给顶部告警条提示，避免未捕获的 promise
+    sessions.error = (e as Error).message || "初始化会话失败";
   }
 });
 </script>

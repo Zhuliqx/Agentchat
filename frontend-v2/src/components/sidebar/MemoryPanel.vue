@@ -71,7 +71,7 @@ async function remove(id: string) {
           <Icon name="brain" :size="13" class="flex-shrink-0 text-ink-faint" />
           <span class="min-w-0 flex-1 truncate">{{ m.content }}</span>
           <button
-            class="hidden flex-shrink-0 text-ink-faint transition hover:text-err group-hover:block"
+            class="hidden h-5 w-5 flex-shrink-0 place-items-center rounded text-ink-faint transition hover:bg-err/10 hover:text-err group-hover:grid"
             title="删除记忆"
             @click="remove(m.id)"
           >

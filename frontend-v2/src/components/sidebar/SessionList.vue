@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { useSessionsStore } from "@/stores/sessions";
 import { useChatStore } from "@/stores/chat";
 import { useDialogStore } from "@/stores/dialog";
 import Icon from "@/components/common/Icon.vue";
+import { relativeTime } from "@/utils/time";
 
 const sessions = useSessionsStore();
 const chat = useChatStore();
 const ui = useDialogStore();
 
 const sorted = computed(() => [...sessions.list]);
+
+// 相对时间每分钟刷新一次：同名会话靠"最后更新时间"区分
+const now = ref(Date.now());
+const ticker = setInterval(() => (now.value = Date.now()), 60_000);
+onBeforeUnmount(() => clearInterval(ticker));
 
 function openSession(id: string) {
   if (sessions.batchMode) {
@@ -100,22 +106,28 @@ function onDblClickTitle(e: MouseEvent, id: string) {
       >
         {{ s.title }}
       </span>
-      <button
-        v-if="!sessions.batchMode"
-        class="hidden flex-shrink-0 text-ink-faint transition hover:text-accent group-hover:block"
-        :title="s.pinned ? '取消置顶' : '置顶'"
-        @click.stop="sessions.pin(s.id, !s.pinned)"
-      >
-        <Icon :name="s.pinned ? 'bookmark' : 'pin'" :size="13" />
-      </button>
-      <button
-        v-if="!sessions.batchMode"
-        class="hidden flex-shrink-0 text-ink-faint transition hover:text-err group-hover:block"
-        title="删除会话"
-        @click.stop="remove(s.id)"
-      >
-        <Icon name="trash" :size="13" />
-      </button>
+      <template v-if="!sessions.batchMode">
+        <!-- 默认显示相对时间，悬停让位给置顶/删除按钮 -->
+        <span class="flex-shrink-0 text-2xs tabular-nums text-ink-faint group-hover:hidden">
+          {{ relativeTime(s.updated_at, now) }}
+        </span>
+        <span class="hidden flex-shrink-0 items-center gap-1 group-hover:flex">
+          <button
+            class="grid h-5 w-5 place-items-center rounded text-ink-faint transition hover:bg-surface-3 hover:text-accent"
+            :title="s.pinned ? '取消置顶' : '置顶'"
+            @click.stop="sessions.pin(s.id, !s.pinned)"
+          >
+            <Icon :name="s.pinned ? 'bookmark' : 'pin'" :size="13" />
+          </button>
+          <button
+            class="grid h-5 w-5 place-items-center rounded text-ink-faint transition hover:bg-err/10 hover:text-err"
+            title="删除会话"
+            @click.stop="remove(s.id)"
+          >
+            <Icon name="trash" :size="13" />
+          </button>
+        </span>
+      </template>
     </button>
   </div>
 </template>

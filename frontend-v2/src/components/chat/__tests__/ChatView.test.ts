@@ -19,7 +19,26 @@ vi.mock("@/components/dialogs/StatsModal.vue", async () => {
   };
 });
 
+vi.mock("@/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api")>();
+  return {
+    ...actual,
+    sessionsApi: {
+      ...actual.sessionsApi,
+      list: vi.fn(async () => []),
+      create: vi.fn(async () => ({
+        id: "s-new",
+        title: "新会话",
+        created_at: "",
+        updated_at: "",
+      })),
+    },
+  };
+});
+
+import { sessionsApi } from "@/api";
 import ChatView from "@/components/chat/ChatView.vue";
+import { useSessionsStore } from "@/stores/sessions";
 
 describe("ChatView lazy dialogs", () => {
   it("loads the stats dialog only when it is opened", async () => {
@@ -39,7 +58,6 @@ describe("ChatView lazy dialogs", () => {
           MessageList: true,
           ChatInput: true,
           TasksModal: true,
-          TimeTravelModal: true,
           TaskAgentModal: true,
         },
       },
@@ -50,6 +68,38 @@ describe("ChatView lazy dialogs", () => {
     await flushPromises();
 
     expect(state.statsImported).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+describe("ChatView 加载失败提示", () => {
+  it("显示失败原因，点重试后重新拉取并自动消失", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useSessionsStore(pinia).error = "后端不可达";
+
+    const wrapper = mount(ChatView, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          ChatHeader: true,
+          MessageList: true,
+          ChatInput: true,
+          TasksModal: true,
+          TaskAgentModal: true,
+        },
+      },
+    });
+
+    expect(wrapper.find('[data-testid="retry-load"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("后端不可达");
+
+    await wrapper.get('[data-testid="retry-load"]').trigger("click");
+    await flushPromises();
+
+    expect(sessionsApi.list).toHaveBeenCalled();
+    expect(sessionsApi.create).toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="retry-load"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

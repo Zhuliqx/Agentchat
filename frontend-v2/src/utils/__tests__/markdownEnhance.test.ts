@@ -74,7 +74,7 @@ describe("markdownEnhance", () => {
     expect(root.querySelectorAll("[data-typing-caret]")).toHaveLength(1);
   });
 
-  it("引用编号：范围内的 [n] 变成可点击标记，越界与代码块内保持原样", () => {
+  it("引用编号：范围内的 [n] 变成可点击标记，越界编号删除、代码块不动", () => {
     const root = makeRoot(
       "<p>结论见 [1] 与 [2]，还有一个不存在的 [9]。</p><pre><code>arr[1]</code></pre>",
     );
@@ -84,8 +84,20 @@ describe("markdownEnhance", () => {
     const marks = root.querySelectorAll("[data-cite]");
     expect(marks).toHaveLength(2);
     expect(Array.from(marks).map((m) => m.textContent)).toEqual(["[1]", "[2]"]);
-    expect(root.textContent).toContain("[9]"); // 越界编号原样保留
+    // 越界编号没有可指向的来源，连同前导空格一起删掉
+    expect(root.textContent).not.toContain("[9]");
+    expect(root.textContent).toContain("还有一个不存在的。");
     expect(root.querySelector("code")?.querySelector("[data-cite]")).toBeNull();
+    expect(root.querySelector("code")?.textContent).toBe("arr[1]");
+  });
+
+  it("没有来源列表时（如联网搜索的回答）正文里的 [n] 直接清掉", () => {
+    const root = makeRoot("<p>OpenAI 推出 Astra [1]，Anthropic 发布 Fable 5.1 [4]。</p>");
+
+    decorateCitations(root, 0);
+
+    expect(root.querySelectorAll("[data-cite]")).toHaveLength(0);
+    expect(root.textContent).toBe("OpenAI 推出 Astra，Anthropic 发布 Fable 5.1。");
   });
 
   it("点击引用编号：滚动到对应来源 chip 并加高亮类", () => {

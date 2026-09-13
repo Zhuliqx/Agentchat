@@ -9,7 +9,6 @@ import type {
   AdminStats,
   AdminUser,
   AuthStats,
-  Checkpoint,
   Doc,
   EvalCase,
   EvalDoc,
@@ -67,6 +66,7 @@ export const authApi = {
 
 // ---------- 会话 ----------
 export const sessionsApi = {
+  /** 默认返回全部会话（侧栏不设显示上限） */
   list: () => api<Session[]>("/sessions"),
   create: () => api<Session>("/sessions", { method: "POST" }),
   history: (id: string) => api<Message[]>(`/sessions/${id}`),
@@ -87,15 +87,12 @@ export const sessionsApi = {
       body: JSON.stringify({ ids }),
     }),
   stats: (id: string) => api<SessionStats>(`/sessions/${id}/stats`),
-  deleteMessage: (sessionId: string, messageId: string) =>
-    api<void>(`/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE" }),
   /** 从某条消息截断（含该条）：编辑重发用它替代前端逐条删除 */
   truncate: (sessionId: string, messageId: string) =>
     api<{ deleted: number }>(`/sessions/${sessionId}/truncate`, {
       method: "POST",
       body: JSON.stringify({ message_id: messageId }),
     }),
-  checkpoints: (id: string) => api<Checkpoint[]>(`/sessions/${id}/checkpoints`),
   exportMarkdown: (id: string) =>
     api<{ session_id: string; markdown: string }>(`/sessions/${id}/export`),
 };
