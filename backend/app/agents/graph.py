@@ -46,7 +46,7 @@ from app.agents.tools import (
     extract_text,
     last_ai_text,
 )
-from app.agents.tools.sources import clear_rag_sources, get_recent_rag_sources
+from app.agents.tools.sources import clear_rag_sources, get_recent_rag_source_refs
 from app.config import settings
 from app.db.memory_store import get_checkpointer, get_store
 
@@ -398,7 +398,7 @@ async def stream_agent(
     if settings.code_agent_enabled:
         streamer.register_tool("code_agent")
 
-    run_sources: list[str] = []
+    run_sources: list[dict] = []
     try:
         async with (
             current_user_context(user_id or "default"),
@@ -485,7 +485,7 @@ async def stream_agent(
             # 流结束：尚未判定的短文本（<阈值）补推（例如很短的直接回答）
             await streamer.flush()
     finally:
-        run_sources = list(get_recent_rag_sources(run_id))
+        run_sources = get_recent_rag_source_refs(run_id)
         clear_rag_sources(run_id)
 
     await _emit_final_events(

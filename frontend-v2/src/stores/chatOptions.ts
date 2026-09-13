@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 
 /** 对话能力开关（知识库 RAG / 联网搜索 / 长期记忆），跨组件共享。
- * 知识库开关在侧边栏文档栏，记忆开关在侧边栏记忆栏，联网开关在输入框工具条。
+ * 三个开关统一放在输入框下方的工具条，与模型切换并列，避免分散在侧栏各面板。
  *
  * 持久化到 localStorage：否则刷新页面后回到默认 true（联网开关尤其关键，
  * 用户关掉后刷新又变回开，导致请求仍带 use_search=true）。

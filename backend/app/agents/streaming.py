@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import math
 from typing import Awaitable, Callable
 
 
@@ -20,6 +21,20 @@ class SupervisorStreamer:
     """
 
     PRELUDE_FLUSH = 40
+
+    @staticmethod
+    def _prelude_weight(text: str) -> int:
+        """按"信息量"折算开场白长度：中文 1 字算 1，英文约 4 字符算 1。
+
+        直接按字符数比较会误判英文开场白：一句
+        "I'll search for the latest AI industry news for you."（51 字符）会被
+        当成"够长的正式回答"提前流式输出，随后工具执行完再拼上中文答案，
+        用户就看到中英混排。折算后中英同一把尺子。
+        """
+        cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        ascii_alpha = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+        rest = len(text) - cjk - ascii_alpha
+        return cjk + math.ceil(ascii_alpha / 4) + math.ceil(rest / 2)
 
     def __init__(
         self,
@@ -39,6 +54,7 @@ class SupervisorStreamer:
         self._streaming_direct = False       # 已判定为直接回答 → 逐字流式
         self._dedupe: _PreludeDedupe | None = None
         self._pending_tool_name: str | None = None
+        self._emitted_sources: dict[str, list[dict]] = {}
 
     def register_tool(self, name: str) -> None:
         """登记本次实际注册的工具（未登记的 tool_call 不发事件）。"""
@@ -51,21 +67,37 @@ class SupervisorStreamer:
             await self._on_token(text)
 
     async def emit_tool(self, name: str) -> None:
-        """统一处理工具调用：丢弃未流式的开场白碎片并发出 tool 事件。"""
+        """统一处理工具调用：丢弃未流式的开场白碎片并发出 tool 事件。
+
+        rag_agent 的来源要等工具执行完才有：模型刚发起调用时事件里 sources 为空，
+        执行后的第二次调用会带来源再补一次（前端按轨道标签去重，只会更新来源、
+        不会多出节点）。
+        """
         is_real = name in self.registered_tools
         if is_real and not self.saw_tool_call:
             if not self._streaming_direct:
                 self._prelude_buf.clear()  # 丢弃未显示的开场白碎片
             self._dedupe = _PreludeDedupe("".join(self._prelude_total))
             self.saw_tool_call = True
-        if self._on_tool_event is not None and is_real and name != self._pending_tool_name:
-            self._pending_tool_name = name
-            data: dict = {}
-            # 引用溯源：rag_agent 执行后附带检索命中的文档来源
-            if name == "rag_agent":
-                from app.agents.tools.sources import get_recent_rag_sources
+        sources: list[dict] = []
+        if is_real and name == "rag_agent":
+            from app.agents.tools.sources import get_recent_rag_source_refs
 
-                data["sources"] = get_recent_rag_sources(self.run_id)
+            # [{"path": ..., "hits": 片段数}]，供前端展示"来源 + 命中片段数"
+            sources = get_recent_rag_source_refs(self.run_id)
+        # 同一工具只发一次事件；但 rag_agent 的来源在执行后才出现，需要补发一次
+        has_new_sources = bool(sources) and sources != self._emitted_sources.get(name)
+        if (
+            self._on_tool_event is not None
+            and is_real
+            and (name != self._pending_tool_name or has_new_sources)
+        ):
+            self._pending_tool_name = name
+            if sources:
+                self._emitted_sources[name] = list(sources)
+            data: dict = {}
+            if sources:
+                data["sources"] = sources
             await self._on_tool_event(
                 {"type": "tool", "content": f"工具: {name}", "data": data}
             )
@@ -85,7 +117,7 @@ class SupervisorStreamer:
             await self._push(text)
         else:
             self._prelude_buf.append(text)
-            if len("".join(self._prelude_buf)) >= self.PRELUDE_FLUSH:
+            if self._prelude_weight("".join(self._prelude_buf)) >= self.PRELUDE_FLUSH:
                 self._streaming_direct = True
                 await self._push("".join(self._prelude_buf))
                 self._prelude_buf.clear()

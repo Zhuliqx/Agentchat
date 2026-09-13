@@ -89,6 +89,12 @@ export const sessionsApi = {
   stats: (id: string) => api<SessionStats>(`/sessions/${id}/stats`),
   deleteMessage: (sessionId: string, messageId: string) =>
     api<void>(`/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE" }),
+  /** 从某条消息截断（含该条）：编辑重发用它替代前端逐条删除 */
+  truncate: (sessionId: string, messageId: string) =>
+    api<{ deleted: number }>(`/sessions/${sessionId}/truncate`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
   checkpoints: (id: string) => api<Checkpoint[]>(`/sessions/${id}/checkpoints`),
   exportMarkdown: (id: string) =>
     api<{ session_id: string; markdown: string }>(`/sessions/${id}/export`),

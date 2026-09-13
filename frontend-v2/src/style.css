@@ -17,7 +17,8 @@
   --color-line-2: #2e323c;
   --color-ink: #e8eaf0;
   --color-ink-dim: #9ba2b0;
-  --color-ink-faint: #636a78;
+  /* 次要文字色满足 WCAG AA：surface 4.99:1 / bg 5.40:1 / surface-2 5.75:1 */
+  --color-ink-faint: #848c9c;
   --color-accent: #4a7dff;
   --color-accent-2: #7da2ff;
   --color-orbit: #22d3ee;
@@ -29,6 +30,20 @@
   --font-sans:
     "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* 字号体系：6 档，替代逐处写死的 text-[Npx] */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.45;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.5;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.55;
+  --text-base: 14px;
+  --text-base--line-height: 1.65;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.4;
+  --text-xl: 18px;
+  --text-xl--line-height: 1.3;
 }
 
 /* ---------- 亮色主题（html.light 时覆盖全部 token） ---------- */
@@ -41,7 +56,8 @@ html.light {
   --color-line-2: #cfd5de;
   --color-ink: #1b1e26;
   --color-ink-dim: #565e6d;
-  --color-ink-faint: #8a92a2;
+  /* 亮色下同样满足 AA：surface 5.22:1 / bg 4.87:1 / surface-2 4.58:1 */
+  --color-ink-faint: #656d7a;
   --color-accent: #3b6fe0;
   --color-accent-2: #5a86e8;
   --color-orbit: #0891b2;
@@ -209,6 +225,77 @@ button {
 button:disabled {
   cursor: not-allowed;
 }
+
+/* 会话内容列：header / 消息 / 输入框共用同一条轴线与左右留白 */
+.content-col {
+  @apply mx-auto w-full max-w-[760px] px-4 sm:px-6;
+}
+
+/* ---------- 侧边栏开合 ----------
+   宽度用标准缓入缓出（Material standard）收拢，全程可见、不显突兀；
+   内容层保持固定宽度、只做淡出，折叠过程中文字不会被逐像素挤压换行。 */
+.sb-shell {
+  transition:
+    width 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    min-width 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sb-shell--dragging {
+  transition: none;
+}
+.sb-inner {
+  transition: opacity 220ms ease;
+}
+
+/* ---------- 面板折叠 ----------
+   与侧栏开合同一套缓动；底部面板用 height、会话列表用 max-height，两者共用同一时长与曲线。
+   拖拽调高时临时关闭过渡，否则高度变化会滞后于指针 */
+.sb-panel {
+  transition:
+    height 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    max-height 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sb-panel--dragging {
+  transition: none;
+}
+
+/* ---------- 消息 hover 显隐 ----------
+   只在支持 hover 的设备上默认隐藏：触屏没有 hover，隐藏后就再也唤不出来 */
+@media (hover: hover) {
+  .msg-actions,
+  .msg-stamp {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .msg-in:hover .msg-actions,
+  .msg-actions:focus-within,
+  .msg-in:hover .msg-stamp {
+    opacity: 1;
+  }
+}
+
+/* ---------- 引用编号 ----------
+   正文里的 [n] 与下方来源列表联动：点击后高亮对应 chip */
+.citation-mark {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent-2);
+  font-size: 0.85em;
+  line-height: 1.35;
+  vertical-align: 1px;
+  transition: background-color 120ms ease;
+}
+.citation-mark:hover {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+.source-chip--highlight {
+  border-color: var(--color-accent) !important;
+  color: var(--color-accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
 :focus-visible {
   outline: 2px solid rgba(74, 125, 255, 0.55);
   outline-offset: 1px;
@@ -257,9 +344,8 @@ select:focus-visible {
   }
 }
 
-/* 打字光标 */
-.typing-caret::after {
-  content: "";
+/* 打字光标：插在最后一个文本块内部（容器级 ::after 会因块级子元素另起一行） */
+.typing-caret-inline {
   display: inline-block;
   width: 7px;
   height: 14px;
@@ -278,7 +364,7 @@ select:focus-visible {
 /* ---------- Markdown 内容(精致排版) ---------- */
 .md {
   line-height: 1.65;
-  font-size: 0.9rem;
+  font-size: 14px;
   color: var(--color-ink);
   overflow-wrap: break-word;
 }
@@ -291,18 +377,18 @@ select:focus-visible {
   letter-spacing: -0.01em;
 }
 .md h1 {
-  font-size: 1.15rem;
+  font-size: 18px;
 }
 .md h2 {
-  font-size: 1.02rem;
+  font-size: 16px;
   padding-bottom: 5px;
   border-bottom: 1px solid var(--color-line);
 }
 .md h3 {
-  font-size: 0.95rem;
+  font-size: 14px;
 }
 .md h4 {
-  font-size: 0.9rem;
+  font-size: 14px;
 }
 .md h1:first-child,
 .md h2:first-child,
@@ -374,19 +460,26 @@ select:focus-visible {
 }
 .md table {
   border-collapse: collapse;
-  margin: 10px 0;
-  width: 100%;
-  table-layout: fixed;
+  margin: 0;
+  /* 列宽按内容伸展，超出宽度交给外层 .md-table-wrap 横向滚动，
+     不再把列压成竖排（原 table-layout: fixed + width: 100% 会挤字） */
+  width: max-content;
+  min-width: 100%;
   font-size: 0.82em;
   border: 1px solid var(--color-line);
   border-radius: 8px;
   overflow: hidden;
+}
+.md-table-wrap {
+  margin: 10px 0;
+  overflow-x: auto;
 }
 .md th,
 .md td {
   border: 1px solid var(--color-line);
   padding: 6px 10px;
   text-align: left;
+  min-width: 120px;
   word-break: break-word;
 }
 .md th {
@@ -400,4 +493,17 @@ select:focus-visible {
 .md img {
   max-width: 100%;
   border-radius: 8px;
+}
+
+/* ---------- 动效降级 ----------
+   系统开启「减少动态效果」时，消息入场、打字光标、编排脉冲等动画统一退化为静态，
+   避免前庭敏感用户不适，也跳过无意义的过渡开销。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -72,7 +72,7 @@ async function guest() {
   <Modal :open="auth.authOpen" :small="true" title="账户" @close="auth.authOpen = false">
     <div class="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-line bg-surface-2 p-1">
       <button
-        class="rounded-md py-1.5 text-[13px] transition"
+        class="rounded-md py-1.5 text-sm transition"
         :class="
           auth.authTab === 'login'
             ? 'bg-surface-3 font-medium text-ink'
@@ -83,7 +83,7 @@ async function guest() {
         登录
       </button>
       <button
-        class="rounded-md py-1.5 text-[13px] transition"
+        class="rounded-md py-1.5 text-sm transition"
         :class="
           auth.authTab === 'register'
             ? 'bg-surface-3 font-medium text-ink'
@@ -120,7 +120,7 @@ async function guest() {
       </label>
       <div
         v-if="error"
-        class="rounded-lg px-2.5 py-1.5 text-[13px]"
+        class="rounded-lg px-2.5 py-1.5 text-sm"
         :class="error === '注册成功，请登录' ? 'bg-ok/10 text-ok' : 'bg-err/10 text-err'"
       >
         {{ error }}

@@ -26,7 +26,7 @@ const isPulsing = (n: OrbitNode) => !!n.active;
       <span v-if="i > 0" class="mx-1.5 h-px w-3.5 bg-line-2" />
 
       <span
-        class="inline-flex items-center gap-1.5 text-[11px]"
+        class="inline-flex items-center gap-1.5 text-2xs"
         :class="[nodeCls(n.type), n.type === 'tool' ? 'font-medium' : '']"
       >
         <!-- 节点图标 -->

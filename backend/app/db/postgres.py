@@ -286,6 +286,25 @@ def get_messages(session_id: str, limit: int = 50) -> list[Message]:
         return list(db.scalars(stmt))
 
 
+def truncate_messages_from(session_id: str, message_id: str) -> int:
+    """删除该消息**及其之后**的全部消息，返回删除条数。
+
+    编辑重发要把"从这条消息起的历史"整体丢掉：逐条 DELETE 一旦中途失败就会
+    留下半截历史，所以放到一个事务里按时间点一次性删。
+    """
+    with SessionLocal() as db:
+        target = db.get(Message, message_id)
+        if not target or target.session_id != session_id:
+            raise ValueError("消息不存在")
+        result = db.query(Message).filter(
+            Message.session_id == session_id,
+            Message.created_at >= target.created_at,
+        )
+        deleted = result.delete(synchronize_session=False)
+        db.commit()
+        return int(deleted)
+
+
 def get_recent_messages(session_id: str, limit: int = 50) -> list[Message]:
     """读取某会话**最近** limit 条消息（按时间正序返回）。
 

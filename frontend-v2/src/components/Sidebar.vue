@@ -1,21 +1,34 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useElementSize } from "@vueuse/core";
 import { searchApi } from "@/api";
+import { usePointerDrag } from "@/composables/usePointerDrag";
 import { useSessionsStore } from "@/stores/sessions";
 import { useAuthStore } from "@/stores/auth";
 import { useDocsStore } from "@/stores/docs";
 import { useMemoryStore } from "@/stores/memory";
 import { useThemeStore } from "@/stores/theme";
 import { useChatStore } from "@/stores/chat";
-import { useChatOptionsStore } from "@/stores/chatOptions";
 import SessionList from "./sidebar/SessionList.vue";
 import DocPanel from "./sidebar/DocPanel.vue";
 import MemoryPanel from "./sidebar/MemoryPanel.vue";
 import UserMenu from "./sidebar/UserMenu.vue";
 import Icon from "@/components/common/Icon.vue";
-import Switch from "@/components/common/Switch.vue";
+import Tooltip from "@/components/common/Tooltip.vue";
+import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH } from "@/utils/sidebarLayout";
 
-const props = defineProps<{ healthText: string; healthOk: boolean; width?: number }>();
+const props = defineProps<{
+  healthText: string;
+  healthOk: boolean;
+  /** 当前渲染宽度（折叠时为 0） */
+  width?: number;
+  /** 内容层保持的宽度：折叠动画期间不再逐像素挤压内容 */
+  contentWidth?: number;
+  /** 展开状态，用于内容淡入淡出 */
+  open?: boolean;
+  /** 窄屏抽屉形态：固定定位悬浮在会话区之上，不参与布局挤压，也不提供拖拽调宽 */
+  overlay?: boolean;
+}>();
 const emit = defineEmits<{
   profile: [];
   admin: [];
@@ -28,7 +41,6 @@ const docs = useDocsStore();
 const memory = useMemoryStore();
 const theme = useThemeStore();
 const chat = useChatStore();
-const options = useChatOptionsStore();
 const docsCount = computed(() => docs.list.length);
 const memoryCount = computed(() => memory.list.length);
 
@@ -85,431 +97,463 @@ async function newSession() {
   chat.clear();
 }
 
-// ---- 拖拽调整宽度（收窄自动折叠；折叠后不松手反向拖拽自动展开） ----
-const FOLD_THRESHOLD = 180; // 折叠 / 展开共用阈值（收窄到该值以下折叠，反向拖回该值及以上展开）
-const MIN_WIDTH = 180;
-// 拖拽宽度时禁用宽度过渡（否则 transition 使宽度变化滞后，显得不跟手）
+// ---- 拖拽调整宽度（收窄到最小宽度自动折叠；折叠后不松手反向拖拽自动展开） ----
+// 拖拽期间禁用过渡保证跟手；越过阈值折叠时改用过渡动画，避免"啪"地消失
 const widthDragging = ref(false);
-function startResize(e: MouseEvent) {
-  e.preventDefault();
-  widthDragging.value = true;
-  const startX = e.clientX;
-  const startW = props.width ?? 236;
-  let collapsed = false; // 本次拖拽中是否已触发折叠
-  let done = false;
-  const end = () => {
-    if (done) return;
-    done = true;
-    widthDragging.value = false;
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-  };
-  const onMove = (ev: MouseEvent) => {
-    const raw = startW + ev.clientX - startX;
-    if (!collapsed) {
-      // 正常拖拽：收窄到阈值以下 → 折叠（不结束，等待反向拖拽）
-      if (raw < FOLD_THRESHOLD) {
-        collapsed = true;
-        emit("toggle");
-        return;
-      }
-      emit("width-change", Math.max(MIN_WIDTH, raw));
-    } else {
+let widthStartW = SIDEBAR_DEFAULT_WIDTH;
+let widthCollapsed = false; // 本次拖拽中是否已触发折叠
+
+const startResize = usePointerDrag({
+  onStart: () => {
+    widthStartW = props.width ?? SIDEBAR_DEFAULT_WIDTH;
+    widthCollapsed = false;
+    widthDragging.value = true;
+  },
+  onMove: (e, ctx) => {
+    const raw = widthStartW + e.clientX - ctx.startX;
+    if (widthCollapsed) {
       // 已折叠：向右拖回阈值及以上 → 自动展开并继续调整宽度
-      if (raw >= FOLD_THRESHOLD) {
-        collapsed = false;
+      if (raw >= SIDEBAR_MIN_WIDTH) {
+        widthCollapsed = false;
+        widthDragging.value = true;
         emit("toggle");
         emit("width-change", raw);
       }
-      // 折叠中向左/小幅移动：保持折叠，不更新宽度
+      return;
     }
-  };
-  const onUp = () => end();
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUp);
+    // 收窄到阈值以下：把宽度交给过渡动画收拢到 0（保持拖拽监听，等待反向拖回）
+    if (raw < SIDEBAR_MIN_WIDTH) {
+      widthCollapsed = true;
+      widthDragging.value = false;
+      emit("toggle");
+      return;
+    }
+    emit("width-change", Math.max(SIDEBAR_MIN_WIDTH, raw));
+  },
+  onEnd: () => {
+    widthDragging.value = false;
+  },
+});
+
+// ---- 文档 / 记忆面板高度：各自独立控制 ----
+// 上限由实测的 aside 高度算出；渲染时再按可用空间收窄，
+// 所以窗口变矮或把某个面板拖得过大都不会溢出。
+const asideRef = ref<HTMLElement | null>(null);
+const { height: asideHeight } = useElementSize(asideRef);
+// 会话列表折叠时用它所在区域的实测高度做动画区间：max-height 从 100vh 收起会让
+// 变化量远大于列表实际高度，观感是"先不动、最后一下收掉"
+const sessionsAreaRef = ref<HTMLElement | null>(null);
+const { height: sessionsAreaH } = useElementSize(sessionsAreaRef);
+
+const PANEL_HEIGHTS_KEY = "sidebar-panel-heights";
+const PANEL_HEADER = 40; // 每个卡片的标题栏（拖拽条悬浮在边框上，不占高度）
+const BOTTOM_CHROME = 14; // 底部容器上下内边距 + 两个卡片间距
+const BOTTOM_RESERVED = 268; // 品牌区 + 新建/搜索 + 会话区最小高度 + 状态栏
+/** 面板内容区的最小高度：放下各自固定控件后还留得下一行列表 */
+const CONTENT_MIN = { doc: 137, mem: 85 };
+/** 默认高度与旧版一致（18vh / 14vh） */
+const PANEL_DEFAULT_RATIO = { doc: 0.18, mem: 0.14 };
+
+function defaultContent(which: "doc" | "mem") {
+  return Math.round(window.innerHeight * PANEL_DEFAULT_RATIO[which]);
 }
 
-// ---- 文档 / 记忆面板高度拖拽（各自面板标题栏上的拖拽条，双击恢复默认） ----
-function loadPanelH(key: string): number | null {
-  const v = parseInt(localStorage.getItem(key) ?? "", 10);
-  return Number.isFinite(v) && v > 0 ? v : null;
+function loadHeights() {
+  const fallback = { doc: defaultContent("doc"), mem: defaultContent("mem") };
+  try {
+    const raw = localStorage.getItem(PANEL_HEIGHTS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as { doc?: unknown; mem?: unknown };
+      return {
+        doc: Number(p.doc) > 0 ? Number(p.doc) : fallback.doc,
+        mem: Number(p.mem) > 0 ? Number(p.mem) : fallback.mem,
+      };
+    }
+  } catch {
+    /* 脏数据回落到默认值 */
+  }
+  return fallback;
 }
-const docPanelH = ref<number | null>(loadPanelH("panel-docs-h"));
-const memPanelH = ref<number | null>(loadPanelH("panel-mem-h"));
-// 拖拽面板高度时禁用高度过渡（否则 transition 使高度变化滞后，显得不跟手）
+
+const initialHeights = loadHeights();
+const docContentH = ref(initialHeights.doc);
+const memContentH = ref(initialHeights.mem);
+// 拖拽调高期间关闭折叠过渡，否则高度变化会滞后于指针
 const panelDragging = ref(false);
-const PANEL_META = {
-  doc: { h: docPanelH, key: "panel-docs-h", fallback: 0.18 }, // 与默认 18vh 一致
-  mem: { h: memPanelH, key: "panel-mem-h", fallback: 0.14 }, // 与默认 14vh 一致
-} as const;
-let panelResizeStartY = 0;
-let panelResizeStartH = 0;
-function startPanelResize(which: "doc" | "mem", e: MouseEvent) {
-  e.preventDefault();
-  panelDragging.value = true;
-  const meta = PANEL_META[which];
-  const aside = document.querySelector("aside");
-  const asideH = aside ? aside.clientHeight : window.innerHeight;
-  const asideTop = aside ? aside.getBoundingClientRect().top : 0;
 
-  // ---- 彻底方案：拖拽时实际测量固定占用，不依赖估算 ----
-  // 顶部固定区高度 = 会话区容器顶部相对 aside 顶部的距离
-  let topH = 142;
-  if (aside) {
-    const sessionWrap = Array.from(aside.children).find(
-      (el) =>
-        (el.className || "").includes("flex-1") &&
-        (el.className || "").includes("flex-col") &&
-        (el.className || "").includes("px-2.5"),
-    );
-    if (sessionWrap) {
-      topH = sessionWrap.getBoundingClientRect().top - asideTop;
-    }
-  }
-  // 底部状态栏高度（实测）
-  let statusH = 46;
-  if (aside) {
-    const statusEl = Array.from(aside.querySelectorAll("div")).find(
-      (d) => (d.textContent || "").includes("MCP") && (d.className || "").includes("border-t"),
-    );
-    if (statusEl) statusH = statusEl.offsetHeight;
-  }
-  // 状态栏理想顶部位置 = aside 高 - 状态栏高（固定，保证状态栏底部正好在界面内，
-  // 不受当前面板高度影响——不能用测量当前位置，否则"越推越溢出"）
-  const statusTopOffset = asideH - statusH;
+/** 两个面板内容区合计可用的高度（扣掉顶部固定区、状态栏与两个卡片标题栏） */
+const contentBudget = computed(() => {
+  // 拖拽条是贴在卡片边框上的悬浮层，卡片高度 = 标题栏 + 内容区
+  const chrome = BOTTOM_CHROME + 2 * PANEL_HEADER;
+  const minSum =
+    (folded.value.docs ? 0 : CONTENT_MIN.doc) + (folded.value.memory ? 0 : CONTENT_MIN.mem);
+  return Math.max(minSum, asideHeight.value - BOTTOM_RESERVED - chrome);
+});
 
-  // 会话区最小保留高度 + 单个面板的标题栏/拖拽条高度
-  const SESSION_MIN = 56;
-  const PANEL_HEADER = 44;
-  // 底部容器额外占用：pt/pb + 面板间 gap + 卡片边框（≈16）
-  const EXTRA = 16;
-  // 另一面板当前总高（内容 + 面板头），fallback 与默认高度一致
-  const otherH =
-    which === "doc"
-      ? (memPanelH.value ?? Math.round(window.innerHeight * 0.14)) + PANEL_HEADER
-      : (docPanelH.value ?? Math.round(window.innerHeight * 0.18)) + PANEL_HEADER;
-  // 最小高度：能容纳面板头部内容（文档=上传区，记忆=搜索/添加区）
-  const MIN = which === "doc" ? 88 : 96;
-  // 当前面板内容区可用高度 = 状态栏顶部 - 顶部固定 - 会话最小 - 底部额外 - 另一面板总高 - 当前面板头
-  const maxH = Math.max(MIN, statusTopOffset - topH - SESSION_MIN - EXTRA - otherH - PANEL_HEADER);
+// 渲染高度：窗口变矮导致放不下时按比例收窄，不改写用户存下的值
+const renderedHeights = computed(() => {
+  const budget = contentBudget.value;
+  const doc = folded.value.docs ? 0 : Math.max(CONTENT_MIN.doc, docContentH.value);
+  const mem = folded.value.memory ? 0 : Math.max(CONTENT_MIN.mem, memContentH.value);
+  const total = doc + mem;
+  if (total <= budget || total === 0) return { doc, mem };
+  const scale = budget / total;
+  const fit = (value: number, min: number) =>
+    value === 0 ? 0 : Math.max(min, Math.floor(value * scale));
+  return { doc: fit(doc, CONTENT_MIN.doc), mem: fit(mem, CONTENT_MIN.mem) };
+});
 
-  panelResizeStartY = e.clientY;
-  panelResizeStartH = meta.h.value ?? Math.round(window.innerHeight * meta.fallback);
-  const onMove = (ev: MouseEvent) => {
-    const h = Math.round(
-      Math.min(Math.max(panelResizeStartH + (panelResizeStartY - ev.clientY), MIN), maxH),
-    );
-    meta.h.value = h;
-    localStorage.setItem(meta.key, String(h));
-  };
-  const onUp = () => {
-    panelDragging.value = false;
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-  };
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUp);
+function persistHeights() {
+  localStorage.setItem(
+    PANEL_HEIGHTS_KEY,
+    JSON.stringify({ doc: docContentH.value, mem: memContentH.value }),
+  );
 }
+
+let docStartH = 0;
+const startDocResize = usePointerDrag({
+  onStart: () => {
+    panelDragging.value = true;
+    docStartH = renderedHeights.value.doc;
+  },
+  onMove: (e, ctx) => {
+    // 向上拖 = 文档面板变高（上限是"预算减去记忆面板当前占用"）
+    const max = Math.max(CONTENT_MIN.doc, contentBudget.value - renderedHeights.value.mem);
+    const next = docStartH + (ctx.startY - e.clientY);
+    docContentH.value = Math.min(max, Math.max(CONTENT_MIN.doc, Math.round(next)));
+  },
+  onEnd: () => {
+    panelDragging.value = false;
+    persistHeights();
+  },
+});
+
+let memStartH = 0;
+const startMemResize = usePointerDrag({
+  onStart: () => {
+    panelDragging.value = true;
+    memStartH = renderedHeights.value.mem;
+  },
+  onMove: (e, ctx) => {
+    // 向上拖 = 记忆面板变高
+    const max = Math.max(CONTENT_MIN.mem, contentBudget.value - renderedHeights.value.doc);
+    const next = memStartH + (ctx.startY - e.clientY);
+    memContentH.value = Math.min(max, Math.max(CONTENT_MIN.mem, Math.round(next)));
+  },
+  onEnd: () => {
+    panelDragging.value = false;
+    persistHeights();
+  },
+});
+
 function resetPanelH(which: "doc" | "mem") {
-  const meta = PANEL_META[which];
-  meta.h.value = null;
-  localStorage.removeItem(meta.key);
+  const target = which === "doc" ? docContentH : memContentH;
+  target.value = defaultContent(which);
+  persistHeights();
 }
 </script>
 
 <template>
   <aside
-    class="relative flex flex-col overflow-hidden border-r border-line bg-surface"
-    :class="
-      widthDragging ? 'transition-none' : 'transition-[width,min-width] duration-300 ease-in-out'
-    "
+    ref="asideRef"
+    class="sb-shell flex flex-col overflow-hidden border-r border-line bg-surface"
+    :class="[
+      overlay ? 'fixed inset-y-0 left-0 z-40 shadow-[0_0_40px_rgba(0,0,0,0.45)]' : 'relative',
+      widthDragging ? 'sb-shell--dragging' : '',
+    ]"
     :style="{ width: (width ?? 0) + 'px', minWidth: (width ?? 0) + 'px' }"
   >
-    <!-- 品牌 + 收起 -->
-    <div class="flex items-center gap-2.5 px-4 pt-4 pb-3">
-      <div
-        class="grid h-8 w-8 flex-shrink-0 place-items-center rounded-[9px] bg-accent/15 text-accent"
-      >
-        <Icon name="agents" :size="16" />
-      </div>
-      <div class="min-w-0">
-        <h1 class="text-[13.5px] font-semibold leading-tight tracking-tight">Multi-Agent</h1>
-        <span class="block truncate text-[10.5px] text-ink-faint">RAG · MCP · LangGraph</span>
-      </div>
-      <button
-        class="ml-auto grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
-        title="收起侧边栏"
-        aria-label="收起侧边栏"
-        @click="emit('toggle')"
-      >
-        <Icon name="chevron" :size="14" class="rotate-90" />
-      </button>
-    </div>
-
-    <!-- 新建会话 -->
-    <div class="px-3 pb-2">
-      <button
-        class="flex w-full items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-3 py-[7px] text-[12.5px] font-medium text-ink transition hover:border-accent/50 hover:bg-surface-3"
-        @click="newSession"
-      >
-        <Icon name="plus" :size="14" />
-        新建会话
-      </button>
-    </div>
-
-    <!-- 全局搜索 -->
-    <div class="px-3 pb-2">
-      <div class="relative">
-        <input
-          v-model="searchText"
-          type="text"
-          class="h-8 w-full rounded-lg border border-line-2 bg-surface-2 pl-8 pr-2.5 text-[12px] text-ink outline-none transition placeholder:text-ink-faint/70 focus:border-accent focus:ring-2 focus:ring-accent/15"
-          placeholder="搜索会话与消息…"
-        />
-        <Icon
-          name="search"
-          :size="13"
-          class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint"
-        />
-      </div>
-      <!-- 搜索结果 -->
-      <div
-        v-if="searchText.trim()"
-        class="no-scrollbar mt-1.5 max-h-[38vh] overflow-y-auto rounded-lg border border-line bg-surface-2 p-1"
-      >
-        <div v-if="searching" class="px-2 py-2 text-[11.5px] text-ink-faint">搜索中…</div>
-        <template v-else-if="searchResults">
-          <div
-            v-if="searchResults.sessions.length"
-            class="px-1.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint"
-          >
-            会话
-          </div>
+    <!-- 内容层保持展开宽度：折叠时整体被裁切 + 淡出，不会逐像素挤压换行 -->
+    <div
+      class="sb-inner flex h-full flex-col"
+      :class="open === false ? 'opacity-0' : 'opacity-100'"
+      :style="{ width: (contentWidth ?? width ?? 0) + 'px' }"
+    >
+      <!-- 品牌 + 收起 -->
+      <div class="flex items-center gap-2.5 px-4 pt-4 pb-3">
+        <div
+          class="grid h-8 w-8 flex-shrink-0 place-items-center rounded-[9px] bg-accent/15 text-accent"
+        >
+          <Icon name="agents" :size="16" />
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-sm font-semibold leading-tight tracking-tight">Multi-Agent</h1>
+          <span class="block truncate text-2xs text-ink-faint">RAG · MCP · LangGraph</span>
+        </div>
+        <Tooltip label="收起侧边栏" placement="bottom">
           <button
-            v-for="s in searchResults.sessions"
-            :key="'s' + s.id"
-            class="flex w-full items-center gap-1.5 rounded px-1.5 py-1.5 text-left text-[12px] text-ink-dim transition hover:bg-surface-3 hover:text-ink"
-            @click="gotoSession(s.id)"
+            class="ml-auto grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+            aria-label="收起侧边栏"
+            @click="emit('toggle')"
           >
-            <Icon name="chat" :size="12" class="flex-shrink-0 text-ink-faint" />
-            <span class="truncate">{{ s.title }}</span>
+            <Icon name="chevron" :size="14" class="rotate-90" />
           </button>
-          <div
-            v-if="searchResults.messages.length"
-            class="px-1.5 py-1 text-[10px] font-medium uppercase tracking-wide text-ink-faint"
-          >
-            消息
-          </div>
-          <button
-            v-for="(m, i) in searchResults.messages"
-            :key="'m' + i"
-            class="flex w-full flex-col gap-0.5 rounded px-1.5 py-1.5 text-left transition hover:bg-surface-3"
-            @click="gotoSession(m.session_id)"
-          >
-            <span class="flex items-center gap-1.5 text-[11px] text-ink-dim">
-              <span
-                class="rounded bg-surface-3 px-1 py-px text-[9.5px]"
-                :class="m.role === 'user' ? 'text-accent' : 'text-orbit'"
-              >
-                {{ m.role === "user" ? "我" : "助手" }}
+        </Tooltip>
+      </div>
+
+      <!-- 新建会话 -->
+      <div class="px-3 pb-2">
+        <button
+          class="flex w-full items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-3 py-[7px] text-xs font-medium text-ink transition hover:border-accent/50 hover:bg-surface-3"
+          @click="newSession"
+        >
+          <Icon name="plus" :size="14" />
+          新建会话
+        </button>
+      </div>
+
+      <!-- 全局搜索 -->
+      <div class="px-3 pb-2">
+        <div class="relative">
+          <input
+            v-model="searchText"
+            type="text"
+            class="h-8 w-full rounded-lg border border-line-2 bg-surface-2 pl-8 pr-2.5 text-xs text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
+            placeholder="搜索会话与消息…"
+          />
+          <Icon
+            name="search"
+            :size="13"
+            class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint"
+          />
+        </div>
+        <!-- 搜索结果 -->
+        <div
+          v-if="searchText.trim()"
+          class="no-scrollbar mt-1.5 max-h-[38vh] overflow-y-auto rounded-lg border border-line bg-surface-2 p-1"
+        >
+          <div v-if="searching" class="px-2 py-2 text-2xs text-ink-faint">搜索中…</div>
+          <template v-else-if="searchResults">
+            <div
+              v-if="searchResults.sessions.length"
+              class="px-1.5 pb-1 pt-1 text-2xs font-medium uppercase tracking-wide text-ink-faint"
+            >
+              会话
+            </div>
+            <button
+              v-for="s in searchResults.sessions"
+              :key="'s' + s.id"
+              class="flex w-full items-center gap-1.5 rounded px-1.5 py-1.5 text-left text-xs text-ink-dim transition hover:bg-surface-3 hover:text-ink"
+              @click="gotoSession(s.id)"
+            >
+              <Icon name="chat" :size="12" class="flex-shrink-0 text-ink-faint" />
+              <span class="truncate">{{ s.title }}</span>
+            </button>
+            <div
+              v-if="searchResults.messages.length"
+              class="px-1.5 py-1 text-2xs font-medium uppercase tracking-wide text-ink-faint"
+            >
+              消息
+            </div>
+            <button
+              v-for="(m, i) in searchResults.messages"
+              :key="'m' + i"
+              class="flex w-full flex-col gap-0.5 rounded px-1.5 py-1.5 text-left transition hover:bg-surface-3"
+              @click="gotoSession(m.session_id)"
+            >
+              <span class="flex items-center gap-1.5 text-2xs text-ink-dim">
+                <span
+                  class="rounded bg-surface-3 px-1 py-px text-2xs"
+                  :class="m.role === 'user' ? 'text-accent' : 'text-orbit'"
+                >
+                  {{ m.role === "user" ? "我" : "助手" }}
+                </span>
+                <span class="truncate">{{ m.session_title }}</span>
               </span>
-              <span class="truncate">{{ m.session_title }}</span>
-            </span>
-            <span class="line-clamp-1 text-[11px] text-ink-faint">{{ m.content }}</span>
-          </button>
-          <div
-            v-if="!searchResults.sessions.length && !searchResults.messages.length"
-            class="px-2 py-2 text-[11.5px] text-ink-faint"
-          >
-            无匹配结果
-          </div>
-        </template>
+              <span class="line-clamp-1 text-2xs text-ink-faint">{{ m.content }}</span>
+            </button>
+            <div
+              v-if="!searchResults.sessions.length && !searchResults.messages.length"
+              class="px-2 py-2 text-2xs text-ink-faint"
+            >
+              无匹配结果
+            </div>
+          </template>
+        </div>
       </div>
-    </div>
 
-    <!-- 会话区：弹性铺满剩余空间，列表滚动（保留最小一行可见，避免被底部面板挤没/重叠） -->
-    <div class="no-scrollbar flex min-h-[56px] flex-1 flex-col px-2.5 pb-1">
-      <section class="mb-1 flex min-h-0 flex-1 flex-col">
-        <div class="flex items-center gap-1.5 px-1.5 py-1.5">
-          <button
-            class="flex items-center gap-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
-            @click="toggle('sessions')"
-          >
-            <Icon
-              name="chevron"
-              :size="11"
-              class="transition-transform"
-              :class="folded.sessions ? '-rotate-90' : ''"
-            />
-            {{ sessions.batchMode ? "批量选择" : "会话" }}
-            <span
-              class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim"
-              >{{ sessions.list.length }}</span
+      <!-- 会话区：弹性铺满剩余空间，列表滚动（保留最小一行可见，避免被底部面板挤没/重叠） -->
+      <div class="no-scrollbar flex min-h-[56px] flex-1 flex-col px-2.5 pb-1">
+        <section ref="sessionsAreaRef" class="mb-1 flex min-h-0 flex-1 flex-col">
+          <div class="flex items-center gap-1.5 px-1.5 py-1.5">
+            <button
+              class="flex items-center gap-1 text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+              @click="toggle('sessions')"
             >
-          </button>
-          <button
-            class="ml-auto text-ink-faint transition hover:text-ink-dim"
-            :title="sessions.batchMode ? '完成' : '多选'"
-            @click="sessions.toggleBatch()"
-          >
-            <Icon v-if="sessions.batchMode" name="check" :size="13" />
-            <Icon v-else name="dots" :size="13" />
-          </button>
-        </div>
-        <div v-if="sessions.batchMode" class="mb-1 flex gap-1 px-1.5">
-          <button
-            class="rounded border border-line-2 px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:text-ink"
-            @click="sessions.toggleSelectAll()"
-          >
-            全选
-          </button>
-          <button
-            class="rounded border border-err/40 px-1.5 py-0.5 text-[10.5px] text-err disabled:opacity-40"
-            :disabled="!sessions.selected.size"
-            @click="sessions.batchDelete([...sessions.selected])"
-          >
-            删除{{ sessions.selected.size ? ` (${sessions.selected.size})` : "" }}
-          </button>
-        </div>
-        <div
-          class="no-scrollbar min-h-0 flex-1 overflow-y-auto transition-[max-height] duration-300 ease-in-out"
-          :style="{ maxHeight: folded.sessions ? '0px' : '100vh' }"
-        >
-          <SessionList />
-        </div>
-      </section>
-    </div>
-
-    <!-- 文档 + 记忆：固定在底部（各自独立卡片，各自区域内滚动） -->
-    <!-- 面板区 flex-shrink-0 保证拖拽跟手；防溢出由拖拽 maxH（实测顶部+理想状态栏位置）与较小默认高度保证 -->
-    <div class="flex flex-shrink-0 flex-col gap-1.5 border-t border-line px-2.5 pt-1 pb-1">
-      <!-- 知识库文档 -->
-      <section class="overflow-hidden rounded-lg border border-line">
-        <!-- 文档面板拖拽条（条状）：在标题栏上方，只控制文档面板高度，折叠时不显示 -->
-        <div
-          v-if="!folded.docs"
-          class="group -mx-2.5 flex h-[13px] cursor-row-resize select-none items-center justify-center text-ink-faint/50 transition-colors hover:bg-accent/10 hover:text-ink-dim"
-          title="拖拽调整文档面板高度 · 双击恢复默认"
-          @mousedown="startPanelResize('doc', $event)"
-          @dblclick="resetPanelH('doc')"
-        >
-          <span
-            class="h-[3px] w-9 rounded-full bg-line-2 transition-colors group-hover:bg-accent/60"
-          />
-        </div>
-        <div class="flex items-center">
-          <button
-            class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
-            @click="toggle('docs')"
-          >
-            <Icon
-              name="chevron"
-              :size="11"
-              class="flex-shrink-0 transition-transform"
-              :class="folded.docs ? '-rotate-90' : ''"
-            />
-            <span class="min-w-0 flex-1 truncate">文档</span>
-            <span
-              class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim"
-              >{{ docsCount }}</span
+              <Icon
+                name="chevron"
+                :size="11"
+                class="transition-transform"
+                :class="folded.sessions ? '-rotate-90' : ''"
+              />
+              {{ sessions.batchMode ? "批量选择" : "会话" }}
+              <span
+                class="ml-0.5 rounded bg-surface-3 px-1 py-px text-2xs font-normal text-ink-dim"
+                >{{ sessions.list.length }}</span
+              >
+            </button>
+            <Tooltip
+              class="ml-auto"
+              :label="sessions.batchMode ? '完成' : '多选'"
+              placement="bottom"
             >
-          </button>
-          <Switch
-            class="flex-shrink-0"
-            :model-value="options.useRag"
-            title="问答时使用知识库"
-            @update:model-value="(v: boolean) => (options.useRag = v)"
-          />
-        </div>
-        <div
-          class="flex min-h-0 flex-col overflow-hidden"
-          :class="
-            panelDragging ? 'transition-none' : 'transition-[height] duration-300 ease-in-out'
-          "
-          :style="{ height: folded.docs ? '0px' : docPanelH ? docPanelH + 'px' : '18vh' }"
-        >
-          <DocPanel />
-        </div>
-      </section>
-
-      <!-- 长期记忆 -->
-      <section class="overflow-hidden rounded-lg border border-line">
-        <!-- 记忆面板拖拽条（条状）：在标题栏上方，只控制记忆面板高度，折叠时不显示 -->
-        <div
-          v-if="!folded.memory"
-          class="group -mx-2.5 flex h-[13px] cursor-row-resize select-none items-center justify-center text-ink-faint/50 transition-colors hover:bg-accent/10 hover:text-ink-dim"
-          title="拖拽调整记忆面板高度 · 双击恢复默认"
-          @mousedown="startPanelResize('mem', $event)"
-          @dblclick="resetPanelH('mem')"
-        >
-          <span
-            class="h-[3px] w-9 rounded-full bg-line-2 transition-colors group-hover:bg-accent/60"
-          />
-        </div>
-        <div class="flex items-center">
-          <button
-            class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
-            @click="toggle('memory')"
-          >
-            <Icon
-              name="chevron"
-              :size="11"
-              class="flex-shrink-0 transition-transform"
-              :class="folded.memory ? '-rotate-90' : ''"
-            />
-            <span class="min-w-0 flex-1 truncate">记忆</span>
-            <span
-              class="ml-0.5 rounded bg-surface-3 px-1 py-px text-[10px] font-normal text-ink-dim"
-              >{{ memoryCount }}</span
+              <button
+                class="text-ink-faint transition hover:text-ink-dim"
+                :aria-label="sessions.batchMode ? '完成' : '多选'"
+                @click="sessions.toggleBatch()"
+              >
+                <Icon v-if="sessions.batchMode" name="check" :size="13" />
+                <Icon v-else name="dots" :size="13" />
+              </button>
+            </Tooltip>
+          </div>
+          <div v-if="sessions.batchMode" class="mb-1 flex gap-1 px-1.5">
+            <button
+              class="rounded border border-line-2 px-1.5 py-0.5 text-2xs text-ink-dim hover:text-ink"
+              @click="sessions.toggleSelectAll()"
             >
-          </button>
-          <Switch
-            class="flex-shrink-0"
-            :model-value="options.useMemory"
-            title="问答时使用长期记忆"
-            @update:model-value="(v: boolean) => (options.useMemory = v)"
-          />
-        </div>
-        <div
-          class="flex min-h-0 flex-col overflow-hidden"
-          :class="
-            panelDragging ? 'transition-none' : 'transition-[height] duration-300 ease-in-out'
-          "
-          :style="{ height: folded.memory ? '0px' : memPanelH ? memPanelH + 'px' : '14vh' }"
-        >
-          <MemoryPanel />
-        </div>
-      </section>
-    </div>
+              全选
+            </button>
+            <button
+              class="rounded border border-err/40 px-1.5 py-0.5 text-2xs text-err disabled:opacity-40"
+              :disabled="!sessions.selected.size"
+              @click="sessions.batchDelete([...sessions.selected])"
+            >
+              删除{{ sessions.selected.size ? ` (${sessions.selected.size})` : "" }}
+            </button>
+          </div>
+          <div
+            class="sb-panel no-scrollbar min-h-0 flex-1 overflow-y-auto"
+            :style="{
+              maxHeight: folded.sessions ? '0px' : sessionsAreaH ? sessionsAreaH + 'px' : '100vh',
+            }"
+          >
+            <SessionList />
+          </div>
+        </section>
+      </div>
 
-    <!-- 底部状态 / 用户 -->
-    <div class="flex items-center gap-2 border-t border-line px-3 py-2.5">
-      <span
-        :class="['h-[7px] w-[7px] flex-shrink-0 rounded-full', healthOk ? 'bg-ok' : 'bg-warn']"
-      />
-      <span class="min-w-0 flex-1 truncate text-[11px] text-ink-faint">{{ healthText }}</span>
-      <button
-        class="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
-        :title="theme.mode === 'dark' ? '切换到亮色主题' : '切换到暗色主题'"
-        @click="theme.toggle()"
-      >
-        <Icon :name="theme.mode === 'dark' ? 'sun' : 'moon'" :size="13" />
-      </button>
-      <button
-        v-if="!auth.user"
-        class="rounded-md border border-line-2 px-2 py-1 text-[11.5px] text-ink-dim transition hover:border-accent/50 hover:text-ink"
-        @click="auth.openAuth('login')"
-      >
-        登录
-      </button>
-      <UserMenu v-else @profile="emit('profile')" @admin="emit('admin')" />
+      <!-- 文档 + 记忆：各自独立卡片，各自的拖拽条只控制自己 -->
+      <div class="flex flex-shrink-0 flex-col gap-1.5 border-t border-line px-2.5 pt-1 pb-1">
+        <!-- 知识库文档 -->
+        <div class="relative">
+          <!-- 拖拽条贴在卡片上边框上（不占布局高度），只控制文档面板高度，折叠时不显示 -->
+          <div
+            v-if="!folded.docs"
+            class="group absolute inset-x-0 -top-[6px] z-10 flex h-[13px] cursor-row-resize touch-none select-none items-center justify-center"
+            title="拖拽调整文档面板高度 · 双击恢复默认"
+            @pointerdown="startDocResize"
+            @dblclick="resetPanelH('doc')"
+          >
+            <span
+              class="h-[3px] w-10 rounded-full bg-line-2 opacity-50 transition group-hover:bg-accent/70 group-hover:opacity-100"
+            />
+          </div>
+          <section class="overflow-hidden rounded-lg border border-line">
+            <div class="flex items-center">
+              <button
+                class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+                @click="toggle('docs')"
+              >
+                <Icon
+                  name="chevron"
+                  :size="11"
+                  class="flex-shrink-0 transition-transform"
+                  :class="folded.docs ? '-rotate-90' : ''"
+                />
+                <span class="min-w-0 flex-1 truncate">文档</span>
+                <span
+                  class="ml-0.5 rounded bg-surface-3 px-1 py-px text-2xs font-normal text-ink-dim"
+                  >{{ docsCount }}</span
+                >
+              </button>
+            </div>
+            <div
+              class="sb-panel flex min-h-0 flex-col overflow-hidden"
+              :class="panelDragging ? 'sb-panel--dragging' : ''"
+              :style="{ height: folded.docs ? '0px' : renderedHeights.doc + 'px' }"
+            >
+              <DocPanel />
+            </div>
+          </section>
+        </div>
+
+        <!-- 长期记忆 -->
+        <div class="relative">
+          <!-- 拖拽条贴在卡片上边框上（不占布局高度），只控制记忆面板高度，折叠时不显示 -->
+          <div
+            v-if="!folded.memory"
+            class="group absolute inset-x-0 -top-[6px] z-10 flex h-[13px] cursor-row-resize touch-none select-none items-center justify-center"
+            title="拖拽调整记忆面板高度 · 双击恢复默认"
+            @pointerdown="startMemResize"
+            @dblclick="resetPanelH('mem')"
+          >
+            <span
+              class="h-[3px] w-10 rounded-full bg-line-2 opacity-50 transition group-hover:bg-accent/70 group-hover:opacity-100"
+            />
+          </div>
+          <section class="overflow-hidden rounded-lg border border-line">
+            <div class="flex items-center">
+              <button
+                class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+                @click="toggle('memory')"
+              >
+                <Icon
+                  name="chevron"
+                  :size="11"
+                  class="flex-shrink-0 transition-transform"
+                  :class="folded.memory ? '-rotate-90' : ''"
+                />
+                <span class="min-w-0 flex-1 truncate">记忆</span>
+                <span
+                  class="ml-0.5 rounded bg-surface-3 px-1 py-px text-2xs font-normal text-ink-dim"
+                  >{{ memoryCount }}</span
+                >
+              </button>
+            </div>
+            <div
+              class="sb-panel flex min-h-0 flex-col overflow-hidden"
+              :class="panelDragging ? 'sb-panel--dragging' : ''"
+              :style="{ height: folded.memory ? '0px' : renderedHeights.mem + 'px' }"
+            >
+              <MemoryPanel />
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- 底部状态 / 用户 -->
+      <div class="flex items-center gap-2 border-t border-line px-3 py-2.5">
+        <span
+          :class="['h-[7px] w-[7px] flex-shrink-0 rounded-full', healthOk ? 'bg-ok' : 'bg-warn']"
+        />
+        <span class="min-w-0 flex-1 truncate text-2xs text-ink-faint">{{ healthText }}</span>
+        <Tooltip :label="theme.mode === 'dark' ? '切换到亮色主题' : '切换到暗色主题'">
+          <button
+            class="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+            :aria-label="theme.mode === 'dark' ? '切换到亮色主题' : '切换到暗色主题'"
+            @click="theme.toggle()"
+          >
+            <Icon :name="theme.mode === 'dark' ? 'sun' : 'moon'" :size="13" />
+          </button>
+        </Tooltip>
+        <button
+          v-if="!auth.user"
+          class="rounded-md border border-line-2 px-2 py-1 text-2xs text-ink-dim transition hover:border-accent/50 hover:text-ink"
+          @click="auth.openAuth('login')"
+        >
+          登录
+        </button>
+        <UserMenu v-else @profile="emit('profile')" @admin="emit('admin')" />
+      </div>
     </div>
 
     <!-- 拖拽调整宽度手柄（悬停变双箭头） -->
     <div
-      class="absolute -right-[3px] top-0 z-20 h-full w-[7px] cursor-col-resize transition-colors hover:bg-accent/25"
+      v-if="!overlay && open !== false"
+      class="absolute -right-[3px] top-0 z-20 h-full w-[7px] cursor-col-resize touch-none transition-colors hover:bg-accent/25"
       title="拖拽调整宽度"
-      @mousedown="startResize"
+      @pointerdown="startResize"
     ></div>
   </aside>
 </template>

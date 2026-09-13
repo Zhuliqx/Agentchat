@@ -123,6 +123,7 @@ const paths: Record<string, string[]> = {
     "M18.36 5.64l1.42-1.42",
   ],
   moon: ["M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"],
+  menu: ["M4 6h16", "M4 12h16", "M4 18h16"],
 };
 
 const d = computed(() => paths[props.name] || []);

@@ -72,7 +72,7 @@ function onDblClickTitle(e: MouseEvent, id: string) {
     <button
       v-for="s in sorted"
       :key="s.id"
-      class="group relative flex items-center gap-2 rounded-md py-[6px] pl-3 pr-1.5 text-left text-[12.5px] transition"
+      class="group relative flex items-center gap-2 rounded-md py-[6px] pl-3 pr-1.5 text-left text-xs transition"
       :class="
         !sessions.batchMode && s.id === sessions.currentId
           ? 'bg-accent/12 text-ink'

@@ -9,6 +9,7 @@ vi.mock("@/api", () => ({
     history: vi.fn(async () => []),
     list: vi.fn(async () => []),
     deleteMessage: vi.fn(async () => undefined),
+    truncate: vi.fn(async () => ({ deleted: 2 })),
   },
   streamChat: vi.fn(),
 }));
@@ -45,6 +46,136 @@ describe("chat store", () => {
     expect(chat.messages[1].role).toBe("assistant");
     expect(chat.messages[1].content).toBe("你好");
     expect(chat.messages[1].streaming).toBe(false);
+  });
+
+  it("发送时给用户消息、回答完成时给助手消息打时间戳", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    emitStream([{ type: "token", content: "好" }]);
+
+    await chat.send("hi");
+
+    const [userMsg, agentMsg] = chat.messages;
+    expect(userMsg.createdAt).toBeTruthy();
+    expect(agentMsg.createdAt).toBeTruthy();
+    // 助手时间在流结束时写入，不应早于用户消息
+    expect(new Date(agentMsg.createdAt!).getTime()).toBeGreaterThanOrEqual(
+      new Date(userMsg.createdAt!).getTime(),
+    );
+  });
+
+  it("滚动状态：贴底阈值、按钮出现条件与未读计数", () => {
+    const chat = useChatStore();
+    chat.messages = [
+      { id: "m1", role: "user", content: "问题" },
+      { id: "m2", role: "assistant", content: "回答" },
+    ];
+
+    // 贴底：不显示按钮、无未读
+    chat.markScroll(0);
+    expect(chat.atBottom).toBe(true);
+    expect(chat.showJumpButton).toBe(false);
+    expect(chat.unseen).toBe(0);
+
+    // 轻微上滑（未超过 240）：不弹按钮
+    chat.markScroll(100);
+    expect(chat.atBottom).toBe(false);
+    expect(chat.showJumpButton).toBe(false);
+
+    // 期间新增 2 条消息：按钮出现并计数
+    chat.messages.push(
+      { id: "m3", role: "user", content: "再问" },
+      { id: "m4", role: "assistant", content: "再答" },
+    );
+    expect(chat.unseen).toBe(2);
+    expect(chat.showJumpButton).toBe(true);
+
+    // 滚远（超过 240）：即使没有新消息也显示按钮
+    chat.markScroll(400);
+    expect(chat.showJumpButton).toBe(true);
+
+    // 回到最新：未读清零、按钮隐藏
+    chat.jumpToBottom();
+    expect(chat.unseen).toBe(0);
+    expect(chat.atBottom).toBe(true);
+    expect(chat.showJumpButton).toBe(false);
+  });
+
+  it("编辑重发走服务端原子截断，再本地截断并重发", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    chat.messages = [
+      { id: "m1", backendId: "b1", role: "user", content: "旧问题" },
+      { id: "m2", backendId: "b2", role: "assistant", content: "旧回答" },
+      { id: "m3", backendId: "b3", role: "user", content: "后续问题" },
+    ];
+    const truncate = sessionsApi.truncate as unknown as ReturnType<typeof vi.fn>;
+    truncate.mockClear().mockResolvedValue({ deleted: 3 });
+    emitStream([{ type: "token", content: "新回答" }]);
+
+    await chat.editAndResend(chat.messages[0], "新问题");
+
+    expect(truncate).toHaveBeenCalledWith("s1", "b1");
+    // 截断点之后（含截断点）的旧消息不再保留，只剩"新问题 + 新回答"
+    expect(chat.messages.map((m) => m.content)).toEqual(["新问题", "新回答"]);
+    expect(chat.historyError).toBeNull();
+  });
+
+  it("截断失败时中止重发，并给出错误提示", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    chat.messages = [
+      { id: "m1", backendId: "b1", role: "user", content: "旧问题" },
+      { id: "m2", backendId: "b2", role: "assistant", content: "旧回答" },
+    ];
+    const truncate = sessionsApi.truncate as unknown as ReturnType<typeof vi.fn>;
+    truncate.mockClear().mockRejectedValue(new Error("网络错误"));
+    const stream = streamChat as unknown as ReturnType<typeof vi.fn>;
+    stream.mockClear();
+
+    await chat.editAndResend(chat.messages[0], "新问题");
+
+    expect(chat.historyError).toContain("截断历史失败");
+    expect(stream).not.toHaveBeenCalled(); // 没有重发
+    expect(chat.messages.map((m) => m.content)).toEqual(["旧问题", "旧回答"]);
+  });
+
+  it("同一工具先发 agent 再发带来源的 tool 事件：来源仍会写入消息", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    emitStream([
+      { type: "start", content: "" },
+      { type: "agent", content: "调用 rag_agent" },
+      {
+        type: "tool",
+        content: "工具: rag_agent",
+        data: {
+          sources: [
+            { path: "/kb/a.md", hits: 3 },
+            { path: "/kb/b.md", hits: 1 },
+          ],
+        },
+      },
+      { type: "token", content: "答案" },
+    ]);
+
+    await chat.send("知识库里有什么内容？");
+
+    const agentMsg = chat.messages[1];
+    expect(agentMsg.sources).toEqual([
+      { path: "/kb/a.md", hits: 3 },
+      { path: "/kb/b.md", hits: 1 },
+    ]);
+    // 轨道仍然只有一个 rag 节点（去重不能被破坏）
+    expect(agentMsg.orbit?.filter((n) => n.label.includes("rag_agent"))).toHaveLength(1);
   });
 
   it("handles interrupt and keeps orbit in same message on resume", async () => {
@@ -157,7 +288,7 @@ describe("chat store", () => {
     await p;
   });
 
-  it("retry() deletes the replaced exchange on the backend", async () => {
+  it("retry() 走服务端原子截断后重新发送", async () => {
     const chat = useChatStore();
     const sessions = useSessionsStore();
     sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
@@ -166,16 +297,20 @@ describe("chat store", () => {
     await chat.send("问题A");
     chat.messages[0].backendId = "u1";
     chat.messages[1].backendId = "a1";
+    const truncate = sessionsApi.truncate as unknown as ReturnType<typeof vi.fn>;
+    truncate.mockReset();
+    truncate.mockResolvedValue({ deleted: 2 });
 
     emitStream([{ type: "token", content: "重试后的回答" }]);
     await chat.retry(chat.messages[1]);
 
-    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "u1");
-    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "a1");
+    // 一次原子截断（含该用户消息及其后的助手消息），而不是逐条删除
+    expect(truncate).toHaveBeenCalledTimes(1);
+    expect(truncate).toHaveBeenCalledWith("s1", "u1");
     expect(chat.messages.map((m) => m.content)).toEqual(["问题A", "重试后的回答"]);
   });
 
-  it("editAndResend() replaces the user message without duplicating it", async () => {
+  it("editAndResend() 原子截断后替换用户消息，不重复", async () => {
     const chat = useChatStore();
     const sessions = useSessionsStore();
     sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
@@ -184,12 +319,14 @@ describe("chat store", () => {
     await chat.send("问题A");
     chat.messages[0].backendId = "u1";
     chat.messages[1].backendId = "a1";
+    const truncate = sessionsApi.truncate as unknown as ReturnType<typeof vi.fn>;
+    truncate.mockReset();
+    truncate.mockResolvedValue({ deleted: 2 });
 
     emitStream([{ type: "token", content: "编辑后的回答" }]);
     await chat.editAndResend(chat.messages[0], "问题A（改）");
 
-    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "u1");
-    expect(sessionsApi.deleteMessage).toHaveBeenCalledWith("s1", "a1");
+    expect(truncate).toHaveBeenCalledWith("s1", "u1");
     expect(chat.messages.map((m) => m.content)).toEqual(["问题A（改）", "编辑后的回答"]);
     expect(chat.messages.filter((m) => m.role === "user")).toHaveLength(1);
   });

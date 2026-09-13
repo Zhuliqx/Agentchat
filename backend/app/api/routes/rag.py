@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_SUFFIX = {".txt", ".md", ".markdown", ".pdf", ".docx", ".html", ".htm"}
 # 项目根下的上传目录（config.upload_dir 相对项目根）
 UPLOAD_ROOT = PROJECT_ROOT / settings.upload_dir
+# 内置知识库随应用分发（data/kb/*.md），不属于用户上传，但同样需要能预览原文
+KB_ROOT = PROJECT_ROOT / "data" / "kb"
 # 上传大小上限（字节）
 MAX_UPLOAD_BYTES = settings.max_upload_mb * 1024 * 1024
 _UPLOAD_EXECUTOR = ThreadPoolExecutor(
@@ -56,9 +58,25 @@ _INGEST_TASK_TTL_SEC = 24 * 60 * 60
 
 
 def _safe_source_in_uploads(path: Path) -> bool:
-    """判断 source 是否位于 uploads 目录内（防任意文件读取）。"""
+    """判断 source 是否位于 uploads 目录内（删除原始文件时用，必须是用户上传目录）。"""
     try:
         return path.resolve().is_relative_to(UPLOAD_ROOT.resolve())
+    except (ValueError, AttributeError):  # pragma: no cover
+        return False
+
+
+def _safe_inline_source(path: Path) -> bool:
+    """判断 source 是否位于可内联读取的目录（用户上传目录 / 内置知识库）。
+
+    白名单放在服务端：即使 source 字符串来自请求，也不能读到这两个目录之外
+    （路由另有"该 source 属于当前用户"的归属校验，两层一起挡住越权读取）。
+    注意：删除原始文件仍只认 uploads（见 _safe_source_in_uploads），避免误删内置知识库。
+    """
+    try:
+        resolved = path.resolve()
+        return resolved.is_relative_to(UPLOAD_ROOT.resolve()) or resolved.is_relative_to(
+            KB_ROOT.resolve()
+        )
     except (ValueError, AttributeError):  # pragma: no cover
         return False
 
@@ -311,7 +329,7 @@ def list_documents(user_id: str = Depends(get_current_user_id)) -> list[dict]:
         )
         g["chunks"] += 1
         if not g["has_file"]:
-            g["has_file"] = _safe_source_in_uploads(Path(d.source))
+            g["has_file"] = _safe_inline_source(Path(d.source))
         if not g["tag"] and d.tag:
             g["tag"] = d.tag
     return list(grouped.values())
@@ -323,13 +341,13 @@ def get_document_file(
     download: bool = False,
     user_id: str = Depends(get_current_user_id),
 ):
-    """获取上传文档的原始文件（仅限当前用户 + uploads 目录内，防越权/任意文件读取）。
+    """获取文档原始文件（仅限当前用户 + uploads 或内置知识库目录，防越权/任意文件读取）。
 
     - download=false：内联预览（文本类可读内容）
     - download=true：强制下载
     """
     path = Path(source)
-    if not _safe_source_in_uploads(path) or not path.is_file():
+    if not _safe_inline_source(path) or not path.is_file():
         raise HTTPException(404, "原始文件不存在或不可访问")
     # 越权校验：该 source 必须属于当前用户
     with SessionLocal() as db:

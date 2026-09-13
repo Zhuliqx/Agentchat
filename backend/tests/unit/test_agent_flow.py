@@ -154,5 +154,6 @@ def test_rag_stream_emits_sources_from_run_context(monkeypatch):
     )
     events, _, result = _run_stream()
 
-    assert "platform_doc_a.txt" in result.get("sources", [])
+    # 引用溯源带命中片段数：[{"path": ..., "hits": n}]
+    assert result.get("sources") == [{"path": "platform_doc_a.txt", "hits": 1}]
     assert any(e.get("type") == "tool" for e in events), "应产生 rag_agent 工具事件"

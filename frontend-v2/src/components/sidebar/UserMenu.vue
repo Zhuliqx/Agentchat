@@ -46,12 +46,12 @@ function switchAccount() {
     <template #trigger>
       <button
         v-if="auth.user"
-        class="flex max-w-[140px] cursor-pointer items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-[11.5px] text-ink-dim transition hover:bg-surface-2 hover:text-ink"
+        class="flex max-w-[140px] cursor-pointer items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-2xs text-ink-dim transition hover:bg-surface-2 hover:text-ink"
         title="账户菜单"
         @click.stop="auth.toggleMenu()"
       >
         <span
-          class="grid h-5 w-5 flex-shrink-0 place-items-center rounded-full text-[10px] font-semibold"
+          class="grid h-5 w-5 flex-shrink-0 place-items-center rounded-full text-2xs font-semibold"
           :class="[avatarColor(auth.user).bg, avatarColor(auth.user).text]"
         >
           {{ initial }}
@@ -61,19 +61,19 @@ function switchAccount() {
     </template>
     <div class="flex items-center gap-2.5 border-b border-line px-3 py-2.5">
       <div
-        class="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full text-[13px] font-semibold"
+        class="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full text-sm font-semibold"
         :class="[avatarColor(auth.user).bg, avatarColor(auth.user).text]"
       >
         {{ initial }}
       </div>
       <div class="min-w-0">
-        <div class="truncate text-[13px] font-semibold text-ink">{{ auth.user?.username }}</div>
-        <div class="text-[11px] text-ink-faint">已登录</div>
+        <div class="truncate text-sm font-semibold text-ink">{{ auth.user?.username }}</div>
+        <div class="text-2xs text-ink-faint">已登录</div>
       </div>
     </div>
     <div class="p-1">
       <button
-        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-ink transition hover:bg-surface-2"
+        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-xs text-ink transition hover:bg-surface-2"
         @click="
           auth.closeMenu();
           emit('profile');
@@ -84,7 +84,7 @@ function switchAccount() {
       </button>
       <button
         v-if="auth.user?.is_admin"
-        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-ink transition hover:bg-surface-2"
+        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-xs text-ink transition hover:bg-surface-2"
         @click="
           auth.closeMenu();
           emit('admin');
@@ -94,7 +94,7 @@ function switchAccount() {
         管理后台
       </button>
       <button
-        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-ink transition hover:bg-surface-2"
+        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-xs text-ink transition hover:bg-surface-2"
         @click="
           auth.closeMenu();
           switchAccount();
@@ -105,7 +105,7 @@ function switchAccount() {
       </button>
       <div class="mx-1 my-1 h-px bg-line" />
       <button
-        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12.5px] text-err transition hover:bg-err/10"
+        class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-xs text-err transition hover:bg-err/10"
         @click="
           auth.closeMenu();
           afterLogout();

@@ -228,8 +228,8 @@ async function editTag(d: { source: string; tag?: string | null }) {
           @change="onFiles"
         />
         <Icon name="upload" :size="15" class="text-ink-faint transition group-hover:text-accent" />
-        <span class="text-[11px] text-ink-dim">点击或拖入文件</span>
-        <span class="text-[10px] text-ink-faint">txt · md · pdf · docx · html</span>
+        <span class="text-2xs text-ink-dim">点击或拖入文件</span>
+        <span class="text-2xs text-ink-faint">txt · md · pdf · docx · html</span>
       </div>
       <!-- 上传进度 -->
       <div v-if="uploading.length" class="mb-1.5 flex flex-col gap-1.5">
@@ -238,7 +238,7 @@ async function editTag(d: { source: string; tag?: string | null }) {
           :key="u.taskId"
           class="rounded-md border border-line bg-surface-2 px-2.5 py-2"
         >
-          <div class="flex items-center justify-between gap-2 text-[11px]">
+          <div class="flex items-center justify-between gap-2 text-2xs">
             <span class="min-w-0 truncate text-ink-dim">{{ u.filename }}</span>
             <span
               class="flex-shrink-0"
@@ -261,17 +261,17 @@ async function editTag(d: { source: string; tag?: string | null }) {
       <div class="flex flex-col gap-px">
         <div class="mb-0.5 flex items-center justify-between px-1">
           <button
-            class="text-[11px] text-ink-faint transition hover:text-accent"
+            class="text-2xs text-ink-faint transition hover:text-accent"
             @click="toggleSelectMode"
           >
             {{ selecting ? "完成" : "多选" }}
           </button>
-          <span v-if="selecting" class="text-[11px] text-ink-faint">{{ selected.size }} 已选</span>
+          <span v-if="selecting" class="text-2xs text-ink-faint">{{ selected.size }} 已选</span>
         </div>
         <div
           v-for="d in docs.list"
           :key="d.id"
-          class="group flex items-center gap-2 rounded-md px-1.5 py-[5px] text-[12px] text-ink-dim transition hover:bg-surface-2 hover:text-ink"
+          class="group flex items-center gap-2 rounded-md px-1.5 py-[5px] text-xs text-ink-dim transition hover:bg-surface-2 hover:text-ink"
           :class="selecting && selected.has(d.source) ? 'bg-accent/8' : ''"
         >
           <input
@@ -293,10 +293,10 @@ async function editTag(d: { source: string; tag?: string | null }) {
           >
             {{ d.filename }}
           </span>
-          <span class="flex-shrink-0 text-[10px] text-ink-faint">{{ d.chunks }}</span>
+          <span class="flex-shrink-0 text-2xs text-ink-faint">{{ d.chunks }}</span>
           <button
             v-if="!selecting"
-            class="flex-shrink-0 rounded-full px-1.5 py-px text-[9.5px] transition"
+            class="flex-shrink-0 rounded-full px-1.5 py-px text-2xs transition"
             :class="
               d.tag
                 ? 'border border-accent/40 text-accent hover:border-accent'
@@ -318,12 +318,12 @@ async function editTag(d: { source: string; tag?: string | null }) {
         </div>
         <!-- 多选操作栏 -->
         <div v-if="selecting" class="mt-1 flex items-center gap-1.5 px-1">
-          <button class="text-[11px] text-ink-dim transition hover:text-ink" @click="toggleAll">
+          <button class="text-2xs text-ink-dim transition hover:text-ink" @click="toggleAll">
             {{ selected.size === docs.list.length ? "取消全选" : "全选" }}
           </button>
           <span class="mx-0.5 h-3 w-px bg-line" />
           <button
-            class="text-[11px] text-err transition hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40"
+            class="text-2xs text-err transition hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40"
             :disabled="!selected.size"
             @click="removeSelected"
           >
@@ -338,25 +338,25 @@ async function editTag(d: { source: string; tag?: string | null }) {
     <Modal title="文档预览" :open="preview.open" @close="preview.open = false">
       <div class="mb-3 flex gap-2">
         <button
-          class="flex items-center gap-1.5 rounded-md border border-line-2 px-2.5 py-1.5 text-[11.5px] text-ink-dim transition hover:border-accent/50 hover:text-ink"
+          class="flex items-center gap-1.5 rounded-md border border-line-2 px-2.5 py-1.5 text-2xs text-ink-dim transition hover:border-accent/50 hover:text-ink"
           @click="openUrl(docsApi.fileUrl(preview.source, true))"
         >
           <Icon name="download" :size="12" />
           下载原始文件
         </button>
         <button
-          class="flex items-center gap-1.5 rounded-md border border-line-2 px-2.5 py-1.5 text-[11.5px] text-ink-dim transition hover:border-accent/50 hover:text-ink"
+          class="flex items-center gap-1.5 rounded-md border border-line-2 px-2.5 py-1.5 text-2xs text-ink-dim transition hover:border-accent/50 hover:text-ink"
           @click="copyText(preview.source)"
         >
           <Icon name="copy" :size="12" />
           复制路径
         </button>
       </div>
-      <pre v-if="preview.binary" class="text-[12px] text-ink-faint">
+      <pre v-if="preview.binary" class="text-xs text-ink-faint">
 该文件为二进制格式，请下载查看。</pre>
       <pre
         v-else
-        class="whitespace-pre-wrap break-all rounded-lg border border-line bg-code-bg p-3.5 text-[12px] leading-relaxed text-ink-dim"
+        class="whitespace-pre-wrap break-all rounded-lg border border-line bg-code-bg p-3.5 text-xs leading-relaxed text-ink-dim"
         >{{
           preview.text.length > 3000
             ? preview.text.slice(0, 3000) + "\n…（已截断，可下载完整文件）"

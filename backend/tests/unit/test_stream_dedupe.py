@@ -143,3 +143,67 @@ def test_unregistered_tool_emits_nothing_and_keeps_buffer():
     assert sink.events == [] and st.saw_tool_call is False
     _run(st.flush())
     assert sink.tokens == ["短回答"]
+
+
+def test_english_prelude_not_streamed_before_tool():
+    """英文开场白（字符数超阈值、信息量不足）不应被判成正式回答。
+
+    回归场景：模型先说 "I'll search for the latest AI industry news for you."
+    再调用 web_search。按字符数判定时 51 字符 > 40，会被提前流出并与中文答案
+    拼在一起（用户看到中英混排）。
+    """
+    sink = _Sink()
+    st = _streamer(sink)
+    st.register_tool("web_search")
+    prelude = "I'll search for the latest AI industry news for you."
+    assert len(prelude) > st.PRELUDE_FLUSH  # 旧口径会误判
+
+    _run(st.feed(prelude))
+    assert sink.tokens == []  # 缓冲中，未流出
+
+    _run(st.emit_tool("web_search"))
+    assert [e["content"] for e in sink.events] == ["工具: web_search"]
+
+    _run(st.feed_answer("以下是最近 AI 行业的主要新闻动态："))
+    assert sink.tokens == ["以下是最近 AI 行业的主要新闻动态："]
+    assert "I'll search" not in st.answer()
+
+
+def test_long_chinese_direct_answer_still_streams_immediately():
+    """中文直接回答仍按原阈值流出（改动不能拖慢正常流式）。"""
+    sink = _Sink()
+    st = _streamer(sink)
+    chunk = "这" * 45  # 45 个汉字 ≥ 40
+    _run(st.feed(chunk))
+    assert sink.tokens == [chunk]
+
+
+def test_rag_sources_emitted_after_tool_execution(monkeypatch):
+    """rag_agent 来源要等执行完才出现：执行后补发一次带 sources 的事件。
+
+    回归场景：模型发起调用时事件里 sources 为空，执行完的第二次 emit 因为
+    "同工具只发一次"被拦掉，前端永远拿不到来源（页面不显示"来源"行）。
+    """
+    from app.agents.tools import sources as sources_mod
+
+    recorded: list[dict] = []
+    monkeypatch.setattr(sources_mod, "get_recent_rag_source_refs", lambda _rid: list(recorded))
+
+    sink = _Sink()
+    st = _streamer(sink)
+    st.register_tool("rag_agent")
+
+    _run(st.emit_tool("rag_agent"))  # 发起调用：还没有来源
+    assert [e["data"].get("sources") for e in sink.events] == [None]
+
+    recorded.extend(
+        [{"path": "/kb/a.md", "hits": 1}, {"path": "/kb/b.md", "hits": 1}]
+    )
+    _run(st.emit_tool("rag_agent"))  # 执行完成：补发带来源的事件
+    assert sink.events[-1]["data"]["sources"] == [
+        {"path": "/kb/a.md", "hits": 1},
+        {"path": "/kb/b.md", "hits": 1},
+    ]
+
+    _run(st.emit_tool("rag_agent"))  # 来源没变：不再重复发
+    assert len(sink.events) == 2

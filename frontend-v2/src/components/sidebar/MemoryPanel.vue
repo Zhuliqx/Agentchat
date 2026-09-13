@@ -38,7 +38,7 @@ async function remove(id: string) {
         <input
           v-model="search"
           type="text"
-          class="w-full rounded-lg border border-line-2 bg-surface-2 py-1.5 pl-7 pr-2.5 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+          class="w-full rounded-lg border border-line-2 bg-surface-2 py-1.5 pl-7 pr-2.5 text-xs text-ink outline-none placeholder:text-ink-faint focus:border-accent"
           placeholder="搜索记忆…"
           @input="onSearch"
         />
@@ -47,7 +47,7 @@ async function remove(id: string) {
         <input
           v-model="input"
           type="text"
-          class="min-w-0 flex-1 rounded-lg border border-line-2 bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+          class="min-w-0 flex-1 rounded-lg border border-line-2 bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none placeholder:text-ink-faint focus:border-accent"
           placeholder="记住一条信息…"
           @keydown.enter="add"
         />
@@ -65,7 +65,7 @@ async function remove(id: string) {
         <div
           v-for="m in memory.list"
           :key="m.id"
-          class="group flex items-center gap-2 rounded-md px-1.5 py-[5px] text-[12px] text-ink-dim transition hover:bg-surface-2 hover:text-ink"
+          class="group flex items-center gap-2 rounded-md px-1.5 py-[5px] text-xs text-ink-dim transition hover:bg-surface-2 hover:text-ink"
           :title="m.content"
         >
           <Icon name="brain" :size="13" class="flex-shrink-0 text-ink-faint" />

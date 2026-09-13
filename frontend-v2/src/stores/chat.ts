@@ -1,11 +1,12 @@
 import { defineStore } from "pinia";
+import { normalizeSources } from "@/utils/sources";
 import { reactive } from "vue";
 import { sessionsApi, streamChat } from "@/api";
 import { useSessionsStore } from "./sessions";
 import { useChatOptionsStore } from "./chatOptions";
 import { useDialogStore } from "./dialog";
 import { AGENT_META } from "@/utils/agentMeta";
-import type { Message, SSEEvent } from "@/types/api";
+import type { Message, SourceRef, SSEEvent } from "@/types/api";
 
 export type OrbitType = "start" | "agent" | "tool" | "end" | "error";
 export interface OrbitNode {
@@ -22,7 +23,8 @@ export interface ChatMsg {
   orbit?: OrbitNode[];
   hitl?: { question: string; sessionId: string } | null;
   backendId?: string; // 后端 messages.id（用于删除/定位）
-  sources?: string[]; // 引用溯源：RAG 检索命中的文档来源
+  sources?: SourceRef[]; // 引用溯源：RAG 检索命中的文档来源（含命中片段数）
+  createdAt?: string; // ISO 时间，hover 消息时显示
 }
 
 export interface SendOptions {
@@ -36,6 +38,11 @@ const ORBIT_NAME_RE = new RegExp(Object.keys(AGENT_META).join("|"));
 
 let uid = 0;
 const nid = () => `m${Date.now()}_${uid++}`;
+
+/** 距底部小于该值视为"贴底"，继续自动跟随流式输出 */
+const STICK_TOLERANCE = 40;
+/** 距底部超过该值才显示"回到最新"，避免轻微滚动就弹出来 */
+const JUMP_BUTTON_GAP = 240;
 
 function orbitLabel(type: OrbitType, text: string): string {
   if (type === "start") return "Supervisor";
@@ -58,6 +65,12 @@ export const useChatStore = defineStore("chat", {
     hitlMsgId: null as string | null,
     // 正在发送的用户消息（SSE meta 帧回填其后端 id）
     pendingUserMsg: null as ChatMsg | null,
+    /** 消息列表距底部的距离（由 MessageList 在滚动时写入） */
+    scrollGap: 0,
+    /** 离开底部那一刻的消息条数，用于统计"新消息" */
+    unseenBase: 0,
+    /** 自增计数：输入区点击"回到最新"时通知列表滚到底部 */
+    scrollNonce: 0,
   }),
   getters: {
     lastAssistant: (s): ChatMsg | null => {
@@ -66,8 +79,31 @@ export const useChatStore = defineStore("chat", {
       }
       return null;
     },
+    atBottom: (s): boolean => s.scrollGap <= STICK_TOLERANCE,
+    /** 离开底部后新增的消息条数（含用户刚发出的那条） */
+    unseen: (s): number =>
+      s.scrollGap <= STICK_TOLERANCE ? 0 : Math.max(0, s.messages.length - s.unseenBase),
+    showJumpButton: (s): boolean =>
+      s.scrollGap > JUMP_BUTTON_GAP ||
+      (s.scrollGap > STICK_TOLERANCE && s.messages.length > s.unseenBase),
   },
   actions: {
+    /** 由 MessageList 在滚动时调用，维护贴底状态与新消息基准 */
+    markScroll(gap: number) {
+      const atBottom = gap <= STICK_TOLERANCE;
+      const wasAtBottom = this.scrollGap <= STICK_TOLERANCE;
+      // 刚离开底部（或已贴底）时把基准对齐到当前条数，之后的增量就是"新消息"
+      if (atBottom || wasAtBottom) this.unseenBase = this.messages.length;
+      this.scrollGap = gap;
+    },
+
+    /** 输入区点击"回到最新"：复位状态并通知列表滚到底 */
+    jumpToBottom() {
+      this.scrollGap = 0;
+      this.unseenBase = this.messages.length;
+      this.scrollNonce += 1;
+    },
+
     async loadHistory(sessionId: string) {
       this._abortStream();
       const seq = ++this.historySeq;
@@ -88,7 +124,8 @@ export const useChatStore = defineStore("chat", {
           backendId: m.id,
           role: m.role === "user" ? "user" : "assistant",
           content: m.content,
-          sources: m.sources,
+          sources: normalizeSources(m.sources),
+          createdAt: m.created_at,
         });
       });
     },
@@ -152,7 +189,12 @@ export const useChatStore = defineStore("chat", {
       const sessions = useSessionsStore();
       const payload = this._buildPayload(sessions.currentId, text, opts);
 
-      this.messages.push({ id: nid(), role: "user", content: text });
+      this.messages.push({
+        id: nid(),
+        role: "user",
+        content: text,
+        createdAt: new Date().toISOString(),
+      });
       // 记录待回填后端 id 的用户消息（SSE meta 帧到达时写入 backendId）
       const userMsg = this.messages[this.messages.length - 1];
       this.pendingUserMsg = userMsg;
@@ -164,6 +206,7 @@ export const useChatStore = defineStore("chat", {
         streaming: true,
         orbit: [],
         hitl: null,
+        createdAt: new Date().toISOString(),
       });
       this.messages.push(agentMsg);
       this.hitlMsgId = null;
@@ -188,6 +231,7 @@ export const useChatStore = defineStore("chat", {
           streaming: true,
           orbit: [],
           hitl: null,
+          createdAt: new Date().toISOString(),
         });
       if (!agentMsg) this.messages.push(target);
       target.hitl = null;
@@ -222,7 +266,7 @@ export const useChatStore = defineStore("chat", {
       if (this.hitlMsgId === msg.id) this.hitlMsgId = null;
     },
 
-    /** 重试：删除该助手消息及其前面的用户问题，截断后续消息后重新发送该问题 */
+    /** 重试：从该助手消息对应的用户问题起原子截断（含该问题），再重新发送它 */
     async retry(agentMsg: ChatMsg) {
       if (this.sending) return;
       const idx = this.messages.findIndex((m) => m.id === agentMsg.id);
@@ -237,32 +281,39 @@ export const useChatStore = defineStore("chat", {
       }
       if (!userMsg) return;
       // 从该用户消息起截断（含其后的所有消息），重新发送
-      const start = this.messages.indexOf(userMsg);
-      const removed = this.messages.splice(start, this.messages.length - start);
-      this.hitlMsgId = null;
-      await this._deleteBackendMessages(removed);
+      if (!(await this._truncateFrom(userMsg))) return;
       await this.send(userMsg.content);
     },
 
-    /** 编辑重发：替换用户消息文本，截断其后所有消息后重新发送 */
+    /** 编辑重发：原子截断该消息及其之后的历史，再用新文本重新发送 */
     async editAndResend(userMsg: ChatMsg, newText: string) {
       if (this.sending) return;
       const text = newText.trim();
       if (!text) return;
       const start = this.messages.indexOf(userMsg);
       if (start < 0) return;
-      const removed = this.messages.splice(start, this.messages.length - start);
-      this.hitlMsgId = null;
-      await this._deleteBackendMessages(removed);
+      if (!(await this._truncateFrom(userMsg))) return;
       await this.send(text);
     },
 
-    /** 重发前清理被截断消息的服务端记录；删除失败不阻塞重发（best-effort）。 */
-    async _deleteBackendMessages(msgs: ChatMsg[]) {
+    /**
+     * 从某条消息起截断（含该条）：服务端一个事务删完，再同步本地列表。
+     * 失败返回 false（调用方应中止重发），错误写入 historyError 由界面提示。
+     */
+    async _truncateFrom(userMsg: ChatMsg): Promise<boolean> {
       const sessionId = useSessionsStore().currentId;
-      const ids = msgs.map((m) => m.backendId).filter((id): id is string => !!id);
-      if (!sessionId || !ids.length) return;
-      await Promise.allSettled(ids.map((id) => sessionsApi.deleteMessage(sessionId, id)));
+      if (sessionId && userMsg.backendId) {
+        try {
+          await sessionsApi.truncate(sessionId, userMsg.backendId);
+        } catch (e) {
+          this.historyError = `截断历史失败：${(e as Error).message}`;
+          return false;
+        }
+      }
+      const start = this.messages.indexOf(userMsg);
+      if (start >= 0) this.messages.splice(start, this.messages.length - start);
+      this.hitlMsgId = null;
+      return true;
     },
 
     async _runStream(payload: Record<string, unknown>, agentMsg: ChatMsg) {
@@ -283,6 +334,8 @@ export const useChatStore = defineStore("chat", {
         }
       } finally {
         agentMsg.streaming = false;
+        // 回答时间以完成为准（开始时写入的只是占位，完成后覆盖）
+        agentMsg.createdAt = new Date().toISOString();
         if (this.abortController === controller) {
           this.sending = false;
           this.abortController = null;
@@ -333,6 +386,12 @@ export const useChatStore = defineStore("chat", {
           if (!agentMsg.orbit) agentMsg.orbit = [];
           if (t === "start" && agentMsg.orbit.length) return;
           const label = orbitLabel(t, ev.content);
+          // 引用溯源：来源挂在 tool 事件上，必须先取出来——后端对同一工具会先发
+          // agent("调用 xxx") 再发 tool("工具: xxx")，后者会被下面的同标签去重跳过，
+          // 若把赋值写在去重之后，来源就会丢。
+          if (t === "tool" && Array.isArray(ev.data?.sources) && ev.data.sources.length) {
+            agentMsg.sources = normalizeSources(ev.data.sources);
+          }
           // 同标签去重：后端对同一工具会推送 agent("调用 xxx") + tool("工具: xxx")，
           // 两者解析出的轨道标签相同，避免轨道出现重复节点
           if ((t === "agent" || t === "tool") && agentMsg.orbit.some((n) => n.label === label))
@@ -341,10 +400,6 @@ export const useChatStore = defineStore("chat", {
             // 新工具调用：前一个停止闪烁，当前节点开始闪烁（执行中）
             agentMsg.orbit.forEach((n) => (n.active = false));
             agentMsg.orbit.push({ type: t, label, active: true });
-            // 引用溯源：收集 RAG 检索命中的文档来源
-            if (Array.isArray(ev.data?.sources) && ev.data.sources.length) {
-              agentMsg.sources = ev.data.sources as string[];
-            }
           } else {
             agentMsg.orbit.push({ type: t, label });
           }

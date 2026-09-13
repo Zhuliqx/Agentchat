@@ -12,8 +12,15 @@ export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  sources?: string[];
+  /** 引用溯源：新记录是 { path, hits }，老记录只有路径字符串 */
+  sources?: (SourceRef | string)[];
   created_at?: string;
+}
+
+export interface SourceRef {
+  path: string;
+  /** 该来源命中的检索片段数（老数据可能没有） */
+  hits?: number;
 }
 
 export interface User {

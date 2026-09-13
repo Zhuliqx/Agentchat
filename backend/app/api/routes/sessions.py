@@ -23,16 +23,31 @@ class SessionOut(BaseModel):
     updated_at: str
 
 
+class SourceRefOut(BaseModel):
+    """引用溯源条目：path + 命中片段数（老数据只有路径字符串）。"""
+
+    path: str
+    hits: int | None = None
+
+
 class MessageOut(BaseModel):
     id: str
     role: str
     content: str
-    sources: list[str] = []
+    # 兼容两种历史数据：新记录是 {path, hits}，老记录是纯路径字符串
+    sources: list[str | SourceRefOut] = []
+    created_at: str | None = None  # 前端用于消息时间戳（hover 显示）
 
 
 class RenameIn(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=100)
     pinned: bool | None = None
+
+
+class TruncateIn(BaseModel):
+    """从某条消息截断：删除该消息及其之后的全部消息（编辑重发用）。"""
+
+    message_id: str
 
 
 class BatchDeleteIn(BaseModel):
@@ -110,6 +125,7 @@ def get_history(session_id: str, user_id: str = Depends(get_current_user_id)):
             role=m.role,
             content=m.content,
             sources=m.sources or [],
+            created_at=m.created_at.isoformat() if m.created_at else None,
         )
         for m in msgs
     ]
@@ -127,6 +143,25 @@ def delete_message(
             raise HTTPException(404, "消息不存在")
         db.delete(m)
         db.commit()
+
+
+@router.post("/{session_id}/truncate")
+def truncate_messages(
+    session_id: str,
+    body: TruncateIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    """从指定消息截断：删除该消息及其之后的全部消息（一个事务内完成）。
+
+    编辑重发用它替代"前端逐条删除"：既避免中途失败留下半截历史，
+    也让删除范围由服务端按时间点界定，不受前端本地列表状态影响。
+    """
+    _owned_or_404(session_id, user_id)
+    try:
+        deleted = postgres.truncate_messages_from(session_id, body.message_id)
+    except ValueError:
+        raise HTTPException(404, "消息不存在") from None
+    return {"deleted": deleted}
 
 
 @router.get("/{session_id}/stats")

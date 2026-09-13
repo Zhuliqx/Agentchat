@@ -89,7 +89,7 @@ onBeforeUnmount(restorePageState);
             <div
               class="flex flex-shrink-0 items-center justify-between border-b border-line px-5 py-3.5"
             >
-              <span :id="titleId" class="text-[14px] font-medium tracking-tight">{{ title }}</span>
+              <span :id="titleId" class="text-base font-medium tracking-tight">{{ title }}</span>
               <button
                 class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
                 aria-label="关闭"

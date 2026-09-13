@@ -1,12 +1,54 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { useChatStore } from "@/stores/chat";
+import { useSessionsStore } from "@/stores/sessions";
 import MessageItem from "./MessageItem.vue";
 import Icon from "@/components/common/Icon.vue";
+import { getReadMarker, setReadMarker } from "@/utils/readMarker";
 
 const chat = useChatStore();
+const sessions = useSessionsStore();
 const listRef = ref<HTMLElement | null>(null);
-const stickToBottom = ref(true);
+
+// 打开会话时快照"上次看到哪里"，本会话内不再变化（读完也不会让分隔线消失）。
+// 历史是异步加载的：切到会话时消息还是空的，所以要等消息到齐后再算一次。
+const dividerIndex = ref(-1);
+let dividerSession = "";
+watch(
+  () => [sessions.currentId, chat.messages.length > 0] as const,
+  ([sid, hasMessages]) => {
+    if (!sid) {
+      dividerSession = "";
+      dividerIndex.value = -1;
+      return;
+    }
+    if (dividerSession === sid) return; // 同一会话只算一次，新增消息不动分隔线
+    if (!hasMessages) return; // 等历史到齐
+    const marker = getReadMarker(sid);
+    // 标记存的是后端消息 id（前端 id 每次刷新都会重新生成，不能用来定位）
+    const idx = marker
+      ? chat.messages.findIndex((m) => m.backendId === marker || m.id === marker)
+      : -1;
+    // 标记正好是最后一条 → 没有新消息，不画分隔线
+    dividerIndex.value = idx >= 0 && idx < chat.messages.length - 1 ? idx + 1 : -1;
+    dividerSession = sid;
+  },
+  { immediate: true },
+);
+
+// 用户在看最新内容（贴底）时推进已读位置，供下次打开时定位
+watch(
+  () => [chat.messages.length, chat.atBottom] as const,
+  () => {
+    // 分隔线还没算完就先别推进，否则会把"上次读到哪里"覆盖掉
+    if (dividerSession !== sessions.currentId) return;
+    const last = chat.messages[chat.messages.length - 1];
+    // 优先记后端 id：它跨刷新稳定；尚未落库的消息退回前端 id
+    if (sessions.currentId && last && chat.atBottom)
+      setReadMarker(sessions.currentId, last.backendId || last.id);
+  },
+  { immediate: true },
+);
 
 function scrollBottom() {
   if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight;
@@ -15,7 +57,8 @@ function scrollBottom() {
 function onScroll() {
   const el = listRef.value;
   if (!el) return;
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
+  // 贴底判定与新消息计数由 store 统一维护（输入区的"回到最新"按钮也要用）
+  chat.markScroll(el.scrollHeight - el.scrollTop - el.clientHeight);
 }
 
 const lastMessage = computed(() => chat.messages[chat.messages.length - 1]);
@@ -24,7 +67,7 @@ const lastMessage = computed(() => chat.messages[chat.messages.length - 1]);
 watch(
   () => [chat.messages.length, lastMessage.value?.content, lastMessage.value?.streaming] as const,
   () => {
-    if (stickToBottom.value) nextTick(scrollBottom);
+    if (chat.atBottom) nextTick(scrollBottom);
   },
   { flush: "post" },
 );
@@ -34,15 +77,16 @@ watch(
   () => chat.messages[0]?.id ?? "",
   (id, prev) => {
     if (id === prev) return;
-    stickToBottom.value = true;
+    chat.markScroll(0);
     nextTick(scrollBottom);
   },
 );
 
-function jumpToBottom() {
-  stickToBottom.value = true;
-  nextTick(scrollBottom);
-}
+// 输入区点击"回到最新"后滚到底部
+watch(
+  () => chat.scrollNonce,
+  () => nextTick(scrollBottom),
+);
 
 const suggestions = [
   { icon: "doc", label: "知识库中有什么内容？" },
@@ -59,7 +103,7 @@ function ask(q: string) {
   <div ref="listRef" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="onScroll">
     <div
       v-if="chat.historyError"
-      class="mx-auto mt-4 max-w-[760px] rounded-lg bg-err/10 px-3 py-2 text-[12.5px] text-err"
+      class="content-col mt-4 rounded-lg bg-err/10 py-2 text-xs text-err"
     >
       {{ chat.historyError }}
     </div>
@@ -67,7 +111,7 @@ function ask(q: string) {
     <!-- 欢迎页 -->
     <div
       v-if="!chat.messages.length"
-      class="mx-auto flex h-full max-w-[620px] flex-col justify-center px-6 pb-24"
+      class="mx-auto flex h-full max-w-[620px] flex-col justify-center px-4 pb-24 sm:px-6"
     >
       <div class="flex flex-col items-center text-center">
         <div
@@ -75,8 +119,8 @@ function ask(q: string) {
         >
           <Icon name="agents" :size="22" />
         </div>
-        <h2 class="mb-1.5 text-[19px] font-semibold tracking-tight">Multi-Agent 助手</h2>
-        <p class="mb-8 max-w-[380px] text-[13px] leading-relaxed text-ink-dim">
+        <h2 class="mb-1.5 text-xl font-semibold tracking-tight">Multi-Agent 助手</h2>
+        <p class="mb-8 max-w-[380px] text-sm leading-relaxed text-ink-dim">
           Supervisor 智能编排，自动路由到知识库、数据库与联网搜索等专业 Agent
         </p>
       </div>
@@ -85,7 +129,7 @@ function ask(q: string) {
         <button
           v-for="s in suggestions"
           :key="s.label"
-          class="group flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left text-[13px] text-ink-dim transition hover:border-line hover:bg-surface-2 hover:text-ink"
+          class="group flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left text-sm text-ink-dim transition hover:border-line hover:bg-surface-2 hover:text-ink"
           @click="ask(s.label)"
         >
           <Icon
@@ -104,17 +148,15 @@ function ask(q: string) {
     </div>
 
     <!-- 消息列表（底部留白给悬浮输入框） -->
-    <div v-else class="mx-auto flex max-w-[760px] flex-col gap-1 px-6 pb-32 pt-6">
-      <MessageItem v-for="m in chat.messages" :key="m.id" :msg="m" />
+    <div v-else class="content-col flex flex-col gap-1 pb-32 pt-6">
+      <template v-for="(m, i) in chat.messages" :key="m.id">
+        <div v-if="i === dividerIndex" class="my-2 flex items-center gap-2" data-new-divider>
+          <span class="h-px flex-1 bg-accent/40" />
+          <span class="text-2xs text-accent">以下为新消息</span>
+          <span class="h-px flex-1 bg-accent/40" />
+        </div>
+        <MessageItem :msg="m" />
+      </template>
     </div>
-
-    <button
-      v-if="!stickToBottom"
-      class="sticky bottom-28 left-1/2 z-10 flex h-8 -translate-x-1/2 items-center gap-1 rounded-full border border-line-2 bg-surface px-3 text-[11.5px] text-ink-dim shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition hover:border-accent/50 hover:text-ink"
-      @click="jumpToBottom"
-    >
-      <Icon name="chevron" :size="12" class="rotate-180" />
-      回到最新
-    </button>
   </div>
 </template>

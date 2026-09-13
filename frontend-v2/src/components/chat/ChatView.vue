@@ -20,6 +20,8 @@ const TaskAgentModal = defineAsyncComponent(
 const sessions = useSessionsStore();
 const taskAgent = useTaskAgentStore();
 const ui = useDialogStore();
+const props = defineProps<{ showMenu?: boolean }>();
+const emit = defineEmits<{ menu: [] }>();
 const showStats = ref(false);
 const showTasks = ref(false);
 const showTimeTravel = ref(false);
@@ -43,6 +45,8 @@ async function exportSession() {
 <template>
   <main class="relative flex min-w-0 flex-1 flex-col">
     <ChatHeader
+      :show-menu="props.showMenu"
+      @menu="emit('menu')"
       @stats="showStats = true"
       @tasks="showTasks = true"
       @agenttask="taskAgent.openModal()"

@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useThrottleFn } from "@vueuse/core";
 import { useChatStore, type ChatMsg } from "@/stores/chat";
 import { md } from "@/utils/markdown";
+import {
+  decorateCitations,
+  decorateMarkdown,
+  handleCodeCopyClick,
+  highlightSourceChip,
+  syncTypingCaret,
+} from "@/utils/markdownEnhance";
 import { useAuthStore } from "@/stores/auth";
 import { useDialogStore } from "@/stores/dialog";
 import { docsApi } from "@/api";
 import OrbitFlow from "./OrbitFlow.vue";
+import SourcePreview from "./SourcePreview.vue";
 import Icon from "@/components/common/Icon.vue";
+import Tooltip from "@/components/common/Tooltip.vue";
 import { avatarColor } from "@/utils/avatar";
+import { sourceName, sourceTitle } from "@/utils/sources";
 
 const props = defineProps<{ msg: ChatMsg }>();
 const chat = useChatStore();
@@ -17,7 +27,13 @@ const ui = useDialogStore();
 
 const userInitial = computed(() => (auth.user?.username || "我").slice(0, 1).toUpperCase());
 
+/** 消息时间只显示时分，例如 14:32 */
+function timeLabel(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 const html = ref("");
+const bodyRef = ref<HTMLElement | null>(null);
 const render = useThrottleFn(
   () => {
     html.value = props.msg.streaming
@@ -28,8 +44,54 @@ const render = useThrottleFn(
   true,
 );
 watch(() => [props.msg.content, props.msg.streaming], render, { immediate: true });
+// v-html 重建 DOM 后补上代码块复制按钮与表格滚动容器。
+// 首次渲染时 html 已在 setup 期间赋值（watch 注册晚于赋值），所以用 onMounted 兜底。
+onMounted(() => {
+  decorateMarkdown(bodyRef.value);
+  decorateCitations(bodyRef.value, props.msg.sources?.length ?? 0);
+  syncTypingCaret(bodyRef.value, !!props.msg.streaming);
+});
+watch(
+  html,
+  () => {
+    decorateMarkdown(bodyRef.value);
+    decorateCitations(bodyRef.value, props.msg.sources?.length ?? 0);
+    syncTypingCaret(bodyRef.value, !!props.msg.streaming);
+  },
+  { flush: "post" },
+);
+// 来源列表变化（流式补发来源）后重新标注引用编号
+watch(
+  () => props.msg.sources?.length ?? 0,
+  (count) => decorateCitations(bodyRef.value, count),
+  { flush: "post" },
+);
+// 流式结束：移除光标（它现在在最后一段内部，不移除会留在正文里）
+watch(
+  () => props.msg.streaming,
+  (now) => syncTypingCaret(bodyRef.value, !!now),
+  { flush: "post" },
+);
+
+async function onMarkdownClick(e: MouseEvent) {
+  if (await handleCodeCopyClick(e.target)) return;
+  const target = e.target as HTMLElement | null;
+  const cite = target?.closest<HTMLElement>("[data-cite]");
+  if (cite?.dataset.cite) highlightSourceChip(bodyRef.value, Number(cite.dataset.cite));
+}
+
+/** 用户气泡里的 Markdown 同样补增强（可能粘贴代码块） */
+const userBodyRef = ref<HTMLElement | null>(null);
+onMounted(() => decorateMarkdown(userBodyRef.value));
+watch(
+  () => props.msg.content,
+  () => decorateMarkdown(userBodyRef.value),
+  { flush: "post" },
+);
 
 const copied = ref(false);
+// 引用溯源：点击来源在应用内预览（原始文件仍可另存/新标签打开）
+const previewSource = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | null = null;
 async function copyMsg() {
   try {
@@ -77,7 +139,7 @@ async function deleteMsg() {
   >
     <!-- 头像 -->
     <div
-      class="mt-0.5 grid h-7 w-7 flex-shrink-0 place-items-center rounded-full text-[11px]"
+      class="mt-0.5 grid h-7 w-7 flex-shrink-0 place-items-center rounded-full text-2xs"
       :class="
         msg.role === 'user'
           ? avatarColor(auth.user).bg + ' font-semibold ' + avatarColor(auth.user).text
@@ -93,7 +155,7 @@ async function deleteMsg() {
       <!-- 用户消息 -->
       <div
         v-if="msg.role === 'user'"
-        class="group/user relative rounded-2xl rounded-tr-md border px-4 py-2.5 text-[13.5px] leading-relaxed transition"
+        class="group/user relative rounded-2xl rounded-tr-md border px-4 py-2.5 text-base leading-relaxed transition"
         :class="editing ? 'border-accent/40 bg-surface' : 'border-line bg-surface-2'"
       >
         <!-- 编辑态：就地改写问题 -->
@@ -101,19 +163,19 @@ async function deleteMsg() {
           <textarea
             v-model="editText"
             rows="3"
-            class="w-full resize-y rounded-xl border border-line-2 bg-surface px-3.5 py-2.5 text-[13.5px] leading-relaxed text-ink outline-none transition placeholder:text-ink-faint/70 focus:border-accent focus:ring-2 focus:ring-accent/15"
+            class="w-full resize-y rounded-xl border border-line-2 bg-surface px-3.5 py-2.5 text-base leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
           />
           <div class="mt-2.5 flex items-center justify-between gap-2">
-            <span class="text-[11px] text-ink-faint">修改后将从此处重新生成回复</span>
+            <span class="text-2xs text-ink-faint">修改后将从此处重新生成回复</span>
             <div class="flex gap-2">
               <button
-                class="h-8 rounded-lg border border-line-2 px-3.5 text-[12.5px] text-ink-dim transition hover:border-line hover:text-ink active:scale-[0.98]"
+                class="h-8 rounded-lg border border-line-2 px-3.5 text-xs text-ink-dim transition hover:border-line hover:text-ink active:scale-[0.98]"
                 @click="cancelEdit"
               >
                 取消
               </button>
               <button
-                class="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-[12.5px] font-medium text-white transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                class="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-xs font-medium text-white transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="chat.sending || !editText.trim()"
                 @click="saveEdit"
               >
@@ -125,37 +187,53 @@ async function deleteMsg() {
         </template>
         <!-- 普通态：内容 + hover 编辑/删除按钮 -->
         <template v-else>
-          <div class="md" v-html="md.render(msg.content)" />
+          <div
+            ref="userBodyRef"
+            class="md"
+            v-html="md.render(msg.content)"
+            @click="onMarkdownClick"
+          />
+          <span
+            v-if="msg.createdAt"
+            class="msg-stamp pointer-events-none absolute -bottom-4 right-1 text-2xs tabular-nums text-ink-faint"
+          >
+            {{ timeLabel(msg.createdAt) }}
+          </span>
           <div
             v-if="!chat.sending"
             class="absolute -left-8 top-0.5 flex flex-col gap-0.5 opacity-0 transition group-hover/user:opacity-100"
           >
-            <button
-              class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
-              title="编辑并重新发送"
-              @click="startEdit"
-            >
-              <Icon name="edit" :size="13" />
-            </button>
-            <button
-              class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err"
-              title="删除消息"
-              @click="deleteMsg"
-            >
-              <Icon name="trash" :size="13" />
-            </button>
+            <Tooltip label="编辑并重新发送">
+              <button
+                class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
+                aria-label="编辑并重新发送"
+                @click="startEdit"
+              >
+                <Icon name="edit" :size="13" />
+              </button>
+            </Tooltip>
+            <Tooltip label="删除消息">
+              <button
+                class="grid h-6 w-6 place-items-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err"
+                aria-label="删除消息"
+                @click="deleteMsg"
+              >
+                <Icon name="trash" :size="13" />
+              </button>
+            </Tooltip>
           </div>
         </template>
       </div>
 
       <!-- 助手消息 -->
       <div v-else class="flex flex-col gap-1">
-        <div class="rounded-2xl rounded-tl-md px-0.5 text-[13.5px] leading-[1.7] text-ink">
+        <div class="rounded-2xl rounded-tl-md px-0.5 text-base leading-[1.7] text-ink">
           <div
             v-if="msg.content || msg.streaming"
+            ref="bodyRef"
             class="md"
-            :class="{ 'typing-caret': msg.streaming }"
             v-html="html"
+            @click="onMarkdownClick"
           />
           <div v-else class="text-ink-faint">正在思考…</div>
         </div>
@@ -165,19 +243,19 @@ async function deleteMsg() {
           v-if="msg.hitl"
           class="mt-1.5 max-w-[520px] rounded-xl border border-warn/25 bg-warn/5 p-3.5"
         >
-          <div class="mb-2.5 flex items-start gap-2 text-[13px] text-ink">
+          <div class="mb-2.5 flex items-start gap-2 text-sm text-ink">
             <Icon name="warn" :size="15" class="mt-0.5 flex-shrink-0 text-warn" />
             <span>{{ msg.hitl.question }}</span>
           </div>
           <div class="flex gap-2">
             <button
-              class="rounded-lg bg-ok px-3.5 py-1.5 text-[12px] font-medium text-white transition hover:brightness-110"
+              class="rounded-lg bg-ok px-3.5 py-1.5 text-xs font-medium text-white transition hover:brightness-110"
               @click="confirmHitl('confirmed')"
             >
               确认执行
             </button>
             <button
-              class="rounded-lg border border-line-2 px-3.5 py-1.5 text-[12px] text-ink-dim transition hover:border-err/50 hover:text-err"
+              class="rounded-lg border border-line-2 px-3.5 py-1.5 text-xs text-ink-dim transition hover:border-err/50 hover:text-err"
               @click="confirmHitl('cancelled')"
             >
               取消
@@ -190,48 +268,66 @@ async function deleteMsg() {
 
         <!-- 引用溯源：RAG 检索命中的文档来源 -->
         <div v-if="msg.sources?.length" class="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <span class="text-[10.5px] text-ink-faint">来源</span>
+          <span class="text-2xs text-ink-faint">来源 {{ msg.sources.length }}</span>
           <a
             v-for="(s, i) in msg.sources"
             :key="i"
-            :href="docsApi.fileUrl(s)"
+            :data-source-index="i + 1"
+            :href="docsApi.fileUrl(s.path)"
             target="_blank"
             rel="noreferrer"
-            class="max-w-[200px] truncate rounded-full border border-line-2 px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:border-accent/50 hover:text-accent"
-            :title="s"
+            class="max-w-[200px] truncate rounded-full border border-line-2 px-2 py-0.5 text-2xs text-ink-dim transition hover:border-accent/50 hover:text-accent"
+            :title="sourceTitle(s)"
+            @click.prevent="previewSource = s.path"
           >
-            {{ s.split("/").pop() }}
+            {{ sourceName(s.path) }}
+            <!-- 命中多段才标数量，避免噪音 -->
+            <span v-if="s.hits && s.hits > 1" class="ml-1 text-ink-faint">×{{ s.hits }}</span>
           </a>
         </div>
 
         <!-- 操作按钮：复制 / 重新生成 -->
-        <div v-if="!msg.streaming && msg.content" class="mt-1 flex items-center gap-0.5">
-          <button
-            class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
-            :title="copied ? '已复制' : '复制'"
-            @click="copyMsg"
-          >
-            <Icon :name="copied ? 'check' : 'copy'" :size="13" :class="copied ? 'text-ok' : ''" />
-          </button>
-          <button
-            v-if="!msg.hitl"
-            class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-            title="重新生成"
-            :disabled="chat.sending"
-            @click="chat.retry(msg)"
-          >
-            <Icon name="refresh" :size="13" />
-          </button>
-          <button
-            class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err disabled:cursor-not-allowed disabled:opacity-40"
-            title="删除消息"
-            :disabled="chat.sending"
-            @click="deleteMsg"
-          >
-            <Icon name="trash" :size="13" />
-          </button>
+        <!-- hover 或键盘聚焦时出现；触屏没有 hover，常显（见 style.css 的 .msg-actions） -->
+        <div
+          v-if="!msg.streaming && msg.content"
+          class="msg-actions mt-1 flex items-center gap-0.5"
+        >
+          <span v-if="msg.createdAt" class="mr-1 text-2xs tabular-nums text-ink-faint">
+            {{ timeLabel(msg.createdAt) }}
+          </span>
+          <Tooltip :label="copied ? '已复制' : '复制'">
+            <button
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+              :aria-label="copied ? '已复制' : '复制'"
+              @click="copyMsg"
+            >
+              <Icon :name="copied ? 'check' : 'copy'" :size="13" :class="copied ? 'text-ok' : ''" />
+            </button>
+          </Tooltip>
+          <Tooltip v-if="!msg.hitl" label="重新生成">
+            <button
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="重新生成"
+              :disabled="chat.sending"
+              @click="chat.retry(msg)"
+            >
+              <Icon name="refresh" :size="13" />
+            </button>
+          </Tooltip>
+          <Tooltip label="删除消息">
+            <button
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-err/10 hover:text-err disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="删除消息"
+              :disabled="chat.sending"
+              @click="deleteMsg"
+            >
+              <Icon name="trash" :size="13" />
+            </button>
+          </Tooltip>
         </div>
       </div>
     </div>
+
+    <SourcePreview v-if="previewSource" :source="previewSource" @close="previewSource = ''" />
   </div>
 </template>

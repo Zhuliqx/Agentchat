@@ -123,10 +123,13 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
                 docs = _front_load(docs)
             if not docs:
                 return "知识库中没有检索到相关内容。"
-            sources: list[str] = []
-            parts = []
+            # 按来源分组编号（【来源 N】）：模型引用 [n] 时与前端来源列表一一对应
+            order: list[str] = []
+            grouped: dict[str, list[str]] = {}
+            orphans: list[str] = []  # 没有 source 元数据的片段：仍给模型，但不可引用
+            hits: dict[str, int] = {}
             dropped = 0
-            for i, d in enumerate(docs, 1):
+            for d in docs:
                 src = d.metadata.get("source", "")
                 detected, pats = detect_injection(d.page_content)
                 if detected:
@@ -136,12 +139,23 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
                         user, src, pats,
                     )
                     continue
-                name = Path(src).name if src else ""
-                if src and src not in sources:
-                    sources.append(src)
-                parts.append(f"[{i}] 来源: {name}\n{wrap_as_data(d.page_content)}")
-            # 记录最近检索来源（供引用溯源）
-            _record_rag_sources(getattr(rt.context, "run_id", "") or "", sources)
+                if not src:
+                    orphans.append(wrap_as_data(d.page_content))
+                    continue
+                if src not in grouped:
+                    grouped[src] = []
+                    order.append(src)
+                grouped[src].append(wrap_as_data(d.page_content))
+                # 命中片段数：同一个文档被检索到多段时累加（片段级计数）
+                hits[src] = hits.get(src, 0) + 1
+            # 记录最近检索来源与命中片段数（供引用溯源）
+            _record_rag_sources(getattr(rt.context, "run_id", "") or "", hits.items())
+            parts = [
+                f"【来源 {i}】{Path(src).name}\n" + "\n".join(grouped[src])
+                for i, src in enumerate(order, 1)
+            ]
+            if orphans:
+                parts.append("【来源 未知】\n" + "\n".join(orphans))
             if not parts:
                 if dropped:
                     return "知识库检索结果经安全过滤后无可用内容。"
