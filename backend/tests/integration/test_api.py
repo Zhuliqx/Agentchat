@@ -68,6 +68,8 @@ def test_sessions_crud(client):
     sid = r.json()["id"]
     # 列表包含
     assert any(s["id"] == sid for s in client.get("/api/sessions").json())
+    # 默认返回全部（侧栏不设上限）；显式传 limit 时才分页
+    assert len(client.get("/api/sessions?limit=1").json()) == 1
     # 重命名
     r = client.patch(f"/api/sessions/{sid}", json={"title": "集成测试会话"})
     assert r.status_code == 200 and r.json()["title"] == "集成测试会话"
@@ -85,6 +87,26 @@ def test_sessions_batch_delete(client):
     assert r.json() == {"deleted": 3, "requested": 3}
     left = {s["id"] for s in client.get("/api/sessions").json()}
     assert not (set(ids) & left)
+
+
+def test_session_pin_keeps_updated_at(client):
+    """置顶/取消置顶不是内容更新：不刷新 updated_at，取消后能回到原位。"""
+    ids = [client.post("/api/sessions").json()["id"] for _ in range(3)]
+    before = {s["id"]: s for s in client.get("/api/sessions").json()}
+    order = list(before)
+    target = ids[2]
+
+    client.patch(f"/api/sessions/{target}", json={"pinned": True})
+    assert client.get("/api/sessions").json()[0]["id"] == target
+
+    r = client.patch(f"/api/sessions/{target}", json={"pinned": False})
+    assert r.status_code == 200
+    assert r.json()["updated_at"] == before[target]["updated_at"]
+    after = [s["id"] for s in client.get("/api/sessions").json()]
+    assert after.index(target) == order.index(target)
+
+    for sid in ids:
+        client.delete(f"/api/sessions/{sid}")
 
 
 # ---------------- 长期记忆 ----------------

@@ -101,7 +101,10 @@ def build_supervisor_prompt(
         )
         rn += 1
     if use_search:
-        rules.append(f"{rn}. 需要实时资讯/最新信息/新闻 -> 调用 web_search。")
+        rules.append(
+            f"{rn}. 需要实时资讯/最新信息/新闻 -> 调用 web_search。搜索结果里的 [n] 编号"
+            "只用于你定位来源，回答正文不要输出 [n] 编号（编号与来源列表联动只对知识库来源生效）。"
+        )
         rn += 1
     else:
         rules.append(

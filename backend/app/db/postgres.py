@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from app.config import BASE_DIR, settings
@@ -213,24 +213,40 @@ def get_owned_session(session_id: str, user_id: str) -> Session | None:
         return s if s and s.user_id == user_id else None
 
 
-def list_sessions(user_id: str | None = None, limit: int = 50) -> list[Session]:
+def list_sessions(
+    user_id: str | None = None, limit: int | None = None, offset: int = 0
+) -> list[Session]:
     with SessionLocal() as db:
         stmt = select(Session).order_by(
             Session.pinned.desc(), Session.updated_at.desc()
         )
         if user_id:
             stmt = stmt.where(Session.user_id == user_id)
-        stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return list(db.scalars(stmt))
 
 
 def rename_session(
     session_id: str, title: str | None = None, pinned: bool | None = None
 ) -> Session | None:
+    """重命名 / 置顶。置顶不算内容更新：显式写回原 updated_at，
+    否则列表（按 updated_at 倒序）会把取消置顶的会话顶到最前，回不到原位。"""
     with SessionLocal() as db:
         s = db.get(Session, session_id)
         if not s:
             return None
+        if title is None and pinned is not None:
+            db.execute(
+                update(Session)
+                .where(Session.id == session_id)
+                .values(pinned=pinned, updated_at=Session.updated_at)
+            )
+            db.commit()
+            db.refresh(s)
+            return s
         if title is not None:
             s.title = title
         if pinned is not None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.agents.graph import list_checkpoint_history
@@ -87,8 +87,16 @@ def _owned_or_404(session_id: str, user_id: str):
 
 
 @router.get("", response_model=list[SessionOut])
-def list_sessions(user_id: str = Depends(get_current_user_id)):
-    return [_session_out(s) for s in postgres.list_sessions(user_id=user_id)]
+def list_sessions(
+    limit: int | None = Query(None, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(get_current_user_id),
+):
+    """默认返回该用户全部会话（侧栏不设显示上限）；传 limit 时才分页。"""
+    return [
+        _session_out(s)
+        for s in postgres.list_sessions(user_id=user_id, limit=limit, offset=offset)
+    ]
 
 
 @router.post("", response_model=SessionOut, status_code=201)

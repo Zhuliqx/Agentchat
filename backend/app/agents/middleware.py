@@ -4,13 +4,6 @@
 - 超时：防止单个模型调用卡死（asyncio 超时中断）
 - 日志：记录每次模型调用耗时，便于观测
 
-> 重试职责不在此层：LLM 客户端已自带网络层重试（`LLM_MAX_RETRIES`），
-> 子 Agent 整体失败由 `agent_to_tool` 重试（`SUBAGENT_RETRIES`）。
-> 三层重试叠加会指数放大失败请求数，故本中间件只做「超时 + 日志」。
-
-用法：作为 `create_agent(..., middleware=[resilience_middleware()])` 传入，
-supervisor 与各子 Agent 共享同一套容错策略。
-
 重试层级（每层只管一种失败面，新增重试前先对照，避免叠成指数放大）：
 1. LLM 客户端网络重试：`LLM_MAX_RETRIES`（ChatOpenAI 等 SDK 内建，管 5xx/限流/连接）；
 2. 本中间件（resilience）：只做超时 + 日志，**不重试**——职责是防卡死而非重试；
@@ -18,6 +11,9 @@ supervisor 与各子 Agent 共享同一套容错策略。
 4. task-agent `_HostExecutor`：空答案双次尝试（防上游偶发空响应，不重复计步）；
 5. task-agent 节点级：`llm_text` 空响应重试、replan/verify 解析级重试、
    图节点 `RetryPolicy` + `error_handler`（瞬时错误重试，耗尽后降级）。
+
+用法：作为 `create_agent(..., middleware=[resilience_middleware()])` 传入，
+supervisor 与各子 Agent 共享同一套容错策略。
 """
 from __future__ import annotations
 
