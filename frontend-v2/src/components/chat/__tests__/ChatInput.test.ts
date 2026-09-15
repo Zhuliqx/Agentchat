@@ -88,4 +88,27 @@ describe("ChatInput 能力开关", () => {
     expect(branchSend).toHaveBeenCalledWith("新的追问");
     wrapper.unmount();
   });
+
+  it("快捷键：空输入按 ↑ 请求编辑上一条，Esc 停止生成", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const chat = useChatStore();
+    chat.messages = [
+      { id: "u1", role: "user", content: "上一条问题" },
+      { id: "a1", role: "assistant", content: "回答" },
+    ];
+    const wrapper = mount(ChatInput, {
+      global: { plugins: [pinia], stubs: { teleport: true } },
+    });
+
+    await wrapper.find("textarea").trigger("keydown", { key: "ArrowUp" });
+    expect(chat.editRequest?.msgId).toBe("u1");
+
+    const abort = vi.fn();
+    chat.sending = true;
+    chat.abortController = { abort } as unknown as AbortController;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(abort).toHaveBeenCalled();
+    wrapper.unmount();
+  });
 });

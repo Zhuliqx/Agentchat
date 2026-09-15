@@ -11,6 +11,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useSessionsStore } from "@/stores/sessions";
 import { useDocsStore } from "@/stores/docs";
 import { useMemoryStore } from "@/stores/memory";
+import { useChatStore } from "@/stores/chat";
 import { clampSidebarWidth } from "@/utils/sidebarLayout";
 import { bootstrapActiveSession } from "@/composables/useSessionBootstrap";
 
@@ -21,6 +22,7 @@ const auth = useAuthStore();
 const sessions = useSessionsStore();
 const docs = useDocsStore();
 const memory = useMemoryStore();
+const chat = useChatStore();
 
 const healthOk = ref(false);
 const healthText = ref("检查中…");
@@ -86,6 +88,8 @@ onMounted(async () => {
     auth.loadCapabilities();
     auth.openAuth("login");
   });
+  // 首屏在"选中会话 + 历史到达"之前保持加载骨架：否则会先闪一下欢迎页再变成历史
+  chat.historyLoading = true;
   await Promise.all([auth.init(), auth.loadCapabilities()]);
   refreshHealth();
   await Promise.all([sessions.load(), docs.load(), memory.load()]);
@@ -94,6 +98,7 @@ onMounted(async () => {
   } catch (e) {
     // 后端不可达时连"新建会话"也会失败：交给顶部告警条提示，避免未捕获的 promise
     sessions.error = (e as Error).message || "初始化会话失败";
+    chat.historyLoading = false; // 拉不到会话时收起骨架，让告警条 + 欢迎页可见
   }
 });
 </script>

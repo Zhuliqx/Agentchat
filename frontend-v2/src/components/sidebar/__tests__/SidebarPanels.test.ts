@@ -3,6 +3,8 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick, ref } from "vue";
 import Sidebar from "@/components/Sidebar.vue";
+import { useDocsStore } from "@/stores/docs";
+import { useMemoryStore } from "@/stores/memory";
 
 vi.mock("@/api", () => ({
   searchApi: { search: vi.fn() },
@@ -142,6 +144,28 @@ describe("Sidebar 面板高度", () => {
 
     expect(list().attributes("style")).toContain("max-height: 0px");
   });
+
+  it("文档/记忆加载中显示骨架而不是「暂无」", async () => {
+    const wrapper = mountSidebar();
+    const docs = useDocsStore();
+    const memory = useMemoryStore();
+
+    docs.loading = true;
+    memory.loading = true;
+    await nextTick();
+
+    expect(wrapper.text()).not.toContain("暂无文档");
+    expect(wrapper.text()).not.toContain("暂无记忆");
+    expect(wrapper.findAll(".animate-pulse").length).toBeGreaterThan(0);
+
+    docs.loading = false;
+    memory.loading = false;
+    await nextTick();
+
+    expect(wrapper.text()).toContain("暂无文档");
+    expect(wrapper.text()).toContain("暂无记忆");
+    wrapper.unmount();
+  });
 });
 
 describe("Sidebar 抽屉形态", () => {
@@ -150,5 +174,20 @@ describe("Sidebar 抽屉形态", () => {
 
     expect(wrapper.find("aside").classes()).toContain("fixed");
     expect(wrapper.find('[title="拖拽调整宽度"]').exists()).toBe(false);
+  });
+});
+
+describe("Sidebar 快捷键", () => {
+  it("Ctrl+K 聚焦会话搜索框", async () => {
+    const wrapper = mountSidebar();
+    const input = wrapper.find('input[placeholder="搜索会话与消息…"]').element as HTMLInputElement;
+    const focusSpy = vi.spyOn(input, "focus");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await nextTick();
+
+    // jsdom 不实现布局/真实焦点，这里断言"快捷键确实调用了聚焦"
+    expect(focusSpy).toHaveBeenCalled();
+    wrapper.unmount();
   });
 });

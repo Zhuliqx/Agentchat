@@ -6,6 +6,7 @@ import { useDialogStore } from "@/stores/dialog";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Icon from "@/components/common/Icon.vue";
 import Modal from "@/components/common/Modal.vue";
+import Skeleton from "@/components/common/Skeleton.vue";
 
 interface UploadItem {
   taskId: string;
@@ -53,8 +54,12 @@ function toggleAll() {
 async function removeSelected() {
   if (!selected.value.size) return;
   if (!(await ui.confirm(`确定从知识库删除选中的 ${selected.value.size} 个文档？`))) return;
-  await docs.removeMany(Array.from(selected.value));
-  selected.value = new Set();
+  try {
+    await docs.removeMany(Array.from(selected.value));
+    selected.value = new Set();
+  } catch (e) {
+    await ui.alertError("批量删除失败", e);
+  }
 }
 
 async function onFiles(e: Event) {
@@ -63,7 +68,7 @@ async function onFiles(e: Event) {
   try {
     await startUpload(Array.from(files));
   } catch (err) {
-    await ui.alert(String((err as Error).message));
+    await ui.alertError("上传失败", err);
   }
 }
 
@@ -141,7 +146,7 @@ async function onDrop(e: DragEvent) {
   try {
     await startUpload(Array.from(files));
   } catch (err) {
-    await ui.alert(String((err as Error).message));
+    await ui.alertError("上传失败", err);
   }
 }
 
@@ -187,7 +192,7 @@ async function showDoc(source: string, filename: string) {
     const p = await docsApi.preview(source);
     preview.value = { title: filename, open: true, text: p.text, binary: p.binary, source };
   } catch (err) {
-    await ui.alert(String((err as Error).message));
+    await ui.alertError("打开文档失败", err);
   }
 }
 
@@ -200,13 +205,21 @@ function copyText(t: string) {
 
 async function remove(source: string) {
   if (!(await ui.confirm("确定从知识库删除该文档？"))) return;
-  await docs.remove(source);
+  try {
+    await docs.remove(source);
+  } catch (e) {
+    await ui.alertError("删除文档失败", e);
+  }
 }
 
 async function editTag(d: { source: string; tag?: string | null }) {
   const input = await ui.prompt("设置文档标签（留空或取消可清除）：", d.tag || "");
   if (input === null) return; // 取消
-  await docs.setTag(d.source, input.trim() || null);
+  try {
+    await docs.setTag(d.source, input.trim() || null);
+  } catch (e) {
+    await ui.alertError("设置标签失败", e);
+  }
 }
 </script>
 
@@ -261,7 +274,7 @@ async function editTag(d: { source: string; tag?: string | null }) {
       <div class="flex flex-col gap-px">
         <div class="mb-0.5 flex items-center justify-between px-1">
           <button
-            class="text-2xs text-ink-faint transition hover:text-accent"
+            class="text-2xs text-ink-faint transition hover:text-accent coarse:grid coarse:h-8 coarse:min-w-8 coarse:place-items-center"
             @click="toggleSelectMode"
           >
             {{ selecting ? "完成" : "多选" }}
@@ -296,7 +309,7 @@ async function editTag(d: { source: string; tag?: string | null }) {
           <span class="flex-shrink-0 text-2xs text-ink-faint">{{ d.chunks }}</span>
           <button
             v-if="!selecting"
-            class="flex-shrink-0 rounded-full px-1.5 py-px text-2xs transition"
+            class="flex-shrink-0 rounded-full px-1.5 py-px text-2xs transition coarse:min-h-8 coarse:px-2.5 coarse:py-1.5"
             :class="
               d.tag
                 ? 'border border-accent/40 text-accent hover:border-accent'
@@ -331,6 +344,10 @@ async function editTag(d: { source: string; tag?: string | null }) {
           </button>
         </div>
       </div>
+    </div>
+    <div v-else-if="docs.loading" class="px-0.5 pt-0.5">
+      <Skeleton :rows="3" />
+      <span class="sr-only">正在加载文档…</span>
     </div>
     <EmptyState v-else text="暂无文档" />
 

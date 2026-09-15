@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import ChatHeader from "@/components/chat/ChatHeader.vue";
+import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 import { useSessionsStore } from "@/stores/sessions";
 
@@ -55,5 +56,36 @@ describe("ChatHeader", () => {
 
     expect(wrapper.text()).toContain("2 条消息");
     expect(wrapper.text()).toContain("3 分钟前更新");
+  });
+
+  it("窄屏：操作收进 ⋯ 菜单，点击条目触发对应事件", async () => {
+    const wrapper = mountHeader();
+
+    // 桌面端图标组仍在 DOM 里（由 sm: 断点控制显隐），另有窄屏专用入口
+    const trigger = wrapper.find('[data-testid="header-more"]');
+    expect(trigger.exists()).toBe(true);
+    expect(wrapper.find('[data-testid="header-more-item"]').exists()).toBe(false);
+
+    await trigger.trigger("click");
+    const items = wrapper.findAll('[data-testid="header-more-item"]');
+    expect(items.map((i) => i.text())).toEqual([
+      "导出为 Markdown",
+      "会话数据分析",
+      "定时任务",
+      "自主任务 Agent",
+    ]);
+
+    await items[1].trigger("click");
+    expect(wrapper.emitted("stats")).toHaveLength(1);
+    // 点击后菜单关闭
+    expect(wrapper.find('[data-testid="header-more-item"]').exists()).toBe(false);
+
+    // 非平台操作员：定时任务条目不出现
+    useAuthStore().platformOperator = false;
+    await nextTick();
+    await trigger.trigger("click");
+    expect(wrapper.findAll('[data-testid="header-more-item"]').map((i) => i.text())).not.toContain(
+      "定时任务",
+    );
   });
 });

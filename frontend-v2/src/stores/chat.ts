@@ -59,6 +59,8 @@ export const useChatStore = defineStore("chat", {
     abortController: null as AbortController | null,
     historySeq: 0,
     historyError: null as string | null,
+    /** 会话历史加载中：用于显示骨架，避免先闪一下欢迎页 */
+    historyLoading: false,
     // HITL：interrupt 时记录所在消息 id，确认后在同一个气泡/轨道内继续
     hitlMsgId: null as string | null,
     // 分支点：发送下一条消息前先删除它之后的历史（点击"从这里分支"写入）
@@ -71,6 +73,8 @@ export const useChatStore = defineStore("chat", {
     unseenBase: 0,
     /** 自增计数：输入区点击"回到最新"时通知列表滚到底部 */
     scrollNonce: 0,
+    /** ↑ 唤起编辑：请求某条消息进入编辑态（nonce 保证连续两次也能触发） */
+    editRequest: null as { msgId: string; nonce: number } | null,
   }),
   getters: {
     lastAssistant: (s): ChatMsg | null => {
@@ -116,25 +120,27 @@ export const useChatStore = defineStore("chat", {
       this.messages = [];
       this.historyError = null;
       this.branchFrom = null;
-      let msgs: Message[];
+      this.historyLoading = true;
       try {
-        msgs = await sessionsApi.history(sessionId);
+        const msgs: Message[] = await sessionsApi.history(sessionId);
+        if (seq !== this.historySeq) return; // 已被更晚的会话切换取代
+        msgs.forEach((m: Message) => {
+          this.messages.push({
+            id: nid(),
+            backendId: m.id,
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.content,
+            sources: normalizeSources(m.sources),
+            createdAt: m.created_at,
+          });
+        });
       } catch (e) {
         if (seq !== this.historySeq) return;
         this.historyError = (e as Error).message || "加载会话失败";
-        return;
+      } finally {
+        // 只有仍是"最新一次加载"时才收起骨架，避免旧请求提前结束新请求的加载态
+        if (seq === this.historySeq) this.historyLoading = false;
       }
-      if (seq !== this.historySeq) return; // 已被更晚的会话切换取代
-      msgs.forEach((m: Message) => {
-        this.messages.push({
-          id: nid(),
-          backendId: m.id,
-          role: m.role === "user" ? "user" : "assistant",
-          content: m.content,
-          sources: normalizeSources(m.sources),
-          createdAt: m.created_at,
-        });
-      });
     },
     clear() {
       this._abortStream();
@@ -142,6 +148,7 @@ export const useChatStore = defineStore("chat", {
       this.historyError = null;
       this.hitlMsgId = null;
       this.branchFrom = null;
+      this.historyLoading = false;
     },
 
     /** 切走会话/清空时中止在途流：立即释放 sending，
@@ -161,6 +168,11 @@ export const useChatStore = defineStore("chat", {
         if (this.messages[i].role === "user") return this.messages[i];
       }
       return null;
+    },
+
+    /** 请求某条消息进入编辑态（由消息组件监听并就地展开编辑框） */
+    requestEdit(msg: ChatMsg) {
+      this.editRequest = { msgId: msg.id, nonce: Date.now() };
     },
 
     /** 统一构建 chat/stream 请求 payload。
@@ -389,6 +401,18 @@ export const useChatStore = defineStore("chat", {
             sessionId: (ev.data?.session_id as string) || useSessionsStore().currentId,
           };
           this.hitlMsgId = agentMsg.id;
+          break;
+        }
+        case "error": {
+          // 后端把失败原因放在 error 帧里（超时/处理失败…）。写进正文，
+          // 否则界面只剩"正在思考…"加轨道上的红叉，用户看不到发生了什么。
+          const reason = ev.content || "处理失败";
+          agentMsg.content = agentMsg.content
+            ? `${agentMsg.content}\n\n> ⚠️ ${reason}`
+            : `> ⚠️ ${reason}`;
+          if (!agentMsg.orbit) agentMsg.orbit = [];
+          agentMsg.orbit.forEach((n) => (n.active = false));
+          agentMsg.orbit.push({ type: "error", label: orbitLabel("error", reason) });
           break;
         }
         default: {

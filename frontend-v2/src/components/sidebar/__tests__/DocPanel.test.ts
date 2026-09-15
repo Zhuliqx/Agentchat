@@ -27,6 +27,8 @@ vi.mock("@/api", () => {
 });
 
 import { docsApi } from "@/api";
+import { useDialogStore } from "@/stores/dialog";
+import { useDocsStore } from "@/stores/docs";
 
 const uploadApi = docsApi.upload as unknown as ReturnType<typeof vi.fn>;
 const ingestStatusApi = docsApi.ingestStatus as unknown as ReturnType<typeof vi.fn>;
@@ -121,6 +123,33 @@ describe("DocPanel ingest polling", () => {
 
     expect(ingestStatusApi).toHaveBeenCalledTimes(3);
     expect(listApi).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("删除文档失败时弹出统一错误提示", async () => {
+    const removeApi = docsApi.remove as unknown as ReturnType<typeof vi.fn>;
+    removeApi.mockRejectedValueOnce(new Error("后端不可达"));
+    const docs = useDocsStore();
+    docs.list = [
+      {
+        id: "d1",
+        filename: "a.md",
+        source: "data/kb/a.md",
+        chunks: 1,
+        has_file: true,
+      },
+    ];
+    const wrapper = mount(DocPanel);
+    const ui = useDialogStore();
+
+    await wrapper.find('button[title="删除文档"]').trigger("click");
+    ui.resolve(true); // 确认删除
+    await flushPromises();
+
+    expect(ui.current?.kind).toBe("alert");
+    expect(ui.current?.message).toContain("删除文档失败");
+    expect(ui.current?.message).toContain("后端不可达");
+    ui.resolve(undefined);
     wrapper.unmount();
   });
 });

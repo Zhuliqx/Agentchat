@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useElementSize } from "@vueuse/core";
 import { searchApi } from "@/api";
 import { usePointerDrag } from "@/composables/usePointerDrag";
@@ -46,6 +46,7 @@ const memoryCount = computed(() => memory.list.length);
 
 // ---- 全局搜索（会话标题 + 消息内容，防抖 300ms） ----
 const searchText = ref("");
+const searchInputRef = ref<HTMLInputElement | null>(null);
 const searching = ref(false);
 const searchResults = ref<{
   sessions: { id: string; title: string; pinned?: boolean }[];
@@ -79,6 +80,26 @@ function gotoSession(id: string) {
   searchText.value = "";
   searchResults.value = null;
 }
+
+/** Ctrl/Cmd+K：聚焦会话搜索（侧栏收起时先展开再聚焦） */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "k") return;
+  e.preventDefault();
+  const el = searchInputRef.value;
+  // 侧栏收起时先展开再聚焦（用 open 判断，不依赖布局，测试与真实环境一致）
+  if (props.open !== false) {
+    el?.focus();
+    el?.select();
+    return;
+  }
+  emit("toggle");
+  nextTick(() => {
+    searchInputRef.value?.focus();
+    searchInputRef.value?.select();
+  });
+}
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown));
 
 const folded = ref<Record<string, boolean>>({
   sessions: localStorage.getItem("fold-sessions") === "1",
@@ -121,11 +142,8 @@ let widthCollapsed = false; // 本次拖拽中是否已触发折叠
 
 const startResize = usePointerDrag({
   onStart: () => {
-    // 折叠态从最小宽度起步，并复用"反向拖回自动展开"分支：
-    // 这样在左边缘往右拖一点点就能把侧栏拉出来，不用先拖过 180px 死区
-    const collapsed = props.open === false;
-    widthStartW = collapsed ? SIDEBAR_MIN_WIDTH : (props.width ?? SIDEBAR_DEFAULT_WIDTH);
-    widthCollapsed = collapsed;
+    widthStartW = props.width ?? SIDEBAR_DEFAULT_WIDTH;
+    widthCollapsed = false;
     widthDragging.value = true;
   },
   onMove: (e, ctx) => {
@@ -301,7 +319,7 @@ function resetPanelH(which: "doc" | "mem") {
         </div>
         <Tooltip label="收起侧边栏" placement="bottom">
           <button
-            class="ml-auto grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+            class="ml-auto grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink coarse:h-9 coarse:w-9"
             aria-label="收起侧边栏"
             @click="emit('toggle')"
           >
@@ -313,7 +331,7 @@ function resetPanelH(which: "doc" | "mem") {
       <!-- 新建会话 -->
       <div class="px-3 pb-2">
         <button
-          class="flex w-full items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-3 py-[7px] text-xs font-medium text-ink transition hover:border-accent/50 hover:bg-surface-3"
+          class="flex w-full items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-3 py-[7px] text-xs font-medium text-ink transition hover:border-accent/50 hover:bg-surface-3 coarse:min-h-10"
           @click="newSession"
         >
           <Icon name="plus" :size="14" />
@@ -325,9 +343,10 @@ function resetPanelH(which: "doc" | "mem") {
       <div class="px-3 pb-2">
         <div class="relative">
           <input
+            ref="searchInputRef"
             v-model="searchText"
             type="text"
-            class="h-8 w-full rounded-lg border border-line-2 bg-surface-2 pl-8 pr-2.5 text-xs text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
+            class="h-8 w-full rounded-lg border border-line-2 bg-surface-2 pl-8 pr-2.5 text-xs text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15 coarse:min-h-9"
             placeholder="搜索会话与消息…"
           />
           <Icon
@@ -396,7 +415,7 @@ function resetPanelH(which: "doc" | "mem") {
         <section ref="sessionsAreaRef" class="mb-1 flex min-h-0 flex-1 flex-col">
           <div class="flex items-center gap-1.5 px-1.5 py-1.5">
             <button
-              class="flex items-center gap-1 text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+              class="flex items-center gap-1 text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim coarse:min-h-9"
               @click="toggle('sessions')"
             >
               <Icon
@@ -417,7 +436,7 @@ function resetPanelH(which: "doc" | "mem") {
               placement="bottom"
             >
               <button
-                class="text-ink-faint transition hover:text-ink-dim"
+                class="text-ink-faint transition hover:text-ink-dim coarse:grid coarse:h-9 coarse:w-9 coarse:place-items-center"
                 :aria-label="sessions.batchMode ? '完成' : '多选'"
                 @click="sessions.toggleBatch()"
               >
@@ -443,7 +462,7 @@ function resetPanelH(which: "doc" | "mem") {
           </div>
           <div
             class="sb-panel no-scrollbar min-h-0 flex-1 overflow-y-auto"
-            :class="panelsAnimating ? 'sb-panel--follow' : ''"
+            :class="panelsAnimating || panelDragging ? 'sb-panel--follow' : ''"
             :style="{
               maxHeight: folded.sessions ? '0px' : sessionsAreaH ? sessionsAreaH + 'px' : '100vh',
             }"
@@ -457,23 +476,23 @@ function resetPanelH(which: "doc" | "mem") {
       <div class="flex flex-shrink-0 flex-col gap-1.5 border-t border-line px-2.5 pt-1 pb-1">
         <!-- 知识库文档 -->
         <div class="relative">
-          <!-- 拖拽条紧贴卡片上边框（交接线）：命中区只在线上方 5px——
-               既不越界到上方内容，也不压住卡片标题（折叠按钮）；悬停时线上亮一条细线 -->
+          <!-- 拖拽条骑在卡片上边框上：命中区 6px（上下各 3px），
+               小胶囊居中压在边框线上；折叠时不显示 -->
           <div
             v-if="!folded.docs"
-            class="group absolute inset-x-0 -top-[5px] z-10 h-[5px] cursor-row-resize touch-none select-none"
+            class="group absolute inset-x-0 -top-[3px] z-10 flex h-[6px] cursor-row-resize touch-none select-none items-center justify-center"
             title="拖拽调整文档面板高度 · 双击恢复默认"
             @pointerdown="startDocResize"
             @dblclick="resetPanelH('doc')"
           >
             <span
-              class="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+              class="h-[3px] w-10 rounded-full bg-line-2 opacity-50 transition group-hover:bg-accent/70 group-hover:opacity-100"
             />
           </div>
           <section class="overflow-hidden rounded-lg border border-line">
             <div class="flex items-center">
               <button
-                class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+                class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim coarse:min-h-9"
                 @click="toggle('docs')"
               >
                 <Icon
@@ -501,22 +520,22 @@ function resetPanelH(which: "doc" | "mem") {
 
         <!-- 长期记忆 -->
         <div class="relative">
-          <!-- 同上：命中区贴住记忆卡片的上边框，不与内容/标题抢点击 -->
+          <!-- 同上：判定区骑在记忆卡片上边框上 -->
           <div
             v-if="!folded.memory"
-            class="group absolute inset-x-0 -top-[5px] z-10 h-[5px] cursor-row-resize touch-none select-none"
+            class="group absolute inset-x-0 -top-[3px] z-10 flex h-[6px] cursor-row-resize touch-none select-none items-center justify-center"
             title="拖拽调整记忆面板高度 · 双击恢复默认"
             @pointerdown="startMemResize"
             @dblclick="resetPanelH('mem')"
           >
             <span
-              class="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+              class="h-[3px] w-10 rounded-full bg-line-2 opacity-50 transition group-hover:bg-accent/70 group-hover:opacity-100"
             />
           </div>
           <section class="overflow-hidden rounded-lg border border-line">
             <div class="flex items-center">
               <button
-                class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim"
+                class="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5 text-left text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint transition hover:text-ink-dim coarse:min-h-9"
                 @click="toggle('memory')"
               >
                 <Icon
@@ -551,7 +570,7 @@ function resetPanelH(which: "doc" | "mem") {
         <span class="min-w-0 flex-1 truncate text-2xs text-ink-faint">{{ healthText }}</span>
         <Tooltip :label="theme.mode === 'dark' ? '切换到亮色主题' : '切换到暗色主题'">
           <button
-            class="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+            class="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink coarse:h-9 coarse:w-9"
             :aria-label="theme.mode === 'dark' ? '切换到亮色主题' : '切换到暗色主题'"
             @click="theme.toggle()"
           >
@@ -560,7 +579,7 @@ function resetPanelH(which: "doc" | "mem") {
         </Tooltip>
         <button
           v-if="!auth.user"
-          class="rounded-md border border-line-2 px-2 py-1 text-2xs text-ink-dim transition hover:border-accent/50 hover:text-ink"
+          class="rounded-md border border-line-2 px-2 py-1 text-2xs text-ink-dim transition hover:border-accent/50 hover:text-ink coarse:min-h-9"
           @click="auth.openAuth('login')"
         >
           登录
@@ -571,18 +590,17 @@ function resetPanelH(which: "doc" | "mem") {
 
     <!-- 拖拽调整宽度手柄：
          fixed 定位（aside 有 overflow-hidden，绝对定位会被裁掉）；
-         命中区紧贴"内容区 / 侧栏"的交接线——展开态落在侧栏内最后一列、不覆盖消息区，
-         折叠态贴在屏幕左边缘；悬停时只在交接线上亮一条细线，所见即所拖 -->
+         命中区 12px 跨在"内容区 / 侧栏"交界线上（内外各 6px），
+         悬停时在交界线上亮一条细线；折叠态不提供拖拽（用左侧浮动按钮展开） -->
     <div
-      v-if="!overlay"
-      class="group fixed top-0 z-30 h-full w-[5px] cursor-col-resize touch-none"
-      :style="{ left: (open === false ? 0 : Math.max(0, (width ?? 0) - 5)) + 'px' }"
+      v-if="!overlay && open !== false"
+      class="group fixed top-0 z-30 h-full w-[12px] cursor-col-resize touch-none"
+      :style="{ left: Math.max(0, (width ?? 0) - 6) + 'px' }"
       title="拖拽调整宽度"
       @pointerdown="startResize"
     >
       <span
-        class="pointer-events-none absolute top-0 h-full w-[2px] bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-        :class="open === false ? 'left-0' : 'right-0'"
+        class="pointer-events-none absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-accent opacity-0 transition-opacity duration-150 group-hover:opacity-100"
       ></span>
     </div>
   </aside>

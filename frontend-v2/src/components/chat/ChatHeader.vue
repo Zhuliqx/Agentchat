@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 import Icon from "@/components/common/Icon.vue";
 import Tooltip from "@/components/common/Tooltip.vue";
+import Dropdown from "@/components/common/Dropdown.vue";
 import { absoluteTime, relativeTime } from "@/utils/time";
 
 const props = defineProps<{ showMenu?: boolean }>();
@@ -37,12 +38,35 @@ const meta = computed(() => {
 const metaTitle = computed(() => absoluteTime(sessions.current?.updated_at));
 
 const iconBtn =
-  "grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink";
+  "grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink coarse:h-9 coarse:w-9";
+
+// ---- 窄屏"⋯"溢出菜单：图标放不下时收进菜单，顺序与桌面端一致 ----
+type HeaderAction = "export" | "stats" | "tasks" | "agenttask";
+const moreOpen = ref(false);
+const moreItems = computed<{ action: HeaderAction; icon: string; label: string }[]>(() => {
+  const items: { action: HeaderAction; icon: string; label: string }[] = [
+    { action: "export", icon: "export", label: "导出为 Markdown" },
+    { action: "stats", icon: "stats", label: "会话数据分析" },
+  ];
+  // 定时任务只对平台操作员可见（与桌面端图标同一条件）
+  if (auth.platformOperator !== false) {
+    items.push({ action: "tasks", icon: "tasks", label: "定时任务" });
+  }
+  items.push({ action: "agenttask", icon: "sparkle", label: "自主任务 Agent" });
+  return items;
+});
+function runAction(action: HeaderAction) {
+  moreOpen.value = false;
+  if (action === "export") emit("export");
+  else if (action === "stats") emit("stats");
+  else if (action === "tasks") emit("tasks");
+  else emit("agenttask");
+}
 </script>
 
 <template>
   <header
-    class="flex h-[48px] flex-shrink-0 items-center border-b border-line bg-bg/80 backdrop-blur"
+    class="relative z-30 flex h-[48px] flex-shrink-0 items-center border-b border-line bg-bg/80 backdrop-blur"
   >
     <!-- 与消息列同轴：共用 content-col 的宽度与左右留白 -->
     <div class="content-col flex min-w-0 items-center gap-1">
@@ -62,8 +86,8 @@ const iconBtn =
         {{ meta }}
       </span>
 
-      <!-- 会话操作：作用于当前会话 -->
-      <div class="flex flex-shrink-0 items-center gap-0.5">
+      <!-- 会话操作：作用于当前会话（窄屏收进 ⋯ 菜单） -->
+      <div class="hidden flex-shrink-0 items-center gap-0.5 sm:flex">
         <Tooltip label="导出为 Markdown">
           <button :class="iconBtn" aria-label="导出为 Markdown" @click="emit('export')">
             <Icon name="export" :size="15" />
@@ -71,10 +95,10 @@ const iconBtn =
         </Tooltip>
       </div>
 
-      <span class="mx-0.5 h-4 w-px flex-shrink-0 bg-line-2" aria-hidden="true" />
+      <span class="mx-0.5 hidden h-4 w-px flex-shrink-0 bg-line-2 sm:block" aria-hidden="true" />
 
-      <!-- 平台工具：统计 / 定时任务 / 自主任务 Agent -->
-      <div class="flex flex-shrink-0 items-center gap-0.5">
+      <!-- 平台工具：统计 / 定时任务 / 自主任务 Agent（窄屏收进 ⋯ 菜单） -->
+      <div class="hidden flex-shrink-0 items-center gap-0.5 sm:flex">
         <Tooltip label="会话数据分析">
           <button :class="iconBtn" aria-label="会话数据分析" @click="emit('stats')">
             <Icon name="stats" :size="15" />
@@ -91,6 +115,37 @@ const iconBtn =
           </button>
         </Tooltip>
       </div>
+
+      <!-- 窄屏：5 个图标挤不下，统一收进"⋯" -->
+      <Dropdown
+        class="sm:hidden"
+        :open="moreOpen"
+        align="right"
+        placement="down"
+        @close="moreOpen = false"
+      >
+        <template #trigger>
+          <button
+            data-testid="header-more"
+            :class="iconBtn"
+            aria-label="更多操作"
+            :aria-expanded="moreOpen"
+            @click="moreOpen = !moreOpen"
+          >
+            <Icon name="dots" :size="15" />
+          </button>
+        </template>
+        <button
+          v-for="item in moreItems"
+          :key="item.action"
+          data-testid="header-more-item"
+          class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-dim transition hover:bg-surface-2 hover:text-ink"
+          @click="runAction(item.action)"
+        >
+          <Icon :name="item.icon" :size="14" class="flex-shrink-0" />
+          {{ item.label }}
+        </button>
+      </Dropdown>
     </div>
   </header>
 </template>

@@ -8,7 +8,7 @@ const emit = defineEmits<{ "update:modelValue": [v: boolean] }>();
     type="button"
     role="switch"
     :aria-checked="modelValue"
-    class="flex items-center gap-1.5 whitespace-nowrap text-2xs text-ink-faint transition hover:text-ink-dim"
+    class="flex items-center gap-1.5 whitespace-nowrap text-2xs text-ink-faint transition hover:text-ink-dim coarse:min-h-9"
     @click="emit('update:modelValue', !modelValue)"
   >
     <span

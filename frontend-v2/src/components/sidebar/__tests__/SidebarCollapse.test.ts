@@ -52,17 +52,18 @@ describe("Sidebar 折叠交互", () => {
     window.dispatchEvent(pointer("pointerup", 254));
   });
 
-  it("折叠态下内容层保持展开宽度，且保留把手可从左边缘拖开", () => {
+  it("折叠态下内容层保持展开宽度，且不再渲染拖拽把手", () => {
     const wrapper = mountSidebar({ width: 0, contentWidth: 236, open: false });
 
     expect((wrapper.find(".sb-inner").element as HTMLElement).style.width).toBe("236px");
+    expect(wrapper.find('[title="拖拽调整宽度"]').exists()).toBe(false);
+  });
+
+  it("手柄命中区 12px 对称跨在交界线上（内外各 6px）", () => {
+    const wrapper = mountSidebar({ width: 236 });
     const handle = wrapper.find('[title="拖拽调整宽度"]').element as HTMLElement;
-    expect(handle).toBeTruthy();
-    // 折叠态从最小宽度起步：往右拖 20px → 直接展开到 200px
-    handle.dispatchEvent(pointer("pointerdown", 200));
-    window.dispatchEvent(pointer("pointermove", 220));
-    expect(wrapper.emitted("toggle")).toHaveLength(1);
-    expect(wrapper.emitted("width-change")?.at(-1)).toEqual([200]);
-    window.dispatchEvent(pointer("pointerup", 220));
+
+    expect(handle.style.left).toBe("230px"); // 236 - 6：内外各 6px
+    expect(handle.classList.contains("w-[12px]")).toBe(true);
   });
 });

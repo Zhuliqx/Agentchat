@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 
+/* 触屏（粗指针）适配：coarse:* 工具类只在触摸设备生效，
+   桌面端完全不受影响——移动端把主要触控目标抬到 ≥36px */
+@custom-variant coarse (@media (pointer: coarse));
+
 /* ============================================================
    设计系统 —— 冷静的「任务控制台」
    参考 Linear / ChatGPT / Claude 的现代 AI 产品语言:
@@ -143,6 +147,9 @@ html,
 body,
 #app {
   height: 100%;
+  /* 移动端地址栏/工具栏伸缩时用动态视口高度：否则底部输入区会被浏览器 UI 挡住。
+     不支持的浏览器退回上面的 100%。 */
+  height: 100dvh;
 }
 body {
   @apply bg-bg text-ink font-sans antialiased overflow-hidden;
@@ -340,6 +347,10 @@ select:focus-visible {
 /* 消息入场 */
 .msg-in {
   animation: msgIn 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  /* 长会话性能：滚出视口的历史消息跳过渲染与绘制；auto 记住渲染后的真实高度，
+     避免滚动条长度跳变（首帧未渲染的用 120px 估算） */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 @keyframes msgIn {
   from {

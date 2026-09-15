@@ -1,10 +1,34 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- interactive-widget：虚拟键盘弹出时压缩内容区，而不是把输入框顶出视口 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#0b0d11" />
+    <script>
+      // 首屏前定主题：亮色用户刷新时不再先闪一下暗色。
+      // 与 stores/theme.ts 同一口径：有手动选择就用手动值，否则跟随系统偏好。
+      (() => {
+        try {
+          const saved = localStorage.getItem("theme");
+          const light = saved
+            ? saved === "light"
+            : window.matchMedia("(prefers-color-scheme: light)").matches;
+          const root = document.documentElement;
+          root.classList.toggle("light", light);
+          root.style.colorScheme = light ? "light" : "dark";
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", light ? "#f6f7f9" : "#0b0d11");
+        } catch {
+          /* localStorage/matchMedia 不可用时保持默认暗色 */
+        }
+      })();
+    </script>
     <title>Multi-Agent Platform</title>
   </head>
   <body>

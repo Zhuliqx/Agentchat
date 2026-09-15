@@ -91,7 +91,7 @@ onBeforeUnmount(restorePageState);
             >
               <span :id="titleId" class="text-base font-medium tracking-tight">{{ title }}</span>
               <button
-                class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+                class="grid h-7 w-7 place-items-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink coarse:h-9 coarse:w-9"
                 aria-label="关闭"
                 @click="emit('close')"
               >

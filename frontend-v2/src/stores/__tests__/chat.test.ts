@@ -47,6 +47,20 @@ describe("chat store", () => {
     expect(chat.messages[1].streaming).toBe(false);
   });
 
+  it("error 帧把失败原因写进正文，并保留轨道错误节点", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.list = [{ id: "s1", title: "t", created_at: "", updated_at: "" }];
+    sessions.currentId = "s1";
+    emitStream([{ type: "error", content: "处理超时，请重试或简化问题" }]);
+
+    await chat.send("hi");
+
+    const agentMsg = chat.messages[1];
+    expect(agentMsg.content).toContain("处理超时，请重试或简化问题");
+    expect(agentMsg.orbit?.some((n) => n.type === "error")).toBe(true);
+  });
+
   it("发送时给用户消息、回答完成时给助手消息打时间戳", async () => {
     const chat = useChatStore();
     const sessions = useSessionsStore();
@@ -381,6 +395,38 @@ describe("chat store", () => {
 
     await expect(chat.loadHistory("s1")).resolves.toBeUndefined();
     expect(chat.historyError).toBe("加载失败");
+  });
+
+  it("loadHistory 期间置 historyLoading，完成后复位", async () => {
+    const chat = useChatStore();
+    let resolveHistory!: (v: unknown) => void;
+    (sessionsApi.history as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+
+    const pending = chat.loadHistory("s1");
+    expect(chat.historyLoading).toBe(true);
+
+    resolveHistory([{ id: "m1", role: "assistant", content: "历史" }]);
+    await pending;
+
+    expect(chat.historyLoading).toBe(false);
+    expect(chat.messages).toHaveLength(1);
+  });
+
+  it("loadHistory 失败时同样收起加载态", async () => {
+    const chat = useChatStore();
+    (sessionsApi.history as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("后端不可达"),
+    );
+
+    await chat.loadHistory("s1");
+
+    expect(chat.historyLoading).toBe(false);
+    expect(chat.historyError).toBe("后端不可达");
   });
 
   it("loadHistory aborts the in-flight stream and frees sending", async () => {

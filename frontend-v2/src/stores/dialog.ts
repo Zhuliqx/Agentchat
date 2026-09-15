@@ -50,6 +50,11 @@ export const useDialogStore = defineStore("dialog", {
         };
       });
     },
+    /** 统一的失败提示：把异常整理成「<动作>：<原因>」，避免各处各写一套 */
+    async alertError(prefix: string, e: unknown): Promise<void> {
+      const reason = e instanceof Error && e.message ? e.message : String(e ?? "未知错误");
+      await this.alert(`${prefix}：${reason}`, "操作失败");
+    },
     resolve(value?: unknown) {
       const current = this.current;
       this.current = null;

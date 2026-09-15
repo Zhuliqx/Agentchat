@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
 import { useChatOptionsStore } from "@/stores/chatOptions";
@@ -49,7 +49,15 @@ watch(
 onMounted(() => {
   model.load();
   loadDraft();
+  window.addEventListener("keydown", onGlobalKeydown);
 });
+
+onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown));
+
+/** 全局快捷键：Esc 停止生成（弹窗/下拉会先处理并阻止冒泡，不会误触） */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && chat.sending) chat.stop();
+}
 
 function autoResize() {
   const el = inputEl.value;
@@ -89,6 +97,13 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     send();
+  } else if (e.key === "ArrowUp" && !e.shiftKey && !input.value.trim() && !chat.sending) {
+    // 输入框为空时按 ↑：编辑上一条用户消息（与消息上的"编辑并重新发送"同一入口）
+    const last = chat.findLastUserMsg();
+    if (last) {
+      e.preventDefault();
+      chat.requestEdit(last);
+    }
   }
   nextTick(autoResize);
 }
@@ -103,6 +118,7 @@ async function chooseModel(id: string) {
   <!-- 悬浮于会话区之上的毛玻璃输入框 -->
   <!-- 渐变底衬：悬浮输入区下面的滚动内容不会与工具条文字相互干扰 -->
   <div
+    data-composer
     class="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-bg via-bg/85 to-transparent pb-4 pt-6"
   >
     <div class="content-col pointer-events-auto">
@@ -154,7 +170,7 @@ async function chooseModel(id: string) {
         />
         <Tooltip v-if="!chat.sending" label="发送" class="mb-1.5 mr-1.5 flex-shrink-0">
           <button
-            class="grid h-8 w-8 place-items-center rounded-xl text-white transition disabled:bg-transparent disabled:text-ink-faint"
+            class="grid h-8 w-8 place-items-center rounded-xl text-white transition disabled:bg-transparent disabled:text-ink-faint coarse:h-10 coarse:w-10"
             :class="input.trim() ? 'bg-accent hover:brightness-110' : ''"
             :disabled="!input.trim()"
             aria-label="发送"
@@ -165,7 +181,7 @@ async function chooseModel(id: string) {
         </Tooltip>
         <Tooltip v-else label="停止生成" class="mb-1.5 mr-1.5 flex-shrink-0">
           <button
-            class="grid h-8 w-8 place-items-center rounded-xl border border-err/40 text-err transition hover:bg-err/10"
+            class="grid h-8 w-8 place-items-center rounded-xl border border-err/40 text-err transition hover:bg-err/10 coarse:h-10 coarse:w-10"
             aria-label="停止生成"
             @click="chat.stop()"
           >
