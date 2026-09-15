@@ -32,6 +32,9 @@ build/
 .coverage
 htmlcov/
 coverage.xml
+test-results/
+playwright-report/
+blob-report/
 
 # IDE
 .vscode/

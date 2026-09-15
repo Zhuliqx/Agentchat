@@ -68,6 +68,13 @@ jobs:
       - name: "Unit tests (Vitest)"
         run: npm run test -- --run
 
+      # 前端 E2E 冒烟：接口全部 route mock，不需要后端/LLM
+      - name: "Install Playwright browser (chromium)"
+        run: npx playwright install --with-deps chromium
+
+      - name: "E2E smoke (Playwright)"
+        run: npm run e2e
+
   # RAG 检索回归：真实启动 Postgres + Milvus，摄入固定测试文档，
   # 断言检索命中率不低于阈值，防止改检索代码/参数导致质量退化。
   rag-regression:

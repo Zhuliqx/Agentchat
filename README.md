@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-13（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-14（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -67,7 +67,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未携带 Authorization 头时归入 `default` 访客（不破坏单用户体验），带过期/无效 token 则返回 401；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
 - **知识库按用户隔离**：文档（Postgres + Milvus 向量）按 `user_id` 隔离，不同用户的知识库互不可见（上传/检索/删除/预览均校验归属）；`ingest_docs.py` 可用 `--user` 指定归属用户
 - **Prompt 注入防护**：检索/搜索外部内容按「不可信数据块」隔离；中英规则库检测命中即剔除+告警，用户 query 含注入指令直接拒绝（`INJECTION_DETECTION_ENABLED`）；可选 LLM 复核降误报（`INJECTION_LLM_REVIEW`）；输出侧泄露检测（系统提示词片段/密钥模式，`INJECTION_OUTPUT_FILTER`）
-- **会话数据分析**：`GET /api/sessions/{id}/stats` 返回消息数/回合数/Token 估算/平均回复长度/对话时长等，前端「📊 分析」面板可视化
+- **会话数据分析**：`GET /api/sessions/{id}/stats` 返回消息数/回合数/Token 估算/平均回复长度/对话时长，以及**平均应答耗时、24 小时活跃分布（`tz_offset_min` 折算本地小时）、引用来源 Top 5 聚合**；前端「📊 分析」面板用环形图（消息构成）、条形对比（长度画像）、活跃时段柱状图与来源命中排行可视化
 - **定时 / 批处理任务**：后台 asyncio 调度器（无第三方依赖）按 `interval:<秒>` 或 `cron:<分钟>` 执行任务；内置重建知识库索引、清理孤儿 Checkpoint、清理失效文档三类任务，可手动触发、启停、删除（前端「⏱ 任务」面板）
 - **增量摄入 / 去重**：文档分块按内容指纹（sha256）增量摄入，未变化的块不重复嵌入/写入，整篇无变化则零写入
 - **多模型路由**：`LLM_LIGHT_MODEL` 配置轻量模型后，Supervisor 用主模型、子 Agent（RAG/搜索/MCP）用轻量模型，成本更低
@@ -291,6 +291,16 @@ API 集成测试（需运行中的 Postgres/Milvus/MCP 依赖；覆盖会话 CRU
 .\venv\Scripts\python.exe -m pytest tests/integration -v
 ```
 
+前端 E2E 冒烟（Playwright，接口全部 route mock，不需要后端/LLM；自动构建并起 preview）：
+
+```powershell
+cd frontend-v2
+npx playwright install chromium   # 首次
+npm run e2e
+```
+
+覆盖：首屏进入欢迎页（能力卡片/示例问题/无控制台报错）、发消息后回答与来源渲染、引用编号点击高亮对应 chip、会话列表分组、触屏长按操作表。
+
 新功能端到端验证（认证 → 会话隔离 → 统计 → 任务系统，需后端运行中）：
 
 ```powershell
@@ -312,7 +322,8 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 
 查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照）。
 
-CI（`.github/workflows/ci.yml`）：Ruff 检查（F/E7/E9）→ Pyright 类型检查（非阻塞）→ 单元测试。
+CI（`.github/workflows/ci.yml`）：后端 Ruff（F/E7/E9）+ 文档同步检查 + Pyright（非阻塞）+ 单元测试；
+前端 ESLint + Prettier + vue-tsc + Vitest + Playwright E2E 冒烟。
 
 ## License
 
