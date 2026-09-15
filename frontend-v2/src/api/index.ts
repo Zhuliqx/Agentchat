@@ -86,7 +86,9 @@ export const sessionsApi = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
-  stats: (id: string) => api<SessionStats>(`/sessions/${id}/stats`),
+  /** 传本地时区偏移：后端据此把"活跃时段"折算成本地小时 */
+  stats: (id: string) =>
+    api<SessionStats>(`/sessions/${id}/stats?tz_offset_min=${-new Date().getTimezoneOffset()}`),
   /** 从某条消息截断（含该条）：编辑重发用它替代前端逐条删除 */
   truncate: (sessionId: string, messageId: string) =>
     api<{ deleted: number }>(`/sessions/${sessionId}/truncate`, {

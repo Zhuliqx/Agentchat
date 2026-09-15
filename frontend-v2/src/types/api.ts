@@ -119,6 +119,20 @@ export interface SessionStats {
   first_at: string | null;
   last_at: string | null;
   duration_sec: number | null;
+  /** 应答耗时（秒）：用户发言到紧随其后助手回复的平均间隔 */
+  avg_response_sec?: number | null;
+  /** 24 小时消息分布（按客户端本地时区） */
+  hourly_counts?: number[];
+  /** 引用来源聚合：按命中片段数排序的 Top 5 */
+  top_sources?: SessionStatSource[];
+}
+
+export interface SessionStatSource {
+  path: string;
+  /** 引用了该来源的助手消息条数 */
+  messages: number;
+  /** 累计命中片段数 */
+  hits: number;
 }
 
 export interface Checkpoint {

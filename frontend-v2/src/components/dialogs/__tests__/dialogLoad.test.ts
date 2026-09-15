@@ -25,6 +25,9 @@ vi.mock("@/api", () => ({
       first_at: "2026-09-13T00:00:00Z",
       last_at: "2026-09-13T00:10:00Z",
       duration_sec: 600,
+      avg_response_sec: 12.5,
+      hourly_counts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+      top_sources: [{ path: "data/kb/company.md", messages: 2, hits: 3 }],
     })),
   },
   authApi: {
@@ -90,8 +93,17 @@ describe("弹窗挂载即打开时加载数据", () => {
     await flushPromises();
 
     expect(statsApi).toHaveBeenCalledWith("s1");
-    expect(wrapper.text()).toContain("总消息数");
-    expect(wrapper.text()).toContain("4");
+    // 概览 + 三个可视化区块都渲染出来（旧版只有四张卡 + 一张表）
+    expect(wrapper.text()).toContain("消息总数");
+    expect(wrapper.text()).toContain("消息构成");
+    expect(wrapper.text()).toContain("活跃时段");
+    expect(wrapper.text()).toContain("引用来源 Top 1");
+    expect(wrapper.text()).toContain("company.md");
+    expect(wrapper.text()).toContain("平均应答");
+    // 环形图：底环 + 用户/助手两段
+    expect(wrapper.findAll("[data-testid='stats-composition'] circle")).toHaveLength(3);
+    // 活跃时段：24 根柱子
+    expect(wrapper.findAll("[data-testid='stats-hourly'] span[title]")).toHaveLength(24);
   });
 
   it("定时任务拉取列表与类型注册表", async () => {

@@ -1,7 +1,7 @@
 """会话管理接口。"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -173,8 +173,16 @@ def truncate_messages(
 
 
 @router.get("/{session_id}/stats")
-def session_stats(session_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
-    """会话深度分析：消息统计、时长、token 估算、最长回合等。"""
+def session_stats(
+    session_id: str,
+    tz_offset_min: int = Query(0, ge=-840, le=840),
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """会话深度分析：消息统计、时长、token 估算、应答耗时、活跃时段与引用来源。
+
+    tz_offset_min：客户端相对 UTC 的分钟偏移（东八区为 480）。用它把 UTC 时间折算成
+    本地小时再统计"活跃时段"，否则热力条会整体错一个时区。
+    """
     _owned_or_404(session_id, user_id)
     msgs = postgres.get_messages(session_id)
     total_chars = sum(len(m.content) for m in msgs)
@@ -207,6 +215,39 @@ def session_stats(session_id: str, user_id: str = Depends(get_current_user_id)) 
     def _iso(dt: datetime | None) -> str | None:
         return dt.isoformat() if dt else None
 
+    # 应答耗时：用户发言 → 紧随其后的助手回复，取平均（秒）
+    gaps: list[float] = []
+    pending_user_at: datetime | None = None
+    for m in msgs:
+        if m.role == "user":
+            pending_user_at = m.created_at
+        elif m.role == "assistant" and pending_user_at and m.created_at:
+            gaps.append((m.created_at - pending_user_at).total_seconds())
+            pending_user_at = None
+    avg_response_sec = round(sum(gaps) / len(gaps), 1) if gaps else None
+
+    # 活跃时段：按客户端本地小时统计消息条数
+    tz = timezone(timedelta(minutes=tz_offset_min))
+    hourly_counts = [0] * 24
+    for m in msgs:
+        if m.created_at:
+            hourly_counts[m.created_at.astimezone(tz).hour] += 1
+
+    # 引用来源：聚合助手消息里的 sources（新格式 {path,hits}；老格式为纯路径字符串）
+    source_stats: dict[str, dict] = {}
+    for m in asst_msgs:
+        for s in m.sources or []:
+            path = s.get("path") if isinstance(s, dict) else str(s)
+            hits = int(s.get("hits") or 0) if isinstance(s, dict) else 0
+            if not path:
+                continue
+            item = source_stats.setdefault(path, {"path": path, "messages": 0, "hits": 0})
+            item["messages"] += 1
+            item["hits"] += hits
+    top_sources = sorted(
+        source_stats.values(), key=lambda x: (-x["hits"], -x["messages"], x["path"])
+    )[:5]
+
     return {
         "session_id": session_id,
         "message_count": len(msgs),
@@ -222,6 +263,9 @@ def session_stats(session_id: str, user_id: str = Depends(get_current_user_id)) 
         "first_at": _iso(first_at),
         "last_at": _iso(last_at),
         "duration_sec": duration_sec,
+        "avg_response_sec": avg_response_sec,
+        "hourly_counts": hourly_counts,
+        "top_sources": top_sources,
     }
 
 

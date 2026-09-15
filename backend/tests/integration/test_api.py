@@ -109,6 +109,38 @@ def test_session_pin_keeps_updated_at(client):
         client.delete(f"/api/sessions/{sid}")
 
 
+def test_session_stats_insights(client):
+    """统计接口补充应答耗时、活跃时段与引用来源聚合。"""
+    from app.db import postgres
+
+    sid = client.post("/api/sessions").json()["id"]
+    postgres.add_message(sid, "user", "知识库里有什么" * 5)
+    postgres.add_message(
+        sid, "assistant", "回答" * 20, [{"path": "data/kb/company.md", "hits": 2}]
+    )
+    postgres.add_message(
+        sid,
+        "assistant",
+        "补充",
+        [{"path": "data/kb/company.md", "hits": 1}, "data/kb/pricing.md"],
+    )
+
+    st = client.get(f"/api/sessions/{sid}/stats", params={"tz_offset_min": 480}).json()
+    assert st["message_count"] == 3
+    assert st["user_count"] == 1 and st["assistant_count"] == 2
+    assert len(st["hourly_counts"]) == 24
+    assert sum(st["hourly_counts"]) == 3
+    assert st["avg_response_sec"] is not None
+    assert st["top_sources"][0] == {
+        "path": "data/kb/company.md",
+        "messages": 2,
+        "hits": 3,
+    }
+    assert st["top_sources"][1]["path"] == "data/kb/pricing.md"
+
+    client.delete(f"/api/sessions/{sid}")
+
+
 # ---------------- 长期记忆 ----------------
 
 def test_memory_crud(client):
