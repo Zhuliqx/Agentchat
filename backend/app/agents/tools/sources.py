@@ -7,17 +7,23 @@
 from __future__ import annotations
 
 import threading
-from typing import Iterable
+from collections.abc import Iterable
 
 # run_id -> [(source, hits)]，按首次命中顺序排列，同一 run 内多次检索累加
 _RAG_SOURCES: dict[str, list[tuple[str, int]]] = {}
 _RAG_SOURCES_LOCK = threading.Lock()
 
 
-def _record_rag_sources(run_id: str, counts: Iterable[tuple[str, int]]) -> None:
-    """累加本次检索各来源命中的片段数（同一来源多次命中会相加）。"""
+def _record_rag_sources(run_id: str, counts: Iterable[tuple[str, int]]) -> dict[str, int]:
+    """累加各来源命中片段数，返回 **run 级稳定编号**（来源 -> 1 开始的序号）。
+
+    编号首次出现即分配、后续复用：一轮对话里检索工具可能被调用多次，若每次都从 1
+    重新编号，模型引用的 [n] 会指向界面上另一个来源（来源列表按首次命中顺序排）。
+    无 run_id（离线调用）时返回空表，调用方退回本次调用内的编号。
+    """
+    assigned: dict[str, int] = {}
     if not run_id:
-        return
+        return assigned
     with _RAG_SOURCES_LOCK:
         bucket = _RAG_SOURCES.setdefault(run_id, [])
         index = {src: i for i, (src, _) in enumerate(bucket)}
@@ -30,6 +36,8 @@ def _record_rag_sources(run_id: str, counts: Iterable[tuple[str, int]]) -> None:
             else:
                 bucket.append((src, hits))
                 index[src] = len(bucket) - 1
+            assigned[src] = index[src] + 1
+    return assigned
 
 
 def get_recent_rag_source_refs(run_id: str) -> list[dict]:

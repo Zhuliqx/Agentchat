@@ -123,7 +123,8 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
                 docs = _front_load(docs)
             if not docs:
                 return "知识库中没有检索到相关内容。"
-            # 按来源分组编号（【来源 N】）：模型引用 [n] 时与前端来源列表一一对应
+            # 按来源分组编号，块头形如【来源 N｜本次第 M 位】：N 全轮稳定（与前端来源
+            # 列表一一对应），M 是本次检索的相关性名次（块顺序按 N 排，不再表达相关性）
             order: list[str] = []
             grouped: dict[str, list[str]] = {}
             orphans: list[str] = []  # 没有 source 元数据的片段：仍给模型，但不可引用
@@ -148,11 +149,19 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
                 grouped[src].append(wrap_as_data(d.page_content))
                 # 命中片段数：同一个文档被检索到多段时累加（片段级计数）
                 hits[src] = hits.get(src, 0) + 1
-            # 记录最近检索来源与命中片段数（供引用溯源）
-            _record_rag_sources(getattr(rt.context, "run_id", "") or "", hits.items())
+            # 记录最近检索来源与命中片段数（供引用溯源），同时拿到 run 级稳定编号：
+            # 同一轮里多次检索若各自从 1 编号，模型写的 [n] 会和界面来源列表错位
+            numbering = _record_rag_sources(getattr(rt.context, "run_id", "") or "", hits.items())
+            numbered = [(numbering.get(src, 0), src) for src in order]
+            if any(i <= 0 for i, _ in numbered):
+                numbered = [(i, src) for i, src in enumerate(order, 1)]
+            numbered.sort(key=lambda item: item[0])
+            # 块顺序按来源编号排（编号可核对），所以相关性名次要写进块头：
+            # 否则模型无法判断本次检索里哪块更相关
+            rank = {src: i for i, src in enumerate(order, 1)}
             parts = [
-                f"【来源 {i}】{Path(src).name}\n" + "\n".join(grouped[src])
-                for i, src in enumerate(order, 1)
+                f"【来源 {i}｜本次第 {rank[src]} 位】{Path(src).name}\n" + "\n".join(grouped[src])
+                for i, src in numbered
             ]
             if orphans:
                 parts.append("【来源 未知】\n" + "\n".join(orphans))
