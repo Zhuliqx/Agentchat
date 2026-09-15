@@ -55,6 +55,8 @@ class SupervisorStreamer:
         self._dedupe: _PreludeDedupe | None = None
         self._pending_tool_name: str | None = None
         self._emitted_sources: dict[str, list[dict]] = {}
+        # 去重器延后到答案开始再建：工具执行期间到达的开场白也要计入 expected
+        self._dedupe_pending = False
 
     def register_tool(self, name: str) -> None:
         """登记本次实际注册的工具（未登记的 tool_call 不发事件）。"""
@@ -77,7 +79,9 @@ class SupervisorStreamer:
         if is_real and not self.saw_tool_call:
             if not self._streaming_direct:
                 self._prelude_buf.clear()  # 丢弃未显示的开场白碎片
-            self._dedupe = _PreludeDedupe("".join(self._prelude_total))
+            # 这里只标记"该去重了"：真正构建放在 feed_answer，
+            # 这样工具执行期间补记的开场白（record_tool_prelude）也算进 expected
+            self._dedupe_pending = True
             self.saw_tool_call = True
         sources: list[dict] = []
         if is_real and name == "rag_agent":
@@ -103,12 +107,14 @@ class SupervisorStreamer:
             )
 
     async def record_tool_prelude(self, text: str) -> None:
-        """工具即将执行时的开场白 chunk：记入 prelude_total，直接回答则已流式。"""
+        """工具即将执行时的开场白 chunk：只记入 prelude_total 供答案去重。
+
+        不再放进 _prelude_buf——那份缓冲会在流结束时被 flush 补推，
+        把开场白追加到答案末尾（工具调用后模型重写完整回答时尤其明显）。
+        """
         self._prelude_total.append(text)
         if self._streaming_direct:
             await self._push(text)
-        else:
-            self._prelude_buf.append(text)
 
     async def feed(self, text: str) -> None:
         """工具调用前（或直接回答）的文本：未判定时缓冲，超阈值开始逐字流式。"""
@@ -124,6 +130,9 @@ class SupervisorStreamer:
 
     async def feed_answer(self, text: str) -> None:
         """工具后的最终答案：流式前缀匹配跳过重复的开场白前缀。"""
+        if self._dedupe_pending:
+            self._dedupe_pending = False
+            self._dedupe = _PreludeDedupe("".join(self._prelude_total))
         if self._dedupe is not None and self._dedupe.active:
             text = self._dedupe.feed(text)
         if text:

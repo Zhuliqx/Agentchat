@@ -207,3 +207,26 @@ def test_rag_sources_emitted_after_tool_execution(monkeypatch):
 
     _run(st.emit_tool("rag_agent"))  # 来源没变：不再重复发
     assert len(sink.events) == 2
+
+
+def test_prelude_recorded_during_tool_run_is_deduped():
+    """工具执行期间补记的开场白也要参与去重。
+
+    真实链路：模型先输出半句开场白 → 发起工具调用 → 工具执行期间又输出后半句
+    → 最终答案把整段开场白连同正文重写一遍。若去重器在 emit_tool 时就定型，
+    expected 只有前半句，用户会看到后半句开场白重复出现。
+    """
+    sink = _Sink()
+    st = _streamer(sink)
+    st.register_tool("web_search")
+
+    _run(st.feed("我先查一下最新的"))  # 工具调用前
+    _run(st.emit_tool("web_search"))  # 工具开始执行
+    _run(st.record_tool_prelude("AI 新闻。"))  # 执行期间到达的后半句
+
+    # 最终答案把整段开场白重写了一遍
+    _run(st.feed_answer("我先查一下最新的AI 新闻。"))
+    _run(st.feed_answer("以下是最近的热点："))
+    _run(st.flush())
+
+    assert "".join(sink.tokens) == "以下是最近的热点："
