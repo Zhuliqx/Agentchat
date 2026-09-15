@@ -6,14 +6,14 @@
  */
 
 const COPY_BTN_CLASS =
-  "absolute right-2 top-2 rounded-md border border-line-2 bg-surface-2/90 px-2 py-0.5 text-2xs text-ink-dim opacity-0 transition hover:text-ink focus:opacity-100 group-hover/code:opacity-100";
+  "absolute right-2 top-2 rounded-md border border-line-2 bg-surface-2/90 px-2 py-0.5 text-2xs text-ink-dim opacity-0 transition hover:text-ink focus:opacity-100 group-hover/code:opacity-100 coarse:px-3 coarse:py-1.5";
 
 /** 光标可以落进去的最后一个块：必须是能在行内追加内容的元素 */
 const CARET_HOSTS = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, code";
 
-/** 引用编号形如 [1]；只处理正文文本节点，跳过代码块与已有链接 */
-const CITATION_TEST = /\[\d+\]/;
-const CITATION_RE = /\[(\d+)\]/g;
+/** 引用编号：[1] 为主，模型也写过 [来源 1] / 【来源 1｜本次第 2 位】；只处理正文文本节点，跳过代码块与链接 */
+const CITATION_TEST = /\[\d+\]|\[来源\s*\d+[^\]]*\]|【来源\s*\d+[^】]*】/;
+const CITATION_RE = /\[(\d+)\]|\[来源\s*(\d+)[^\]]*\]|【来源\s*(\d+)[^】]*】/g;
 
 export function decorateMarkdown(root: HTMLElement | null): void {
   if (!root) return;
@@ -105,7 +105,7 @@ export function decorateCitations(root: HTMLElement | null, sourceCount: number)
     let changed = false;
     CITATION_RE.lastIndex = 0; // matchAll 会读 lastIndex，先归零避免漏匹配
     for (const match of text.matchAll(CITATION_RE)) {
-      const index = Number(match[1]);
+      const index = Number(match[1] ?? match[2] ?? match[3]);
       const start = match.index ?? 0;
       const end = start + match[0].length;
       if (index < 1 || index > sourceCount) {
@@ -132,13 +132,35 @@ export function decorateCitations(root: HTMLElement | null, sourceCount: number)
   }
 }
 
-/** 点击引用编号：滚动到对应来源 chip 并短暂高亮 */
+/** 点击引用编号：滚到对应来源 chip（避开悬浮输入框）并短暂高亮 */
 export function highlightSourceChip(root: HTMLElement | null, index: number): void {
   const row = root?.closest(".msg-in");
   const chip = row?.querySelector<HTMLElement>(`[data-source-index="${index}"]`);
   if (!chip) return;
-  // jsdom 等环境没有 scrollIntoView，做一次存在性判断
-  chip.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  scrollChipIntoView(chip);
   chip.classList.add("source-chip--highlight");
-  setTimeout(() => chip.classList.remove("source-chip--highlight"), 1200);
+  // 留够时间：平滑滚动到位后高亮还在，用户才能把正文里的编号和这个 chip 对上
+  setTimeout(() => chip.classList.remove("source-chip--highlight"), 1600);
+}
+
+/**
+ * 让来源 chip 真正落在视野里。
+ *
+ * scrollIntoView({block:"nearest"}) 只按滚动容器的可视框判断，而输入框是悬浮在会话区
+ * 底部的：chip 处在它后面时会被判成"已可见"，于是一个像素都不滚，用户点完什么也看不到。
+ * 所以按容器与输入框的真实位置算差值，只在需要时滚那一点。
+ */
+function scrollChipIntoView(chip: HTMLElement): void {
+  const container = chip.closest<HTMLElement>("[data-msg-scroll]");
+  if (!container) return;
+  const box = container.getBoundingClientRect();
+  const rect = chip.getBoundingClientRect();
+  const composerTop = document
+    .querySelector<HTMLElement>("[data-composer]")
+    ?.getBoundingClientRect().top;
+  const gap = 8;
+  const down = rect.bottom + gap - Math.min(composerTop ?? box.bottom, box.bottom);
+  const up = box.top + gap - rect.top;
+  const delta = down > 0 ? down : -Math.max(up, 0);
+  if (delta) container.scrollBy?.({ top: delta, behavior: "smooth" });
 }

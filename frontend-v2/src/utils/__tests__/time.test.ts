@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { absoluteTime, relativeTime } from "@/utils/time";
+import { absoluteTime, dayBucket, relativeTime } from "@/utils/time";
 
 const NOW = new Date("2026-09-13T16:00:00Z").getTime();
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -34,5 +34,28 @@ describe("absoluteTime", () => {
     const iso = new Date(2026, 8, 13, 16, 20).toISOString();
     expect(absoluteTime(iso)).toBe("2026-09-13 16:20");
     expect(absoluteTime(null)).toBe("");
+  });
+});
+
+describe("dayBucket", () => {
+  /** 本地时间的 N 天前（用日历日推算，避免"现在几点"影响期望值） */
+  const daysAgo = (n: number, hour = 10) => {
+    const d = new Date(NOW);
+    d.setDate(d.getDate() - n);
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  };
+
+  it("按自然日分档：今天 / 昨天 / 更早", () => {
+    expect(dayBucket(daysAgo(0), NOW)).toBe("today");
+    expect(dayBucket(daysAgo(1), NOW)).toBe("yesterday");
+    expect(dayBucket(daysAgo(2), NOW)).toBe("earlier");
+    expect(dayBucket(daysAgo(40), NOW)).toBe("earlier");
+  });
+
+  it("时钟偏差的未来时间算今天；空值/非法值算更早", () => {
+    expect(dayBucket(new Date(NOW + 3_600_000).toISOString(), NOW)).toBe("today");
+    expect(dayBucket(null, NOW)).toBe("earlier");
+    expect(dayBucket("not-a-date", NOW)).toBe("earlier");
   });
 });

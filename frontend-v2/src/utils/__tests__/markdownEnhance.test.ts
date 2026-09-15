@@ -100,6 +100,19 @@ describe("markdownEnhance", () => {
     expect(root.textContent).toBe("OpenAI 推出 Astra，Anthropic 发布 Fable 5.1。");
   });
 
+  it("模型写成 [来源 1] / 【来源 2｜本次第 1 位】时同样接进联动，越界的照样清掉", () => {
+    const root = makeRoot("<p>公司介绍 [来源 1]，数据政策【来源 2｜本次第 1 位】。</p>");
+    decorateCitations(root, 2);
+
+    const marks = Array.from(root.querySelectorAll<HTMLElement>("[data-cite]"));
+    expect(marks.map((m) => m.dataset.cite)).toEqual(["1", "2"]);
+    expect(marks.map((m) => m.textContent)).toEqual(["[来源 1]", "【来源 2｜本次第 1 位】"]);
+
+    const dangling = makeRoot("<p>越界 [来源 9]。</p>");
+    decorateCitations(dangling, 2);
+    expect(dangling.textContent).toBe("越界。");
+  });
+
   it("点击引用编号：滚动到对应来源 chip 并加高亮类", () => {
     const row = document.createElement("div");
     row.className = "msg-in";
@@ -119,4 +132,66 @@ describe("markdownEnhance", () => {
       row.querySelector('[data-source-index="1"]')!.classList.contains("source-chip--highlight"),
     ).toBe(false);
   });
+
+  it("来源 chip 被悬浮输入框挡住时按差值滚动（它自己判不出被挡，只会一个像素都不滚）", () => {
+    const { scroller, scrollBy, chip } = mountChipFixture({ chipRect: [870, 892] });
+    const composer = document.createElement("div");
+    composer.setAttribute("data-composer", "");
+    Object.defineProperty(composer, "getBoundingClientRect", { value: () => rect(792, 900) });
+    document.body.appendChild(composer);
+
+    highlightSourceChip(chip, 3);
+
+    // 892 + 8(gap) - 792(输入框顶) = 108
+    expect(scrollBy).toHaveBeenCalledWith({ top: 108, behavior: "smooth" });
+    expect(chip.classList.contains("source-chip--highlight")).toBe(true);
+    expect(scroller).toBeTruthy();
+  });
+
+  it("来源 chip 本来就完整可见时不滚动", () => {
+    const { scrollBy, chip } = mountChipFixture({ chipRect: [500, 522] });
+    const composer = document.createElement("div");
+    composer.setAttribute("data-composer", "");
+    Object.defineProperty(composer, "getBoundingClientRect", { value: () => rect(792, 900) });
+    document.body.appendChild(composer);
+
+    highlightSourceChip(chip, 3);
+
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
 });
+
+function rect(top: number, bottom: number): DOMRect {
+  return {
+    top,
+    bottom,
+    left: 0,
+    right: 0,
+    width: 0,
+    height: bottom - top,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+/** 会话滚动容器 + 一条带来源 chip 的消息，几何全部写死便于断言 */
+function mountChipFixture(opts: { chipRect: [number, number] }) {
+  const scroller = document.createElement("div");
+  scroller.setAttribute("data-msg-scroll", "");
+  Object.defineProperty(scroller, "getBoundingClientRect", { value: () => rect(0, 900) });
+  const scrollBy = vi.fn();
+  Object.defineProperty(scroller, "scrollBy", { value: scrollBy, configurable: true });
+
+  const row = document.createElement("div");
+  row.className = "msg-in";
+  const chip = document.createElement("a");
+  chip.setAttribute("data-source-index", "3");
+  Object.defineProperty(chip, "getBoundingClientRect", {
+    value: () => rect(opts.chipRect[0], opts.chipRect[1]),
+  });
+  row.appendChild(chip);
+  scroller.appendChild(row);
+  document.body.appendChild(scroller);
+  return { scroller, scrollBy, chip };
+}

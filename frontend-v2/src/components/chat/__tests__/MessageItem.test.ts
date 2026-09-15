@@ -118,6 +118,10 @@ describe("MessageItem streaming render", () => {
     expect(wrapper.text()).toContain("来源 2");
     expect(wrapper.text()).toContain("company.md");
     expect(wrapper.text()).toContain("policies.md");
+    // 序号即引用编号：正文里的 [n] 能直接对应到第 n 个 chip
+    const chips = wrapper.findAll("a[data-source-index]");
+    expect(chips.map((c) => c.attributes("data-source-index"))).toEqual(["1", "2"]);
+    expect(chips.map((c) => c.text())).toEqual(["1 company.md ×3", "2 policies.md"]);
     // 命中多段的来源标出数量，命中 1 段的不标
     expect(wrapper.text()).toContain("×3");
     expect(wrapper.text()).not.toContain("×1");
@@ -180,6 +184,29 @@ describe("MessageItem streaming render", () => {
     await copy.trigger("click");
     await nextTick();
     expect(writeText).toHaveBeenCalledWith("复制我");
+    wrapper.unmount();
+  });
+
+  it("收到 ↑ 编辑请求时就地展开编辑框并聚焦", async () => {
+    const chat = useChatStore();
+    const msg = reactive<ChatMsg>({ id: "m12", role: "user", content: "改我" });
+    chat.messages = [msg];
+    const wrapper = mount(MessageItem, {
+      props: { msg },
+      global: { stubs: { teleport: true } },
+    });
+    expect(wrapper.find("textarea").exists()).toBe(false);
+
+    chat.requestEdit(msg);
+    await nextTick();
+
+    const area = wrapper.find("textarea");
+    expect(area.exists()).toBe(true);
+    expect((area.element as HTMLTextAreaElement).value).toBe("改我");
+
+    // Esc 退出编辑态（不保存）
+    await area.trigger("keydown", { key: "Escape" });
+    expect(wrapper.find("textarea").exists()).toBe(false);
     wrapper.unmount();
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
@@ -54,7 +54,7 @@ describe("MessageList auto scroll", () => {
 
     chat.jumpToBottom();
     await nextTick();
-    await nextTick();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); // 滚动已合并到动画帧
 
     expect(list.scrollTop).toBe(1000);
     expect(chat.atBottom).toBe(true);
@@ -130,6 +130,116 @@ describe("MessageList auto scroll", () => {
     await nextTick();
 
     expect(wrapper.find("[data-new-divider]").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("历史加载中显示骨架，不闪欢迎页", async () => {
+    const chat = useChatStore();
+    chat.messages = [];
+    chat.historyLoading = true;
+
+    const wrapper = mount(MessageList, { global: { stubs: { MessageItem: true } } });
+
+    expect(wrapper.find("[data-testid='history-skeleton']").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("Multi-Agent 助手");
+
+    chat.historyLoading = false;
+    await nextTick();
+
+    expect(wrapper.find("[data-testid='history-skeleton']").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Multi-Agent 助手");
+    wrapper.unmount();
+  });
+
+  it("流式输出的滚动合并到动画帧（每帧最多滚一次）", async () => {
+    const chat = useChatStore();
+    chat.messages = [{ id: "m1", role: "assistant", content: "第一段", streaming: true }];
+    const wrapper = mount(MessageList, { global: { stubs: { MessageItem: true } } });
+    const list = wrapper.element as HTMLElement;
+    setScrollMetrics(list, { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 });
+    await wrapper.trigger("scroll"); // 贴底 → atBottom
+
+    let scrollWrites = 0;
+    Object.defineProperty(list, "scrollTop", {
+      get: () => 600,
+      set: () => {
+        scrollWrites += 1;
+      },
+      configurable: true,
+    });
+
+    // 连续两个 token（两次 watcher 触发）在同一个动画帧内
+    chat.messages[0].content += "a";
+    await nextTick();
+    chat.messages[0].content += "b";
+    await nextTick();
+    expect(scrollWrites).toBe(0); // 还没到动画帧，不做同步滚动
+
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(scrollWrites).toBe(1); // 两个 token 合并成一次
+
+    wrapper.unmount();
+  });
+});
+
+describe("欢迎页", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
+  it("展示能力卡片，点示例问题直接发送", async () => {
+    const chat = useChatStore();
+    const send = vi.spyOn(chat, "send").mockResolvedValue(undefined);
+
+    const wrapper = mount(MessageList, { global: { stubs: { MessageItem: true } } });
+
+    const caps = wrapper.find("[data-testid='welcome-capabilities']");
+    expect(caps.exists()).toBe(true);
+    expect(caps.text()).toContain("知识库检索");
+    expect(caps.text()).toContain("人工确认");
+
+    const examples = wrapper.findAll("[data-testid='welcome-examples'] button");
+    expect(examples.length).toBe(3);
+    await examples[0].trigger("click");
+    expect(send).toHaveBeenCalledWith("知识库中有什么内容？");
+
+    wrapper.unmount();
+  });
+
+  it("最近会话排除当前会话、最多 3 条，点击后切换并加载历史", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionsStore();
+    sessions.currentId = "s1";
+    sessions.list = [
+      { id: "s1", title: "当前空会话", created_at: "", updated_at: "2026-09-15T02:00:00Z" },
+      { id: "s2", title: "上一条", created_at: "", updated_at: "2026-09-15T01:00:00Z" },
+      { id: "s3", title: "上上条", created_at: "", updated_at: "2026-09-14T01:00:00Z" },
+      { id: "s4", title: "更早", created_at: "", updated_at: "2026-09-13T01:00:00Z" },
+      { id: "s5", title: "最早", created_at: "", updated_at: "2026-09-12T01:00:00Z" },
+    ];
+    const loadHistory = vi.spyOn(chat, "loadHistory").mockResolvedValue(undefined);
+
+    const wrapper = mount(MessageList, { global: { stubs: { MessageItem: true } } });
+    const rows = wrapper.findAll("[data-testid='welcome-recent'] button");
+    expect(rows.length).toBe(3);
+    expect(rows.map((r) => r.text()).join("|")).not.toContain("当前空会话");
+
+    await rows[0].trigger("click");
+    expect(sessions.currentId).toBe("s2");
+    expect(loadHistory).toHaveBeenCalledWith("s2");
+
+    wrapper.unmount();
+  });
+
+  it("没有别的会话时不出最近会话区块", async () => {
+    const sessions = useSessionsStore();
+    sessions.currentId = "only";
+    sessions.list = [{ id: "only", title: "新会话", created_at: "", updated_at: "" }];
+
+    const wrapper = mount(MessageList, { global: { stubs: { MessageItem: true } } });
+    expect(wrapper.find("[data-testid='welcome-recent']").exists()).toBe(false);
+
     wrapper.unmount();
   });
 });

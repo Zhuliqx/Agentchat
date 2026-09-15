@@ -28,3 +28,23 @@ export function absoluteTime(iso: string | undefined | null): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+export type DayBucket = "today" | "yesterday" | "earlier";
+
+/**
+ * 会话列表分组：按本地自然日分成 今天 / 昨天 / 更早。
+ *
+ * 用自然日而不是"最近 24 小时"——用户说的"昨天"是日历上的昨天；
+ * 用 setDate 推算昨天而不是减 86400000，跨夏令时也不会错。
+ * 缺失或非法时间归入"更早"，避免脏数据把会话顶到"今天"。
+ */
+export function dayBucket(iso: string | undefined | null, nowMs = Date.now()): DayBucket {
+  const t = new Date(iso || "").getTime();
+  if (!Number.isFinite(t)) return "earlier";
+  const d = new Date(nowMs);
+  d.setHours(0, 0, 0, 0);
+  const todayStart = d.getTime();
+  if (t >= todayStart) return "today"; // 时钟偏差产生的"未来"时间也按今天算
+  d.setDate(d.getDate() - 1);
+  return t >= d.getTime() ? "yesterday" : "earlier";
+}

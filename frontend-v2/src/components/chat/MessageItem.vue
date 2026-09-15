@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useThrottleFn } from "@vueuse/core";
 import { useChatStore, type ChatMsg } from "@/stores/chat";
 import { md } from "@/utils/markdown";
@@ -109,6 +109,7 @@ function confirmHitl(choice: "confirmed" | "cancelled") {
 
 const editing = ref(false);
 const editText = ref("");
+const editRef = ref<HTMLTextAreaElement | null>(null);
 function startEdit() {
   editText.value = props.msg.content;
   editing.value = true;
@@ -123,6 +124,16 @@ function saveEdit() {
   editing.value = false;
 }
 
+// ↑ 快捷键（输入框为空时）通过 store 请求编辑：这里就地展开编辑框并聚焦
+watch(
+  () => chat.editRequest,
+  (req) => {
+    if (!req || req.msgId !== props.msg.id) return;
+    startEdit();
+    nextTick(() => editRef.value?.focus());
+  },
+);
+
 /** 只有后面还有消息时才谈得上分支：最后一条没有可删除的后续内容 */
 const canBranch = computed(() => {
   const idx = chat.messages.indexOf(props.msg);
@@ -134,6 +145,7 @@ const canBranch = computed(() => {
   <div
     class="group msg-in flex gap-3 py-2.5"
     :class="msg.role === 'user' ? 'flex-row-reverse' : ''"
+    :aria-busy="msg.streaming ? 'true' : undefined"
   >
     <!-- 头像 -->
     <div
@@ -164,9 +176,11 @@ const canBranch = computed(() => {
           <!-- 编辑态：就地改写问题 -->
           <template v-if="editing">
             <textarea
+              ref="editRef"
               v-model="editText"
               rows="3"
               class="w-full resize-y rounded-xl border border-line-2 bg-surface px-3.5 py-2.5 text-base leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
+              @keydown.escape="cancelEdit"
             />
             <div class="mt-2.5 flex items-center justify-between gap-2">
               <span class="text-2xs text-ink-faint">修改后将从此处重新生成回复</span>
@@ -207,7 +221,7 @@ const canBranch = computed(() => {
           </span>
           <Tooltip :label="copied ? '已复制' : '复制'">
             <button
-              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink coarse:h-9 coarse:w-9"
               :aria-label="copied ? '已复制' : '复制'"
               @click="copyMsg"
             >
@@ -216,7 +230,7 @@ const canBranch = computed(() => {
           </Tooltip>
           <Tooltip label="编辑并重新发送">
             <button
-              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink"
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface hover:text-ink coarse:h-9 coarse:w-9"
               aria-label="编辑并重新发送"
               @click="startEdit"
             >
@@ -281,6 +295,8 @@ const canBranch = computed(() => {
             :title="sourceTitle(s)"
             @click.prevent="previewSource = s.path"
           >
+            <!-- 序号即正文里的引用编号：看到 [3] 就能直接对应到「3 xxx.md」 -->
+            <span class="mr-1 tabular-nums text-ink-faint">{{ i + 1 }}</span>
             {{ sourceName(s.path) }}
             <!-- 命中多段才标数量，避免噪音 -->
             <span v-if="s.hits && s.hits > 1" class="ml-1 text-ink-faint">×{{ s.hits }}</span>
@@ -298,7 +314,7 @@ const canBranch = computed(() => {
           </span>
           <Tooltip :label="copied ? '已复制' : '复制'">
             <button
-              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink"
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink coarse:h-9 coarse:w-9"
               :aria-label="copied ? '已复制' : '复制'"
               @click="copyMsg"
             >
@@ -307,7 +323,7 @@ const canBranch = computed(() => {
           </Tooltip>
           <Tooltip v-if="!msg.hitl" label="重新生成">
             <button
-              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 coarse:h-9 coarse:w-9"
               aria-label="重新生成"
               :disabled="chat.sending"
               @click="chat.retry(msg)"
@@ -317,7 +333,7 @@ const canBranch = computed(() => {
           </Tooltip>
           <Tooltip v-if="canBranch" label="从这里分支">
             <button
-              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              class="flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 coarse:h-9 coarse:w-9"
               aria-label="从这里分支"
               :disabled="chat.sending"
               @click="chat.startBranch(msg)"
