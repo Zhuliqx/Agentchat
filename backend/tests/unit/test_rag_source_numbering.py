@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import app.agents.tools.rag_tool as rag_tool
@@ -32,13 +33,26 @@ def _headers(text: str) -> list[str]:
     return [ln for ln in text.splitlines() if ln.startswith("【来源")]
 
 
+def _parse(header: str) -> tuple[int, int, str]:
+    """把「【来源 N｜本次第 M 位】文件名」拆成 (N, M, 文件名)。"""
+    head, _, name = header.partition("】")
+    num, _, rank = head.removeprefix("【来源 ").partition("｜本次第 ")
+    return int(num), int(rank.removesuffix(" 位")), name
+
+
+def _blocks(text: str) -> list[tuple[int, int, str]]:
+    return [_parse(h) for h in _headers(text)]
+
+
 def test_second_retrieval_reuses_run_level_numbering(monkeypatch):
     run_id = "test-run-tool-numbering"
     clear_rag_sources(run_id)
+    # 路径统一用正斜杠：Windows 上反斜杠是分隔符、Linux 上不是，
+    # 用反斜杠会让"文件名"在 CI 里变成整条路径，测试跟着平台飘
     retriever = _Retriever(
         [
-            [_Doc("kb\\company.md", "公司介绍"), _Doc("kb\\policies.md", "数据政策")],
-            [_Doc("kb\\policies.md", "数据政策"), _Doc("kb\\api.md", "接口说明")],
+            [_Doc("kb/company.md", "公司介绍"), _Doc("kb/policies.md", "数据政策")],
+            [_Doc("kb/policies.md", "数据政策"), _Doc("kb/api.md", "接口说明")],
         ]
     )
     monkeypatch.setattr(rag_tool, "get_retriever", lambda user_id=None: retriever)
@@ -54,24 +68,20 @@ def test_second_retrieval_reuses_run_level_numbering(monkeypatch):
     first = asyncio.run(tool.ainvoke({"query": "知识库有什么"}))
     second = asyncio.run(tool.ainvoke({"query": "数据怎么保留"}))
 
-    assert _headers(first)[0].startswith("【来源 1｜本次第 1 位】company.md")
-    assert _headers(first)[1].startswith("【来源 2｜本次第 2 位】policies.md")
+    assert _blocks(first) == [(1, 1, "company.md"), (2, 2, "policies.md")]
     # 第二次 policies.md 排到最前，编号仍复用 2、名次变成本次第 1；新来源接 3
-    assert _headers(second)[0].startswith("【来源 2｜本次第 1 位】policies.md")
-    assert _headers(second)[1].startswith("【来源 3｜本次第 2 位】api.md")
+    assert _blocks(second) == [(2, 1, "policies.md"), (3, 2, "api.md")]
 
-    # 与界面来源列表（chip 顺序）一致
-    assert [r["path"].split("\\")[-1] for r in get_recent_rag_source_refs(run_id)] == [
-        "company.md",
-        "policies.md",
-        "api.md",
-    ]
+    # 与界面来源列表（chip 顺序）一致：第二次的块正好是列表去掉第一项
+    assert [name for _, _, name in _blocks(second)] == [
+        Path(r["path"]).name for r in get_recent_rag_source_refs(run_id)
+    ][1:]
     clear_rag_sources(run_id)
 
 
 def test_without_run_id_keeps_per_call_numbering(monkeypatch):
     """没有 run_id（离线调用）时退回本次调用内的 1..N 编号，不报错也不串号。"""
-    retriever = _Retriever([[_Doc("kb\\a.md", "A 内容"), _Doc("kb\\b.md", "B 内容")]])
+    retriever = _Retriever([[_Doc("kb/a.md", "A 内容"), _Doc("kb/b.md", "B 内容")]])
     monkeypatch.setattr(rag_tool, "get_retriever", lambda user_id=None: retriever)
     monkeypatch.setattr(
         rag_tool,
@@ -83,5 +93,4 @@ def test_without_run_id_keeps_per_call_numbering(monkeypatch):
 
     out = asyncio.run(rag_tool._build_search_knowledge_base_tool().ainvoke({"query": "x"}))
 
-    assert _headers(out)[0].startswith("【来源 1｜本次第 1 位】a.md")
-    assert _headers(out)[1].startswith("【来源 2｜本次第 2 位】b.md")
+    assert _blocks(out) == [(1, 1, "a.md"), (2, 2, "b.md")]
