@@ -216,5 +216,6 @@ jobs:
 
       - name: "Runner sandbox tests"
         run: |
-          pip install pydantic-settings
+          # 只装这个 job 需要的：pytest + app.config 的依赖（测试会 import app.*）
+          pip install pytest pydantic-settings
           pytest backend/tests/integration/test_code_runner.py -q
