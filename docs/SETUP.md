@@ -1,7 +1,7 @@
 # 环境搭建（Setup）
 
 > 相关文档：见 [文档地图](README.md)；项目 2 见 [AGENT_TASK](AGENT_TASK.md)。
-> 最后校验：2026-09-06（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-16（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 本文档说明如何在 Windows（Docker Desktop 运行数据库）上把项目跑起来。
 Postgres 与 Milvus 是必需依赖；Redis 是**可选**基础设施（默认 `REDIS_ENABLED=false`，
@@ -197,6 +197,7 @@ npm run dev          # http://localhost:5173，/api 自动代理到 :8000
 | `npm run build` | 生产构建（`vue-tsc -b` 类型检查 + `vite build` → `dist/`） |
 | `npm run typecheck` | 仅类型检查 |
 | `npm run test` | Vitest 单元/组件测试（store / SSE / markdown / 关键组件） |
+| `npm run e2e` | Playwright E2E 冒烟（接口全部 route mock，不需要后端/LLM；自动构建并起 preview，首次需 `npx playwright install chromium`） |
 | `npm run lint` | ESLint 静态检查（Vue 3 + TypeScript） |
 | `npm run format` | Prettier 格式化 `src/` 与根配置文件 |
 | `npm run format:check` | 只检查格式，不写文件（CI 用） |

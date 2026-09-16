@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-14（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-16（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -23,7 +23,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 | **246 / 46**（另有 task-agent 独立包 **101**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 挂检索回归 + LLM-judge 质量评估 + 文档漂移检查（Ruff + pytest） |
+| 工程质量 | 单测 / 集成 / 前端 / E2E | **261 / 51 / 169 / 5**（另有 task-agent 独立包 **101**，合计 **587**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 五个 job：后端 Ruff+pytest、前端 lint/格式/类型/Vitest/Playwright E2E、容器沙箱回归、RAG 检索回归、LLM-judge 质量评估 + 文档漂移检查 |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
 
 ## 项目构成
@@ -74,7 +74,9 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **统一错误响应**：所有异常统一返回 JSON `{"detail", "code"}`，前端可读、不出现 HTML 500
 - **健壮性**：单轮请求超时（默认 120s）、LLM 请求超时/重试、rerank 模型后台预热
 - **容错**：模型调用统一 `middleware`（超时 + 耗时日志）、LLM 客户端网络重试（`LLM_MAX_RETRIES`）、子 Agent 调用自动重试（`SUBAGENT_RETRIES`）、图执行/LLM 提示缓存（`AGENT_CACHE_ENABLED`）、模型**离线加载**（`HF_OFFLINE=true`，HF 网络不可达时直接走本地缓存不联网检查）
-- **现代前端（frontend-v2）**：Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia；marked 官方 highlight 集成（marked-highlight + highlight.js 按需注册）+ DOMPurify 消毒；SSE 流式渲染、Agent 编排轨道（Orbit）、HITL 确认卡片、消息内分支（保留分支点、截断其后历史再续写）；Vitest 单元测试。构建产物由 FastAPI 托管
+- **现代前端（frontend-v2）**：Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia；marked 官方 highlight 集成（marked-highlight + highlight.js 按需注册）+ DOMPurify 消毒；SSE 流式渲染、Agent 编排轨道（Orbit）、HITL 确认卡片、消息内分支（保留分支点、截断其后历史再续写）；引用编号点击联动来源（并在 chip 上显示序号）、欢迎页能力总览、会话列表按 置顶/今天/昨天/更早 分组、触屏长按操作表、加载骨架与首帧主题；Vitest 单元测试 + Playwright E2E 冒烟。构建产物由 FastAPI 托管
+
+- **引用溯源与引用联动**：检索块头形如 `【来源 N｜本次第 M 位】`——`N` 是**整轮稳定**的来源编号（与界面来源列表一一对应，同一轮里检索多次也不会漂移），`M` 是本次检索的**相关性名次**；回答正文里的 `[n]` 点击即滚动并高亮对应来源 chip，chip 上也带序号便于人工核对
 
 ## 技术栈
 

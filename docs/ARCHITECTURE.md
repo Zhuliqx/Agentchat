@@ -1,6 +1,6 @@
 # 系统架构
 
-> 最后校验：2026-09-06（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-16（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 1. 文档地图（本仓库两个项目）
 
@@ -139,6 +139,11 @@ flowchart LR
 - **rerank**：融合后的 Top-N 候选经 `bge-reranker-base`（CrossEncoder）交叉编码精排，输出最终 top-k。
 - **跨库一致性**：Postgres 为事实源（`vector_status` pending/synced 标记），Milvus 用幂等
   `sync_chunks`（按 doc_id 删+插）同步；`reconcile_vectors` 对账任务清理幽灵向量/补缺失块。
+
+- **引用溯源编号**：检索工具输出的块头形如 `【来源 N｜本次第 M 位】`。`N` 由 `app/agents/tools/sources.py`
+  按 **run 级首次出现顺序**分配（同一轮内多次检索复用同一编号），因此与 `Message.sources`
+  的 chip 顺序严格一致——早先"每次检索各自从 1 重新编号"会让模型写的 `[n]` 指向另一个来源；
+  `M` 是该块在**本次**检索里的相关性名次（块按 `N` 排序输出，顺序本身不再表达相关性，故名次写进块头）。
 
 ## 6. MCP 架构
 
