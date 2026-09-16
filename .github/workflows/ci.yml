@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # 手动触发（gh workflow run CI）：不等定时、也不用为触发而特意推提交
+  workflow_dispatch:
   schedule:
     - cron: "17 3 * * *"  # 每天 03:17 UTC 全量回归（含 LLM-judge 质量评估）
 
