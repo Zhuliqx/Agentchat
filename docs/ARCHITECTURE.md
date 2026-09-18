@@ -1,6 +1,6 @@
 # 系统架构
 
-> 最后校验：2026-09-16（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-17（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 1. 文档地图（本仓库两个项目）
 
@@ -142,8 +142,8 @@ flowchart LR
 
 - **引用溯源编号**：检索工具输出的块头形如 `【来源 N｜本次第 M 位】`。`N` 由 `app/agents/tools/sources.py`
   按 **run 级首次出现顺序**分配（同一轮内多次检索复用同一编号），因此与 `Message.sources`
-  的 chip 顺序严格一致——早先"每次检索各自从 1 重新编号"会让模型写的 `[n]` 指向另一个来源；
-  `M` 是该块在**本次**检索里的相关性名次（块按 `N` 排序输出，顺序本身不再表达相关性，故名次写进块头）。
+  的 chip 顺序严格一致——编号必须整轮稳定，否则模型写的 `[n]` 会指向另一个来源；
+  `M` 是该块在**本次**检索里的相关性名次（块按 `N` 排序输出，顺序本身不表达相关性，故名次写进块头）。
 
 ## 6. MCP 架构
 
@@ -182,6 +182,13 @@ flowchart LR
 
 - **短期记忆**：`create_agent(..., checkpointer=AsyncPostgresSaver)` 编译，
   调用时 `config={"configurable": {"thread_id": session_id}}`，图状态（含历史 messages）跨请求持久化。
+- **Time Travel（从检查点分叉）**：`GET /api/sessions/{id}/checkpoints` 列出线程的 checkpoint（新→旧，含
+  `checkpoint_id` / `parent_checkpoint_id` / `next` / 摘要 / `interrupted`）；`/api/chat(/stream)` 传
+  `checkpoint_id` 即从该点继续——图以该检查点为父写入**新链**，旧分支的消息不会被删除（非破坏性）。
+  真实链路验证：同一问题"正常续问"与"从最旧检查点分叉"得到不同回答，DB 里 6 条消息全保留。
+  **粒度提醒**：checkpoint 是"每个节点/中间件钩子一条"（实测每轮约 7 条、约 57% 属 `*Middleware`），
+  接口默认 `limit=30`（约 4-5 轮即触顶）——要展示给用户必须先按轮次聚合，这也是前端只保留"消息内分支"的原因。
+
 ### 7.3 运行时上下文
 
 - **运行时上下文**：`create_agent(..., context_schema=UserContext)` 定义上下文类型，
