@@ -138,13 +138,13 @@ jobs:
           python scripts/ingest_docs.py ../data/kb --user evalexample
           python scripts/eval_rag.py --dataset ../data/eval/ground_truth.json --user evalexample
 
-      - name: "GT v2 加载校验（私有语料，仅校验可加载）"
+      - name: "GT v2 加载校验（字段演示，仅校验可加载）"
         working-directory: backend
         continue-on-error: true
         run: |
-          # v2 用例的 expected_sources 指向未入库的私有文档（docs/annual_report_2023.md 等），
-          # 所以这里只校验"能加载 + 含图片用例"，不跑检索（跑了也全是 0，没有参考价值）。
-          python -c "from app.evaluation.dataset import load_ground_truth; cs=load_ground_truth('tests/fixtures/eval/private_docs_v2.json'); ims=[c for c in cs if c.expected_images]; print('v2 cases:', len(cs), 'with-image:', len(ims)); assert len(cs)==8 and ims"
+          # 该 fixture 覆盖图片/表格/去重/口语字段，source 为占位路径、无配套语料，
+          # 因此只校验"能加载 + 含图片用例"，不跑检索。
+          python -c "from app.evaluation.dataset import load_ground_truth; cs=load_ground_truth('tests/fixtures/eval/demo_fields_v2.json'); ims=[c for c in cs if c.expected_images]; print('v2 cases:', len(cs), 'with-image:', len(ims)); assert len(cs)==8 and ims"
 
   # 端到端质量评估（LLM-judge 四指标，需 DEEPSEEK_API_KEY）：
   # 补 §15.2 自述的"四指标无自动化闭环"差距。push + nightly 运行，

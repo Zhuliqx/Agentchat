@@ -11,7 +11,7 @@
 | 入口 | [README](../README.md)（仓库根） | 项目概览 + 评估与质量 + 快速开始 |
 | 架构 | [ARCHITECTURE](ARCHITECTURE.md) | 系统架构总览（组件 / 流程 / 记忆 / HITL / 文件映射） |
 | 入门 | [EXPLAIN](EXPLAIN.md) | 10 分钟总览（实现细节以代码注释与 [ARCHITECTURE](ARCHITECTURE.md) 为准） |
-| 评测入口 | [EVAL](EVAL.md) | 评测资产索引：GT 清单（公开/私有）、脚本对照、产出目录、CI 里怎么跑 |
+| 评测入口 | [EVAL](EVAL.md) | 评测资产索引：GT 清单、脚本对照、产出目录、CI 里怎么跑 |
 | 可复现评估 | [REPRODUCIBLE_EVAL](REPRODUCIBLE_EVAL.md) | 公开示例语料 + 14 问评估集，检索级 MRR/Hit@1 可复现（含步骤） |
 | 部署 / 安装 | [DEPLOYMENT](DEPLOYMENT.md) · [SETUP](SETUP.md) | 部署扩展与演进 / 环境搭建 |
 | 运维 | [OBSERVABILITY](OBSERVABILITY.md) | Langfuse 可观测性接入 |

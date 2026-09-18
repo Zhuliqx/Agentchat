@@ -186,7 +186,7 @@ def test_eval_rag_load_cases_skips_no_source(tmp_path):
 
 def test_load_ground_truth_expected_images():
     """v2 GT（覆盖图片/图文/表格/去重/口语）应能被解析，图片维度生效。"""
-    cases = dataset.load_ground_truth(FIXTURES / "eval" / "private_docs_v2.json")
+    cases = dataset.load_ground_truth(FIXTURES / "eval" / "demo_fields_v2.json")
     assert len(cases) == 8
     im = next(c for c in cases if c.id == "v2_img01")
     assert im.expected_images == ["docs/annual_report_2023.md#1"]
