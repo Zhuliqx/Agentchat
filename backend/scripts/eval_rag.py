@@ -2,7 +2,7 @@
 
 用法：
     python scripts/eval_rag.py                        # 内置案例（关键词判定）
-    python scripts/eval_rag.py --dataset data/eval/ground_truth.json  # 用 GT 案例
+    python scripts/eval_rag.py --dataset data/eval/gt/ground_truth.json  # 用 GT 案例
     python scripts/eval_rag.py --compare A.json B.json
 
 判定说明：
@@ -30,7 +30,8 @@ from app.rag.retriever import get_retriever
 
 setup_utf8_stdio()
 
-EVAL_DIR = Path(__file__).resolve().parent.parent / "data" / "eval"
+# 数据集（GT）与产出分开：数据集在 data/eval/，评估产出统一写 data/eval_runs/
+RUNS_DIR = Path(__file__).resolve().parent.parent / "data" / "eval_runs"
 
 # 评估用知识库用户（--user 覆盖；默认 "default"，与既有行为一致）
 _USER_ID = "default"
@@ -251,8 +252,8 @@ def run_eval(cases: list[dict], mode: str, top_k: int) -> dict:
 
 
 def save_result(payload: dict) -> Path:
-    EVAL_DIR.mkdir(parents=True, exist_ok=True)
-    path = EVAL_DIR / f"rag_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    path = RUNS_DIR / f"rag_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"结果已保存: {path}")
     return path

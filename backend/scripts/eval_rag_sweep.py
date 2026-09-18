@@ -18,7 +18,7 @@ from app.config import settings
 # 复用同级 eval_rag 的检索级评估函数（脚本直接运行时 scripts/ 在 sys.path）
 from eval_rag import _collect_docs_retriever, _eval_case, _summarize, load_cases
 
-EVAL = Path("data/eval")
+EVAL = Path("data/eval/gt")
 
 
 def bench(dataset: str, overrides: dict, label: str) -> dict:
@@ -40,7 +40,7 @@ def bench(dataset: str, overrides: dict, label: str) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default=None, help="GT json（覆盖默认书面集）")
+    ap.add_argument("--dataset", default=None, help="GT 文件名（相对 data/eval/gt/，默认 ground_truth.json）")
     ap.add_argument("--sweep", action="store_true", help="只跑 P3-7 超参 sweep")
     args = ap.parse_args()
 

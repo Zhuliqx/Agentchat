@@ -31,7 +31,8 @@ from app.evaluation import dataset, setup_utf8_stdio
 setup_utf8_stdio()
 
 EVAL_DIR = Path(__file__).resolve().parent.parent / "data" / "eval"
-DEFAULT_GT = EVAL_DIR / "ground_truth.json"
+RUNS_DIR = Path(__file__).resolve().parent.parent / "data" / "eval_runs"
+DEFAULT_GT = EVAL_DIR / "gt" / "ground_truth.json"
 DEFAULT_MODELS = "BAAI/bge-small-zh-v1.5,BAAI/bge-base-zh-v1.5"
 TOP_K = 4
 
@@ -112,7 +113,7 @@ def _eval_model(model_name: str, chunks: list[dict], queries: list[str], expecte
 def main() -> None:
     parser = argparse.ArgumentParser(description="Embedding 选型对比（来源级命中）")
     parser.add_argument("--models", default=DEFAULT_MODELS, help="逗号分隔模型列表")
-    parser.add_argument("--dataset", default=None, help="GT json（默认 ground_truth.json）")
+    parser.add_argument("--dataset", default=None, help="GT json（默认 data/eval/gt/ground_truth.json）")
     parser.add_argument("--max-cases", type=int, default=0, help="只评估前 N 条")
     parser.add_argument("--pooling", default="cls", choices=["cls", "mean"], help="池化方式（bge-base 建议 mean）")
     args = parser.parse_args()
@@ -135,7 +136,8 @@ def main() -> None:
     for r in results:
         print(f"{r['model']:<40}{r['dim']:>6}{r['hit@1']:>8.4f}{r['hit@3']:>8.4f}{r['mrr']:>8.4f}")
 
-    out = EVAL_DIR / f"embedding_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    out = RUNS_DIR / f"embedding_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     out.write_text(__import__("json").dumps(
         {"timestamp": datetime.now().isoformat(timespec="seconds"),
          "gt": str(gt_path), "chunks": len(chunks), "results": results},

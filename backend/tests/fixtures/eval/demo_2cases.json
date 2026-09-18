@@ -1,6 +1,6 @@
 {
   "name": "rag-ground-truth-example",
-  "note": "公共示例数据集（可提交、CI 用）。请勿用它替代私有真实基准；仅用于演示 eval_quality.py / eval_rag.py 流程与单测。",
+  "note": "公共示例数据集（可提交）：仅用于单测与流程演示；CI 的质量/检索回归使用配套语料 data/kb + 评估集 data/eval/ground_truth.json。",
   "cases": [
     {
       "id": "demo_01",

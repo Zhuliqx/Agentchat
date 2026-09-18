@@ -30,6 +30,10 @@ jobs:
         working-directory: backend
         run: python scripts/check_docs_stale.py
 
+      - name: "Docs numbers consistency check"
+        working-directory: backend
+        run: python scripts/check_docs_numbers.py
+
       # Pyright 类型检查：报告但不阻塞（项目含大量第三方库类型噪音，
       # 见 docs/EXPLAIN.md；待 langchain 1.x 升级后收紧）
       - name: "Type check (Pyright, non-blocking)"
@@ -125,21 +129,22 @@ jobs:
         working-directory: backend
         run: pytest tests/integration/test_rag_regression.py -q
 
-      - name: "Retrieval regression (full GT MRR, non-blocking)"
+      - name: "Retrieval baseline on example corpus (non-blocking)"
         working-directory: backend
         continue-on-error: true
         run: |
-          # 暂用 CI fixture 作为 GT 真值（轻量、无需外部数据）；验混合检索召回防退化。
-          python -c "import json, pathlib; p=pathlib.Path('tests/fixtures/rag_ground_truth.example.json'); d=json.loads(p.read_text(encoding='utf-8')); print('GT cases:', len(d))"
-          python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.example.json
+          # 评估集 data/eval/ground_truth.json 的 expected_sources 指向示例语料 data/kb（5 篇），
+          # 必须喂同一套语料才有意义；用独立 user 与上面的 kb_ci.txt 隔离，避免互相抢召回。
+          python scripts/ingest_docs.py ../data/kb --user evalexample
+          python scripts/eval_rag.py --dataset ../data/eval/ground_truth.json --user evalexample
 
-      - name: "GT v2 (图片/图文/表格/去重/口语) 加载校验"
+      - name: "GT v2 加载校验（私有语料，仅校验可加载）"
         working-directory: backend
         continue-on-error: true
         run: |
-          # v2 覆盖当前设计：图片/图文双通道、表格/多栏、文档级去重、口语改写。
-          python -c "from app.evaluation.dataset import load_ground_truth; cs=load_ground_truth('tests/fixtures/rag_ground_truth.v2.json'); ims=[c for c in cs if c.expected_images]; print('v2 cases:', len(cs), 'with-image:', len(ims)); assert len(cs)==8 and ims"
-          python scripts/eval_rag.py --dataset tests/fixtures/rag_ground_truth.v2.json
+          # v2 用例的 expected_sources 指向未入库的私有文档（docs/annual_report_2023.md 等），
+          # 所以这里只校验"能加载 + 含图片用例"，不跑检索（跑了也全是 0，没有参考价值）。
+          python -c "from app.evaluation.dataset import load_ground_truth; cs=load_ground_truth('tests/fixtures/eval/private_docs_v2.json'); ims=[c for c in cs if c.expected_images]; print('v2 cases:', len(cs), 'with-image:', len(ims)); assert len(cs)==8 and ims"
 
   # 端到端质量评估（LLM-judge 四指标，需 DEEPSEEK_API_KEY）：
   # 补 §15.2 自述的"四指标无自动化闭环"差距。push + nightly 运行，
@@ -174,11 +179,13 @@ jobs:
           done
           docker compose ps
 
-      - name: "Init DB + ingest fixture"
+      - name: "Init DB + ingest example corpus"
         working-directory: backend
         run: |
           python scripts/init_db.py
-          python -c "from pathlib import Path; from app.rag.ingestion import ingest_file; print(ingest_file(Path('tests/fixtures/kb_ci.txt'), user_id='default'))"
+          # 质量评估的 GT（data/eval/ground_truth.json）以 data/kb 的 5 篇文档为出处，
+          # 必须喂同一套语料，否则 expected_sources 全不匹配、context_recall 恒为 0。
+          python scripts/ingest_docs.py ../data/kb --user default
 
       - name: "Quality eval (LLM-judge, max 10 cases, non-blocking)"
         continue-on-error: true
@@ -191,14 +198,14 @@ jobs:
             echo "DEEPSEEK_API_KEY not set; skipping quality eval"
             exit 0
           fi
-          python scripts/eval_quality.py --dataset tests/fixtures/rag_ground_truth.example.json --max-cases 10 --out data/eval/ci_quality.json --report
+          python scripts/eval_quality.py --dataset ../data/eval/ground_truth.json --max-cases 10 --out data/eval_runs/ci_quality.json --report
 
       - name: "Upload quality report"
-        if: always() && hashFiles('backend/data/eval/ci_quality*') != ''
+        if: always() && hashFiles('backend/data/eval_runs/ci_quality*') != ''
         uses: actions/upload-artifact@v5
         with:
           name: rag-quality-report
-          path: backend/data/eval/ci_quality*
+          path: backend/data/eval_runs/ci_quality*
 
   # 容器代码沙箱：构建 runner 镜像后验证网络/文件系统/资源边界
   code-runner:

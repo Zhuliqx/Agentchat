@@ -2,7 +2,7 @@
 
 用法（在 backend/ 下）：
     python scripts/audit_orphan_data.py
-    python scripts/audit_orphan_data.py --json-out data/eval/orphan_audit.json
+    python scripts/audit_orphan_data.py --json-out data/eval_runs/orphan_audit.json
     python scripts/audit_orphan_data.py --apply          # 二次确认 + 自动备份后清理
 
 默认只读；--apply 才会删除。判断项（重复消息、repro 用户文档等）默认保留，
@@ -390,7 +390,7 @@ def main() -> None:
     parser.add_argument("--yes", action="store_true", help="跳过交互确认（谨慎使用）")
     parser.add_argument(
         "--backup-dir",
-        default="data/eval/orphan_backups",
+        default="data/eval_runs/orphan_backups",
         help="清理前的完整行备份目录",
     )
     parser.add_argument(

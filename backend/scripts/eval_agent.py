@@ -3,7 +3,7 @@
 用法：
     python scripts/eval_agent.py --max-cases 5        # 试跑
     python scripts/eval_agent.py --runs 3             # 每任务跑 3 次取均值（推荐：LLM 路由有随机性）
-    python scripts/eval_agent.py --out data/eval/agent_eval.json
+    python scripts/eval_agent.py --out data/eval_runs/agent/agent_eval.json
 
 判定（规则，零 LLM 成本）：
 - rag/mcp/chat/multi：Route@1（首次工具选择正确）+ 工具集合命中（实际==期望）；

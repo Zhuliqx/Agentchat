@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-16（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-09-17（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -15,16 +15,19 @@
 
 | 领域 | 关键指标 | 结果 | 一句话结论 |
 |------|---------|------|-----------|
-| 检索质量（GT 40 条） | MRR / Hit@1 | **0.963 / 0.925** | 混合检索 + rerank，来源级命中（唯一基线见 [docs/README](docs/README.md)） |
-| 生成质量 | Faithfulness / Relevancy | **0.923 / 1.0** | LLM-judge 四指标，低幻觉（[唯一基线](docs/README.md)） |
-| 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益（[唯一基线](docs/README.md)） |
-| Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝（[唯一基线](docs/README.md)） |
+| 检索质量（GT 40 条） | MRR / Hit@1 | **0.963 / 0.925** | 混合检索 + rerank，来源级命中 |
+| 生成质量 | Faithfulness / Relevancy | **0.923 / 1.0** | LLM-judge 四指标，低幻觉 |
+| 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益 |
+| Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝 |
 | 性能（单 worker） | 检索 p50 / 吞吐 | 82ms / ~16 QPS | 单机满足小团队，扩展触发信号明确 |
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
-| Embedding 选型 | Hit@1（4 模型） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优（[唯一基线](docs/README.md)） |
+| Embedding 选型 | Hit@1（4 模型对比） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优 |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 / 前端 / E2E | **261 / 51 / 169 / 5**（另有 task-agent 独立包 **101**，合计 **587**；覆盖率沿用既有快照 app 41% / task-agent 87%） | CI 五个 job：后端 Ruff+pytest、前端 lint/格式/类型/Vitest/Playwright E2E、容器沙箱回归、RAG 检索回归、LLM-judge 质量评估 + 文档漂移检查 |
-| 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现（[步骤](docs/REPRODUCIBLE_EVAL.md)） |
+| 工程质量 | 单测 / 集成 / 前端 / E2E | 单测 **261** · 集成 **51** · 前端 **169** · E2E **5** · task-agent **101**（合计 **587**） | CI 五个 job 全绿：后端 Ruff+pytest、前端 lint/格式/类型/Vitest/E2E、容器沙箱、RAG 检索回归、LLM-judge 质量评估 |
+| 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现 |
+
+> 本表数字与 [docs/README 唯一基线](docs/README.md) 保持一致，由 `backend/scripts/check_docs_numbers.py` 在 CI 里校验（不一致直接失败）。
+> 评测资产清单与跑法见 [docs/EVAL](docs/EVAL.md)。
 
 ## 项目构成
 
@@ -63,7 +66,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
   - 支持**语义检索**（pgvector 索引）与**写入去重**（相似记忆合并覆盖）
 - **流式输出（SSE）**：`POST /api/chat/stream` **token 级流式**——Agent 调度事件实时推送，工具调用前先一次性推送完整开场白、工具完成后的答案逐 token 推送（自动去重重复前缀），前端实时渲染；同步 DB 调用放线程池，不阻塞事件循环
 - **人工确认（HITL）**：基于 LangGraph `interrupt`/`Command(resume)` 机制，前端弹出确认卡片，用户确认/取消后从断点继续（同一 `thread_id`）。**默认 LLM 自主判定**（类似 Claude Code/Codex）：由模型根据操作影响自主决定是否请求用户授权（`request_confirmation` 工具）；也可配置 `HITL_ACTIONS` 切换为**强制确认**（调用前无条件中断；有开关的动作在开关打开时自动豁免）
-- **时间旅行与消息内分支（Time Travel）**：后端基于 Checkpointer 保留 checkpoint 版本链，`GET /api/sessions/{id}/checkpoints` 可拉取时间线，`/api/chat(/stream)` 传 `checkpoint_id` 可从任意检查点分叉；前端不再提供检查点弹窗，改为**消息内分支**——在回答上点「从这里分支」，发送新消息时先原子截断其后的历史（`POST /api/sessions/{id}/truncate`）再从该点续写
+- **时间旅行与消息内分支（Time Travel）**：后端基于 Checkpointer 保留 checkpoint 版本链，`GET /api/sessions/{id}/checkpoints` 可拉取时间线，`/api/chat(/stream)` 传 `checkpoint_id` 可从任意检查点分叉（**已真实链路验证**：同一问题正常续问与从旧检查点分叉得到不同回答，原历史全部保留 —— 分叉生效且非破坏性）；前端不再提供检查点弹窗，改为**消息内分支**——在回答上点「从这里分支」，发送新消息时先原子截断其后的历史（`POST /api/sessions/{id}/truncate`）再从该点续写。**为何不做检查点 UI**：checkpoint 粒度是"每个中间件钩子一条"（实测每轮约 7 条、其中约 57% 是 `*Middleware` 步骤），直接展示噪音过大，要做用户可读的时间线得先按轮次聚合
 - **用户系统（JWT）**：注册 / 登录 / 会话与长期记忆**按用户隔离**；未携带 Authorization 头时归入 `default` 访客（不破坏单用户体验），带过期/无效 token 则返回 401；密码使用 PBKDF2-HMAC-SHA256 哈希，JWT HS256 签名
 - **知识库按用户隔离**：文档（Postgres + Milvus 向量）按 `user_id` 隔离，不同用户的知识库互不可见（上传/检索/删除/预览均校验归属）；`ingest_docs.py` 可用 `--user` 指定归属用户
 - **Prompt 注入防护**：检索/搜索外部内容按「不可信数据块」隔离；中英规则库检测命中即剔除+告警，用户 query 含注入指令直接拒绝（`INJECTION_DETECTION_ENABLED`）；可选 LLM 复核降误报（`INJECTION_LLM_REVIEW`）；输出侧泄露检测（系统提示词片段/密钥模式，`INJECTION_OUTPUT_FILTER`）
@@ -209,7 +212,7 @@ python run.py
 | GET/POST | `/api/sessions` | 会话列表 / 新建会话（按登录用户隔离） |
 | GET/PATCH/DELETE | `/api/sessions/{id}` | 会话历史 / 重命名 / 删除 |
 | GET | `/api/sessions/{id}/stats` | **会话数据分析**（消息数/回合/token/时长等） |
-| GET | `/api/sessions/{id}/checkpoints` | 会话 checkpoint 时间线（Time Travel 后端能力，前端未提供入口） |
+| GET | `/api/sessions/{id}/checkpoints` | 会话 checkpoint 时间线（Time Travel）。**已验证**：`checkpoint_id` 可分叉且非破坏性；粒度细（每轮约 7 条、约 57% 为中间件步骤）+ 默认 `limit=30`，UI 展示前需按轮次聚合 |
 | GET | `/api/sessions/{id}/export` | 导出会话为 Markdown |
 | POST | `/api/sessions/batch-delete` | 批量删除会话（含消息与 checkpoint） |
 | GET/POST | `/api/tasks` | 定时任务列表（公开）/ 新建（需平台操作员权限） |

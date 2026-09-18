@@ -12,7 +12,7 @@
 说明：
 - 检索与生产完全同路径（混合检索 + rerank + 上下文压缩），见 app.rag.retriever。
 - judge 固定 DeepSeek、temperature=0；生成器为对话主模型。
-- Ground truth 默认读取 data/eval/ground_truth.json（--dataset 覆盖）。
+- Ground truth 默认读取 data/eval/gt/ground_truth.json（--dataset 覆盖）。
 - 指标定义见 app/evaluation/metrics.py 与 docs/REPRODUCIBLE_EVAL.md。
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ from app.rag.retriever import get_retriever
 setup_utf8_stdio()
 
 EVAL_DIR = Path(__file__).resolve().parent.parent / "data" / "eval"
-DEFAULT_GT = EVAL_DIR / "ground_truth.json"
+DEFAULT_GT = EVAL_DIR / "gt" / "ground_truth.json"
 CONCURRENCY = 4
 
 # 评估用知识库用户（环境变量 RAG_EVAL_USER 覆盖；默认 "default"，与既有行为一致）
@@ -296,7 +296,7 @@ def _run(args: argparse.Namespace) -> int:
             print(f"没有匹配的案例 id: {args.only}")
             return 1
     if not cases:
-        print("ground truth 无案例，请先编写 data/eval/ground_truth.json")
+        print("ground truth 无案例，请先编写 data/eval/gt/ground_truth.json")
         return 1
 
     changed = _apply_overrides(args)

@@ -2,7 +2,7 @@
 
 用法（需 LLM key；backend/ 目录下）：
     python scripts/eval_task_agent.py
-    python scripts/eval_task_agent.py --max-cases 3 --out data/eval/task_agent_eval.json
+    python scripts/eval_task_agent.py --max-cases 3 --out data/eval_runs/task_agent_eval.json
 """
 from __future__ import annotations
 
