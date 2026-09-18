@@ -1,5 +1,7 @@
 # 可复现评估（公开示例语料）
 
+> 评测资产总索引（GT 清单 / 脚本 / 产出目录 / CI 用法）见 [EVAL.md](EVAL.md)。
+
 > 目的：让任何人 clone 仓库后，不依赖私有语料即可复现一套**真实、确定性的检索基线**。
 > 示例语料（`data/kb/`，5 个文件 / 20 块）与评估集（`data/eval/ground_truth.json`，14 问）均已入库。
 
@@ -33,12 +35,12 @@ python scripts/ingest_docs.py ..\data\kb --user default
 python scripts/eval_rag.py --dataset ..\data\eval\ground_truth.json --user default
 ```
 
-预期输出：`MRR=1.000  Hit@1=1.000  Hit@3=1.000  Hit@5=1.000`，结果 JSON 存到 `backend/data/eval/`。
+预期输出：`MRR=1.000  Hit@1=1.000  Hit@3=1.000  Hit@5=1.000`，结果 JSON 存到 `backend/data/eval_runs/`。
 
 ## 端到端四指标（需 LLM key，结果非确定）
 
 ```powershell
-python scripts/eval_quality.py --dataset ..\data\eval\ground_truth.json --user default --max-cases 14
+python scripts/eval_quality.py --dataset ..\data\eval\ground_truth.json --max-cases 14
 ```
 
 四指标（Precision / Recall / Faithfulness / Relevancy）由 LLM-judge 打分，受生成随机性影响，
@@ -51,3 +53,8 @@ python scripts/eval_quality.py --dataset ..\data\eval\ground_truth.json --user d
 - `data/eval/ground_truth.json`：14 问，覆盖 8 类考察点；`expected_sources` 按文件名子串匹配
   （与 `scripts/eval_rag.py` 的 source 模式判定一致）。
 - 新增语料/用例的约定：问题必须有唯一出处；新增用例后跑一次 `eval_rag` 更新本文件数字。
+
+## CI 里的用法
+
+CI 的两个评估 job（`rag-quality` / `rag-regression`）用的就是**这套**语料 + 评估集，
+逐 job 对照与"语料必须与 GT 成对"的约定见 [EVAL.md §CI 里怎么跑](EVAL.md)。
