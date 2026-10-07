@@ -294,6 +294,7 @@ class MemorySection(BaseModel):
 
     memory_semantic_search: bool = True         # 语义检索需要 Postgres 启用 pgvector 扩展
     memory_dedup_threshold: float = 0.86        # remember 语义去重阈值（余弦相似度）
+    memory_recall_limit: int = 6                # recall 按相关性返回的记忆条数上限（无索引时退回全量 50）
 
 
 class HITLSection(BaseModel):

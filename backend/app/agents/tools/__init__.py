@@ -29,7 +29,7 @@ from app.agents.tools.confirmation import (
 from app.agents.tools.mcp_tool import build_mcp_agent
 from app.agents.tools.memory_tools import (
     _MemoryContent,
-    _NoArgs,
+    _RecallQuery,
     build_recall_tool,
     build_remember_tool,
 )
@@ -71,7 +71,7 @@ __all__ = [
     "build_remember_tool",
     "build_recall_tool",
     "_MemoryContent",
-    "_NoArgs",
+    "_RecallQuery",
     "build_confirmation_tool",
     "_ConfirmQuery",
     "_AgentQuery",
