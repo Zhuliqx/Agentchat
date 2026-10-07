@@ -254,7 +254,9 @@ class RetrievalEnhancementsSection(BaseModel):
     intent_routing: bool = False                # 检索级意图路由（compare/list/chat/fact）
     dedup_near_duplicate: bool = False          # 语义近似去重（embedding 相似 ≥ 阈值仅留最高分）
     dedup_sim_threshold: float = 0.90           # 语义去重相似阈值
-    rag_max_total_chars: int = 0                # 0=不限制；>0 按分数降序累计截断
+    # 检索上下文总量上限（字符）：≈ 6 块 × rag_max_chunk_chars(1500)，0=不限制。
+    # 与历史压缩的 token 口径不同，这里按字符是为了零成本（不需要 tokenizer）。
+    rag_max_total_chars: int = 9000
     rag_multi_turn_context: bool = False        # 检索时把最近几轮会话历史拼进 query
     embed_with_context: bool = False            # 嵌入侧给块文本加章节/文件名前缀（需 force_reingest）
     rerank_section_context: bool = False        # rerank pair 文本带上章节/文件名前缀

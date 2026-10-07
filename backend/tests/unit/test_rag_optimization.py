@@ -124,3 +124,23 @@ def test_get_relevant_documents_intent_vector_filter(monkeypatch):
     # fact（走 else 分支）→ 触发 user_filter 引用
     docs = MilvusRetriever(user_id="default")._get_relevant_documents("公司成立于哪一年")
     assert docs and docs[0].metadata["source"] == "company.md"
+
+
+# ---------------- 检索上下文总量预算 ----------------
+
+def test_total_budget_caps_retrieval_context(monkeypatch):
+    """预算生效：按分数降序累计到上限即截断。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "rag_max_total_chars", 100)
+    hits = [{"text": "甲" * 80, "score": 0.9}, {"text": "乙" * 80, "score": 0.8}]
+    kept = _apply_total_budget(hits, settings.rag_max_total_chars)
+    assert len(kept) == 1
+    assert sum(len(h["text"]) for h in kept) <= 100
+
+
+def test_default_total_budget_is_bounded():
+    """默认必须有总量上限，否则检索上下文只受 top_k × max_per_doc 隐性约束。"""
+    from app.config import settings
+
+    assert settings.rag_max_total_chars > 0, "默认必须有总量上限，否则检索上下文无界"
