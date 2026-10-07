@@ -39,7 +39,7 @@ from langgraph.types import Command
 logger = logging.getLogger(__name__)
 
 from app.agents.context import UserContext, current_user_context
-from app.agents.llm import get_llm
+from app.agents.llm import current_model_fingerprint, get_llm
 from app.agents.middleware import build_supervisor_middlewares
 from app.agents.prompts import build_supervisor_prompt
 from app.agents.streaming import SupervisorStreamer
@@ -71,6 +71,31 @@ AGENT_TOOL_NAMES = ("rag_agent", "mcp_agent", "web_search")
 _graph_cache: dict[tuple, Any] = {}
 
 
+def _graph_cache_key(
+    use_rag: bool, use_search: bool, use_memory: bool
+) -> tuple:
+    """构建（并缓存）Supervisor 图时使用的配置指纹。
+
+    含：功能开关、checkpointer/store 就绪状态、历史压缩参数、调用上限，
+    以及**当前模型指纹**（模型变了必须重建图，否则会继续用旧模型）。
+    """
+    return (
+        use_rag,
+        use_search,
+        use_memory,
+        get_checkpointer() is not None,
+        get_store() is not None,
+        settings.history_summary_enabled,
+        settings.history_summary_trigger_tokens,
+        settings.history_summary_min_messages,
+        settings.history_summary_keep_messages,
+        settings.history_summary_max_input_tokens,
+        settings.agent_max_tool_calls,
+        settings.agent_max_model_calls,
+        current_model_fingerprint(),
+    )
+
+
 def clear_graph_cache() -> None:
     """清除图缓存。运行时切换模型后调用，使下次请求按新模型重建 Supervisor 图。"""
     _graph_cache.clear()
@@ -95,21 +120,7 @@ def get_supervisor_graph(
     use_rag: bool = True, use_search: bool = True, use_memory: bool = True
 ) -> Any:
     """构建（并缓存）Supervisor 图。可分别开关 RAG / 联网搜索 / 长期记忆。"""
-    # 配置指纹含 checkpointer/store 就绪状态，避免状态变化后继续使用过期图
-    key = (
-        use_rag,
-        use_search,
-        use_memory,
-        get_checkpointer() is not None,
-        get_store() is not None,
-        settings.history_summary_enabled,
-        settings.history_summary_trigger_tokens,
-        settings.history_summary_min_messages,
-        settings.history_summary_keep_messages,
-        settings.history_summary_max_input_tokens,
-        settings.agent_max_tool_calls,
-        settings.agent_max_model_calls,
-    )
+    key = _graph_cache_key(use_rag, use_search, use_memory)
     if key in _graph_cache:
         return _graph_cache[key]
 
