@@ -20,11 +20,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
+import anyio
 from langchain_core.caches import InMemoryCache
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    RemoveMessage,
+)
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
@@ -225,6 +234,73 @@ def _prepare_run(
     else:
         input_data = {"messages": [("user", question)]}
     return graph, input_data, config
+
+
+def display_messages_to_lc(history: Sequence[tuple[str, str]]) -> list[BaseMessage]:
+    """把「显示历史」(role, content) 转成 LangChain 消息，供重置图状态使用。
+
+    只认 user / assistant：其余角色（如 system）不该被重新注入模型上下文；
+    content 去空白后为空的条目跳过（空消息会被部分 provider 拒绝）。
+    """
+    out: list[BaseMessage] = []
+    for role, content in history:
+        text = (content or "").strip()
+        if not text:
+            continue
+        if role == "user":
+            out.append(HumanMessage(content=text))
+        elif role == "assistant":
+            out.append(AIMessage(content=text))
+    return out
+
+
+async def reset_thread_messages(
+    session_id: str, history: Sequence[tuple[str, str]]
+) -> bool:
+    """把线程状态重置为给定的显示历史（截断 / 分支后调用）。
+
+    用 ``RemoveMessage(REMOVE_ALL_MESSAGES)`` 整体替换 messages 通道——与
+    history_summary 中间件压缩历史时同一套语义。无 Checkpointer 时返回 False
+    （图本就在无状态模式运行，无需也无法重置）。
+    """
+    if get_checkpointer() is None or not session_id:
+        return False
+    graph = await anyio.to_thread.run_sync(get_supervisor_graph)
+    await graph.aupdate_state(
+        {"configurable": {"thread_id": session_id}},
+        {
+            "messages": [
+                RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                *display_messages_to_lc(history),
+            ]
+        },
+        # 必须显式指定 as_node：线程可能一个新 checkpoint 都没有（刚建会话就截断），
+        # 此时 LangGraph 无法推断"是谁写的"，会抛 InvalidUpdateError: Ambiguous update。
+        # 归到 model 节点：替换后的消息里没有未完成 tool_calls，条件边会落到 __end__，
+        # 与一轮正常结束后的状态一致，下一条用户消息按新会话继续。
+        as_node="model",
+    )
+    return True
+
+
+async def thread_messages(
+    session_id: str, limit: int | None = None
+) -> list[BaseMessage]:
+    """读取线程状态里的消息（按原顺序）；limit 非空时取末尾 limit 条。
+
+    无 Checkpointer 或读取失败返回空列表：调用方（截断后校验 / 多轮检索上下文）
+    把它当作"没有可用上下文"处理，不阻断主流程。
+    """
+    if get_checkpointer() is None or not session_id:
+        return []
+    try:
+        graph = await anyio.to_thread.run_sync(get_supervisor_graph)
+        snap = await graph.aget_state({"configurable": {"thread_id": session_id}})
+    except Exception as exc:  # noqa: BLE001 - 读状态失败不阻断主流程
+        logger.warning("读取线程状态失败 session=%s: %s", session_id, exc)
+        return []
+    msgs = list((getattr(snap, "values", None) or {}).get("messages") or [])
+    return msgs[-limit:] if limit else msgs
 
 
 async def list_checkpoint_history(

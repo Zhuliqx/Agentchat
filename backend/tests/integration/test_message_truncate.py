@@ -67,3 +67,44 @@ def test_truncate_rejects_message_from_other_session(client: TestClient) -> None
     finally:
         client.delete(f"/api/sessions/{sid_a}")
         client.delete(f"/api/sessions/{sid_b}")
+
+
+def test_truncate_resets_graph_state(client: TestClient) -> None:
+    """截断必须同时重置图状态，否则模型仍记得被删掉的对话（含截空场景）。"""
+    import asyncio
+
+    from app.agents.graph import reset_thread_messages, thread_messages
+    from app.db import postgres
+
+    sid = client.post("/api/sessions").json()["id"]
+    try:
+        postgres.add_message(sid, "user", "问题一")
+        postgres.add_message(sid, "assistant", "回答一")
+        second = postgres.add_message(sid, "user", "问题二")
+        postgres.add_message(sid, "assistant", "回答二")
+        asyncio.run(
+            reset_thread_messages(
+                sid,
+                [
+                    ("user", "问题一"),
+                    ("assistant", "回答一"),
+                    ("user", "问题二"),
+                    ("assistant", "回答二"),
+                ],
+            )
+        )
+        assert len(asyncio.run(thread_messages(sid))) == 4
+
+        r = client.post(f"/api/sessions/{sid}/truncate", json={"message_id": second.id})
+        assert r.json() == {"deleted": 2}
+
+        left = asyncio.run(thread_messages(sid))
+        assert [m.content for m in left] == ["问题一", "回答一"]
+
+        # 截空：全部删掉后状态里不应残留任何消息
+        first = client.get(f"/api/sessions/{sid}").json()[0]
+        emptied = client.post(f"/api/sessions/{sid}/truncate", json={"message_id": first["id"]})
+        assert emptied.json() == {"deleted": 2}
+        assert asyncio.run(thread_messages(sid)) == []
+    finally:
+        client.delete(f"/api/sessions/{sid}")

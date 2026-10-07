@@ -41,6 +41,15 @@ _HITL_CHECK_TTL = 5.0
 _hitl_checked: dict[str, float] = {}  # session_id -> monotonic ts
 
 
+def invalidate_pending_cache(session_id: str) -> None:
+    """清除某会话的 HITL 检查短路缓存。
+
+    截断/分支会改写历史（图状态随之重置），此前的"已确认无 pending"结论
+    不再成立，必须让下一次请求重新检查。
+    """
+    _hitl_checked.pop(session_id, None)
+
+
 # ---------------- 会话准备（同步 DB，放线程池） ----------------
 
 def _ensure_resume_checkpoint_conflict(
@@ -135,7 +144,7 @@ async def _save_assistant_if_final(
     触发 400，而非明确的 409。
     """
     if result.get("hitl_pending") is not None:
-        _hitl_checked.pop(session_id, None)
+        invalidate_pending_cache(session_id)
         return None
     # 输出侧泄露检测：回答含系统提示词片段/密钥模式 → 告警（不改回答）
     if settings.injection_output_filter:
