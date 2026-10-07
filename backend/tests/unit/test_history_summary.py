@@ -153,3 +153,33 @@ def test_graph_wiring_summarizes(monkeypatch):
     assert len(final) <= 6
     assert isinstance(final[-1], AIMessage)
     assert "最终回答" in str(final[-1].content)
+
+
+def test_upstream_summarization_hooks_still_exist(monkeypatch):
+    """SafeSummarizationMiddleware 依赖上游这些钩子；改名/删除必须让本测试失败。
+
+    上游 ``SummarizationMiddleware`` 一旦调整内部实现（切点算法、token 计数、
+    摘要前裁剪），本项目的复制实现会静默偏离——不会报错，只会行为不一致。
+    本用例把依赖面钉住，让升级在 CI 里显式失败而不是悄悄退化。
+    """
+    from langchain.agents.middleware import SummarizationMiddleware
+
+    # 类级方法：复制实现直接调用它们
+    for name in (
+        "_ensure_message_ids",
+        "_should_summarize",
+        "_determine_cutoff_index",
+        "_partition_messages",
+        "_trim_messages_for_summary",
+    ):
+        assert hasattr(SummarizationMiddleware, name), (
+            f"LangChain 升级后 {name} 不存在：SafeSummarizationMiddleware 的复制实现需要同步"
+        )
+
+    # token_counter 由上游在 __init__ 里注入为实例属性，只能在实例上校验
+    mw = _fake_middleware(monkeypatch)
+    assert mw is not None
+    assert callable(getattr(mw, "token_counter", None)), (
+        "LangChain 升级后 token_counter 不再是实例上的可调用属性："
+        "SafeSummarizationMiddleware 的复制实现需要同步"
+    )
