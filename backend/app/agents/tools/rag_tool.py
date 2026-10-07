@@ -5,6 +5,8 @@ import asyncio
 import logging
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from langchain_core.tools import StructuredTool
 from langgraph.runtime import get_runtime
@@ -94,6 +96,44 @@ def _front_load(docs: list) -> list:
     return [docs[0]] + docs[2:] + [docs[1]]
 
 
+_ROLE_BY_MESSAGE_TYPE = {"human": "user", "ai": "assistant"}
+
+
+def _to_display_like(msg: Any) -> Any:
+    """把线程状态里的 LangChain 消息归一成 ``_build_retrieval_context`` 认识的形状。
+
+    线程状态给的是 ``HumanMessage`` / ``AIMessage``（``type=human/ai``），而显示历史
+    给的是带 ``role`` 字段的行对象；两处形状不同，直接混用会让多轮上下文静默失效。
+    """
+    role = str(getattr(msg, "role", "") or "")
+    if not role:
+        role = _ROLE_BY_MESSAGE_TYPE.get(str(getattr(msg, "type", "") or ""), "")
+    content = getattr(msg, "content", "")
+    return SimpleNamespace(role=role, content=content if isinstance(content, str) else "")
+
+
+async def _recent_context_messages(session_id: str, limit: int) -> list:
+    """取多轮检索上文的源消息：**线程状态优先**，显示历史兜底。
+
+    线程状态才是模型实际看到的上下文（截断 / 摘要之后两者可能不同），所以优先读它；
+    无 Checkpointer（图在无状态模式运行）或读不到时回退消息表，保证该增强在
+    降级场景仍可用。
+    """
+    if not session_id:
+        return []
+    try:
+        from app.agents.graph import thread_messages  # 延迟导入防循环依赖
+
+        msgs = await thread_messages(session_id, limit)
+        if msgs:
+            return [_to_display_like(m) for m in msgs]
+    except Exception as exc:  # noqa: BLE001 - 读线程状态失败则回退消息表
+        logger.debug("读取线程状态失败，回退消息表：%s", exc)
+    from app.db import postgres  # 延迟导入防环
+
+    return await asyncio.to_thread(postgres.get_recent_messages, session_id, limit)
+
+
 def _build_search_knowledge_base_tool() -> StructuredTool:
     """知识库检索工具（按用户隔离）。
 
@@ -110,9 +150,7 @@ def _build_search_knowledge_base_tool() -> StructuredTool:
             # 改善"那第二个呢/它的价格呢"这类指代式追问的召回。
             session_id = getattr(rt.context, "session_id", "") or ""
             if settings.rag_multi_turn_context and session_id:
-                from app.db import postgres  # 延迟导入防环
-
-                msgs = await asyncio.to_thread(postgres.get_recent_messages, session_id, 6)
+                msgs = await _recent_context_messages(session_id, 6)
                 ctx = _build_retrieval_context(msgs)
                 if ctx:
                     query = f"{ctx}\n当前问题: {query}"

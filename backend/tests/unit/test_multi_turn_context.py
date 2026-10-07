@@ -79,3 +79,52 @@ def test_trailing_user_message_without_answer_still_used():
     ctx = _build_retrieval_context(msgs)
     assert "问题1" in ctx
     assert "答案1" in ctx
+
+
+def test_recent_context_prefers_thread_state(monkeypatch):
+    """多轮上下文优先读线程状态（模型实际看到的那份），不读显示历史。"""
+    import asyncio
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.agents.tools import rag_tool
+    from app.db import postgres
+
+    async def fake_thread_messages(session_id, limit=None):
+        # 线程状态里是 LangChain 消息（type=human/ai），不是带 role 字段的行对象
+        return [HumanMessage(content="第一问"), AIMessage(content="第一答")]
+
+    def boom(*args, **kwargs):
+        raise AssertionError("有线程状态时不应回退到消息表")
+
+    # rag_tool 内部惰性 import thread_messages，所以打桩打的是源模块
+    monkeypatch.setattr("app.agents.graph.thread_messages", fake_thread_messages)
+    monkeypatch.setattr(postgres, "get_recent_messages", boom)
+
+    msgs = asyncio.run(rag_tool._recent_context_messages("sid", 6))
+    text = rag_tool._build_retrieval_context(msgs)
+    assert text.startswith("[上文]")
+    assert "第一问" in text
+
+
+def test_recent_context_falls_back_to_table(monkeypatch):
+    """无 Checkpointer（线程状态为空）时回退到消息表，无 Docker 场景仍可用。"""
+    import asyncio
+
+    from app.agents.tools import rag_tool
+    from app.db import postgres
+
+    async def empty_thread_messages(session_id, limit=None):
+        return []
+
+    monkeypatch.setattr("app.agents.graph.thread_messages", empty_thread_messages)
+    monkeypatch.setattr(
+        postgres,
+        "get_recent_messages",
+        # 必须给问答对：_build_retrieval_context 只从"助手消息"往回配对，
+        # 单条用户消息本来就产不出上文（见 test_no_user_message_returns_empty 等）
+        lambda session_id, limit=6: [_msg("user", "表里的问题"), _msg("assistant", "表里的答案")],
+    )
+
+    msgs = asyncio.run(rag_tool._recent_context_messages("sid", 6))
+    assert "表里的问题" in rag_tool._build_retrieval_context(msgs)
