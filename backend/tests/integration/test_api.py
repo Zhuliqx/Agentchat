@@ -55,6 +55,9 @@ def test_health(client):
     assert body["status"] in ("ok", "degraded")
     assert body["postgres"]["ok"] is True
     assert body["milvus"]["connected"] is True
+    # Milvus 侧只给累计插入数（删除不回落），真实块数看 Postgres 事实源
+    assert "num_entities_cumulative" in body["milvus"]
+    assert isinstance(body["documents_chunks"], int)
     assert "redis" in body
     assert {"db", "time"}.issubset(set(body["mcp_servers"]))
 

@@ -388,12 +388,12 @@ def search(
 
 
 def stats() -> dict[str, Any]:
-    """collection 统计信息，用于健康检查。"""
+    """collection 统计（健康检查用）。row_count 来自 segment 统计，删除后不立即回落。"""
     try:
         s = _client().get_collection_stats(settings.milvus_collection)
         return {
             "collection": settings.milvus_collection,
-            "num_entities": s.get("row_count", 0),
+            "num_entities_cumulative": s.get("row_count", 0),
             "connected": True,
         }
     except Exception as exc:
