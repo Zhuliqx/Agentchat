@@ -242,6 +242,41 @@ def sync_chunks(
     )
 
 
+def add_chunks_multi(entries: list[dict[str, Any]], user_id: str = "default") -> list[str]:
+    """跨来源一次插入多篇文档的块（批量导入用）。
+
+    entries: [{"source": str, "chunks": [...], "doc_ids": [...], "vectors": [...]}]
+    一次 RPC 写完，避免"每篇文档一次 insert"——批量导入的主要开销之一。
+    幂等性由调用方负责（导入前按 source 删旧向量）。
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in entries:
+        chunks = entry["chunks"]
+        doc_ids = entry["doc_ids"]
+        vectors = entry["vectors"]
+        if not (len(chunks) == len(doc_ids) == len(vectors)):
+            raise ValueError("chunks / doc_ids / vectors 长度必须一致")
+        for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
+            rows.append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "doc_id": doc_ids[i],
+                    "user_id": user_id,
+                    "source": entry["source"],
+                    "chunk_index": i,
+                    "text": chunk["text"],
+                    "metadata_json": json.dumps(
+                        chunk.get("metadata") or {}, ensure_ascii=False
+                    ),
+                    "embedding": vec,
+                }
+            )
+    if not rows:
+        return []
+    _client().insert(settings.milvus_collection, rows)
+    return [r["id"] for r in rows]
+
+
 def delete_by_source(source: str, user_id: str | None = None) -> None:
     """按 source（可限定用户）删除该文档的所有向量。
 
@@ -249,6 +284,30 @@ def delete_by_source(source: str, user_id: str | None = None) -> None:
     user_id 为 None 时删除全部用户的该 source（兼容旧调用）。
     """
     _client().delete(settings.milvus_collection, filter=source_filter_expr(source, user_id))
+
+
+def delete_by_sources(
+    sources: list[str], user_id: str | None = None, chunk_size: int = 50
+) -> int:
+    """一次删掉多个 source 的向量（批量导入/重建用），返回发出的 RPC 次数。
+
+    ``delete_by_source`` 每次约 300ms（实测，与是否命中无关），逐源调用在千级
+    文档下是纯 RPC 开销；这里按 ``source in [...]`` 分组，每 chunk_size 个源
+    一次删除。表达式过长时 Milvus 会拒绝，故分组而不是一次全塞。
+    """
+    if not sources:
+        return 0
+    uf = user_filter_expr(user_id)
+    calls = 0
+    for i in range(0, len(sources), max(1, chunk_size)):
+        group = sources[i : i + chunk_size]
+        quoted = ", ".join(f'"{escape_source(s)}"' for s in group)
+        expr = f"source in [{quoted}]"
+        if uf:
+            expr += f" and {uf}"
+        _client().delete(settings.milvus_collection, filter=expr)
+        calls += 1
+    return calls
 
 
 def delete_by_ids(ids: list[str]) -> None:
