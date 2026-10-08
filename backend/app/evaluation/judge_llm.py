@@ -204,6 +204,88 @@ def build_generation_prompt(
     return sys, user
 
 
+# 官方 hallu_mod 模板（含示例与<response>要求），取自 CRUD-RAG（Apache-2.0），
+# 逐字保留示例——示例会显著影响模型是否"最小化纠正"而不是大段复述材料。
+_HALLU_FIX_TEMPLATE = """现在我有一段新闻的开头，和基于新闻开头的续写，但是，续写存在幻觉信息。我已经检索了一些可能和新闻相关的信息，希望你能根据检索信息，修改幻觉文本为正确的文本。以下是一个例子：
+
+新闻开头：新华社拉姆安拉1月21日电（记者高路 刘立伟）巴勒斯坦解放组织（巴解组织）21日宣布成立专门委员会，负责审查准备递交到国际刑事法院的案件。
+  巴解组织执委会当天在位于拉姆安拉的总统府举行会议，总统阿巴斯主持了会议。
+
+幻觉续写：巴解组织执委会认为，巴解组织成立专门委员会将有助于加强对巴以冲突的和平解决，同时也有利于促进地区和平与稳定。
+
+检索到的可能相关文档：会后散发的声明说，巴勒斯坦将成立一个委员会，负责审查准备递交到荷兰海牙国际刑事法院的案件，并根据重要性决定递交的先后顺序。
+    声明说，以色列扩建犹太人定居点以及去年夏季发动针对加沙地带的“护刃行动”是“准备最先递交到国际刑事法院的案件”。
+    声明还强调，由于以色列方面冻结向巴勒斯坦政府转交代收税款，对巴勒斯坦人实施“集体惩罚”，巴勒斯坦方面将“认真考虑”是否继续与以色列实施安全合作。
+
+分析：巴解组织执委会认为成立专门委员会是合理的，目的是加强对巴以冲突的审查。巴解组织执委会也认为促进地区和平是合理的，但与成立专门委员会无直接关系。但是，巴解组织执委会认为和平解决不合理，因为该专门委员会的成立是为了审查递交至国际刑事法院的案件，与提及的“和平解决”无直接关系。同样地，巴解组织执委会认为稳定也不合理，因为该专门委员会的任务与稳定无直接联系。
+
+纠正文本：
+<response>
+巴解组织执委会认为，成立专门委员会审查递交至国际刑事法院的案件是非常必要的。
+</response>
+
+新闻开头：{begin}
+
+幻觉续写：{hallu_continue}
+
+检索到的可能相关文档：{search_documents}
+
+
+请给出你的纠正文本。请特别注意，纠正文本时，不要引入新的，无关的信息。请特别注意，即使检索文档中有类似的信息，如果他与纠正幻觉无关，也请不要加入到纠正的文本中。回答在<response></response>之间。"""
+
+
+def build_hallu_fix_prompt(
+    news_beginning: str, hallucinated_continuation: str, docs: list[dict]
+) -> tuple[str, str]:
+    """幻觉纠正的改写生成（CRUD-RAG hallu_modified 官方模板口径）。
+
+    只允许依据新闻开头与检索材料改写；docs 为空时等价于"无 RAG"基线。
+    """
+    material = "\n".join(
+        str(d.get("text") or "")[:800] for d in docs
+    ) if docs else "（无检索材料）"
+    user = _HALLU_FIX_TEMPLATE.format(
+        begin=news_beginning,
+        hallu_continue=hallucinated_continuation,
+        search_documents=material,
+    )
+    sys = "你是严谨的新闻编辑。只依据给定材料纠正幻觉，不引入材料之外的信息。"
+    return sys, user
+
+
+def build_hallu_judge_prompt(
+    news_beginning: str,
+    hallucinated_continuation: str,
+    reference_corrected: str,
+    candidate: str,
+    docs: list[dict] | None = None,
+) -> tuple[str, str]:
+    """评审幻觉纠正结果：是否纠错 / 是否残留虚假信息 / 是否引入新事实。"""
+    sys = _SYS_RULES + (
+        "\n\n任务：判断【候选修订】是否完成了对【幻觉续写】的纠错。"
+        "【参考修订】是数据集的人工正确版本，作为判定依据；"
+        "允许候选与参考措辞不同、详略不同。\n"
+        "- fixes_hallucination：候选是否把幻觉内容纠正为与参考修订一致的合理表述"
+        "（没有残留与参考冲突的假信息）。\n"
+        "- kept_false_claims：候选是否仍包含被参考修订删掉/改掉的虚假信息"
+        "（如原文事实中不存在的机构、事件、人物行为）。\n"
+        "- added_new_claims：候选是否引入了【新闻开头】【幻觉续写】【参考修订】【检索材料】"
+        "都没有的新事实。\n"
+        '输出严格 JSON：{"fixes_hallucination": true/false, '
+        '"kept_false_claims": true/false, "added_new_claims": true/false}。'
+    )
+    # 与生成端（build_hallu_fix_prompt 的 800）保持一致，避免"材料里有但被截断"误判为新事实
+    material = _json_text(_format_docs(docs or [], max_chars=800)) if docs else "（无检索材料）"
+    user = (
+        f"新闻开头：{news_beginning}\n\n"
+        f"幻觉续写：{hallucinated_continuation}\n\n"
+        f"参考修订：{reference_corrected}\n\n"
+        f"检索材料：\n{material}\n\n"
+        f"候选修订：{candidate}\n\n只输出 JSON。"
+    )
+    return sys, user
+
+
 def jump_to_json(text: str | None) -> dict:
     """解析 LLM 输出的 JSON 对象：剥离代码围栏与前后杂文，失败返回 {}。"""
     if not text:

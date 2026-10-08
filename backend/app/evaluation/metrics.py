@@ -117,3 +117,64 @@ def safe_bool_list(raw: object, expected_len: int) -> list[bool]:
 
 def macro_average(scores: Sequence[float]) -> float:
     return _safe_ratio(sum(float(s) for s in scores), len(scores))
+
+
+# ---------------- 字符级文本相似度（中文幻觉纠正评估用，无外部依赖） ----------------
+
+
+def _char_ngram_counts(text: str, n: int) -> dict[str, int]:
+    """字符 n-gram 计数（去空白后按字符切分，适配中文）。"""
+    s = "".join((text or "").split())
+    counts: dict[str, int] = {}
+    for i in range(len(s) - n + 1):
+        gram = s[i : i + n]
+        counts[gram] = counts.get(gram, 0) + 1
+    return counts
+
+
+def char_bleu(candidate: str, reference: str, n: int = 1) -> float:
+    """字符级 BLEU-n（含简短惩罚）；候选/参考为空时返回 0。"""
+    import math
+
+    cand = "".join((candidate or "").split())
+    ref = "".join((reference or "").split())
+    if not cand or not ref or len(cand) < n:
+        return 0.0
+    cand_grams = _char_ngram_counts(cand, n)
+    ref_grams = _char_ngram_counts(ref, n)
+    total = sum(cand_grams.values())
+    if total == 0:
+        return 0.0
+    clipped = sum(min(cnt, ref_grams.get(g, 0)) for g, cnt in cand_grams.items())
+    precision = clipped / total
+    bp = 1.0 if len(cand) >= len(ref) else math.exp(1 - len(ref) / max(1, len(cand)))
+    return bp * precision
+
+
+def char_bleu_avg(candidate: str, reference: str) -> float:
+    """1~4 元字符 BLEU 的算术平均。
+
+    不用几何平均：参考修订只有一句话时 3/4-gram 常为 0，几何平均会整体归零、
+    失去区分度；算术平均对短参考更稳（与 CRUD-RAG 论文的 bleu-avg 口径一致）。
+    """
+    return sum(char_bleu(candidate, reference, n) for n in (1, 2, 3, 4)) / 4.0
+
+
+def rouge_l_f1(candidate: str, reference: str) -> float:
+    """字符级 ROUGE-L：最长公共子序列的 F1（去空白、按字符）。"""
+    cand = "".join((candidate or "").split())
+    ref = "".join((reference or "").split())
+    if not cand or not ref:
+        return 0.0
+    prev = [0] * (len(ref) + 1)
+    for ch in cand:
+        cur = [0] * (len(ref) + 1)
+        for j, rch in enumerate(ref, start=1):
+            cur[j] = prev[j - 1] + 1 if ch == rch else max(prev[j], cur[j - 1])
+        prev = cur
+    lcs = prev[-1]
+    if lcs == 0:
+        return 0.0
+    precision = lcs / len(cand)
+    recall = lcs / len(ref)
+    return 2 * precision * recall / (precision + recall)
