@@ -91,6 +91,32 @@ python scripts/eval_rag.py --dataset ..\data\eval_corpus\crud_1doc_gt_sample.jso
 > 摄入注意：全池一次批量摄入（单事务约 8.5 万块）在本机出现 PG 写入卡死；拆成每批约 1 万块
 > （约 70s/批、零失败）稳定完成。建议后续给 `batch_ingest` 增加分批提交（每批 1-2 万行）。
 
+## 外部基准：LongBench 中文子集（长文档 / 多文档检索）
+
+[LongBench](https://github.com/THUDM/LongBench)（THUDM；数据在其 HuggingFace 仓库的 `data.zip`，
+各子任务源自其上游数据集）里挑出 3 个"有可判定支撑文档"的中文子集做检索级评测；
+vcsum（会议摘要）没有单一支撑段落，不适用检索口径。
+
+```powershell
+python scripts/import_longbench.py --src <解压后的 data 目录>
+python scripts/ingest_docs.py ..\data\eval_corpus\longbench_dureader --user lb_dureader --batch
+python scripts/eval_rag.py --dataset ..\data\eval_corpus\longbench_dureader_gt.json --user lb_dureader --top-k 6
+# multifieldqa_zh / passage_retrieval_zh 同理（换语料目录与 --user）
+```
+
+实测（2026-10-08，top_k 6 + rerank 候选 12）：
+
+| 子集（题型） | 语料规模 | 题量 | MRR | Hit@1 | Hit@3 | Hit@5 |
+|---|---|---|---|---|---|---|
+| dureader（多文档问答） | 4,000 篇 / 7,761 块 | 148 | 0.563 | 0.345 | 0.723 | 0.919 |
+| multifieldqa_zh（长文档问答） | 200 篇 / 2,253 块 | 200 | 0.635 | 0.480 | 0.780 | 0.845 |
+| passage_retrieval_zh（段落检索） | 6,000 篇 / 6,000 块 | 200 | 0.485 | 0.255 | 0.720 | 0.860 |
+
+口径：dureader 的支撑文章按"答案探针（去尾标点）精确匹配，否则最长公共子串 ≥12 且严格大于次优"
+自动标注，200 题中 148 题可判定（其余答案过于抽象/歧义，跳过）；passage_retrieval_zh 按答案里的
+"段落N"直接标注；multifieldqa_zh 的支撑文档即该题自己的长文。命中判定走 `eval_rag` 的 source 模式。
+注：LongBench 部分段落的原文含 NUL（0x00）坏字符，PG 拒收——导入器已统一清洗。
+
 ## 语料与评估集设计
 
 - `data/kb/`：company（事实）/ products（套餐与价格表、对比、私有化部署要求）/ faq（试用/退款/客服/部署方式）/

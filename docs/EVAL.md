@@ -19,6 +19,7 @@
 | `backend/tests/fixtures/eval/demo_fields_v2.json` | 8 | —（字段演示，source 为占位） | 覆盖图片/表格/去重/口语字段，仅校验解析 |
 | `data/eval_corpus/crud_hallu_gt*.json` | 1268（抽样 200） | `crud_hallu_db/`（5130 篇检索池） | CRUD-RAG 幻觉纠正（外部参考 + LLM judge） |
 | `data/eval_corpus/crud_{1doc,2docs,3docs}_gt*.json` | 2510 / 3773 / 4102 | `crud_{1doc,2docs,3docs}/` | CRUD-RAG 检索级 QA（MRR / Hit@K） |
+| `data/eval_corpus/longbench_*_gt*.json` | dureader 148 / multifieldqa 200 / passage 200 | `longbench_*/`（4,000 / 200 / 6,000 篇） | LongBench 中文长文 / 多文档检索（MRR / Hit@K） |
 
 > CRUD-RAG 系列由上游公开数据**本地生成**（`scripts/import_crud_rag.py` / `import_crud_hallu.py`，
 > 输出到 `data/eval_corpus/`，已 gitignore），生成方式与实测数字见 [REPRODUCIBLE_EVAL.md](REPRODUCIBLE_EVAL.md)。
@@ -35,6 +36,7 @@
 | `scripts/eval_hallu.py` | 幻觉纠正（纠正率 / 残留 / 坏词 / BLEU / ROUGE-L） | 是 | `--dataset` hallu GT + `--user` 检索池；`--no-retrieval` 为无 RAG 基线 | `--out` 指定（如 `hallu_retrieval_200.json`） |
 | `scripts/import_crud_rag.py` · `import_crud_hallu.py` | 从 CRUD-RAG 上游数据生成评估语料 | 否 | `--src`（上游数据目录；hallu 需额外 `hallu_docs/`） | `data/eval_corpus/` |
 | `scripts/build_scale_pool.py` | 文档池规模阶梯语料（每行一文件） | 否 | `--src` 指向 80000_docs；`--limit` / `--exclude-dir` | 输出目录（`pool_*.txt`） |
+| `scripts/import_longbench.py` | 从 LongBench data.zip 生成检索评估语料 | 否 | `--src`（解压后的数据目录） | `data/eval_corpus/` |
 | `scripts/eval_rag_sweep.py` | 混合检索超参 sweep / 三档复测 | 否 | `--dataset` 收 GT 文件名（相对 `data/eval/gt/`；三档复测另读口语集与难例集，文件名见脚本） | 控制台的 JSON 汇总 |
 | `scripts/benchmark.py` | 性能压测（检索链路 / 完整对话） | 对话档需要 | 运行中的服务 | 控制台 |
 
