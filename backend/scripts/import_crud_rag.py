@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""把 CRUD-RAG 的 1doc 问答集转成本项目的评估语料 + GT。
+"""把 CRUD-RAG 的 1/2/3doc 问答集转成本项目的评估语料 + GT。
 
 数据来源（Apache-2.0）：https://github.com/IAAR-Shanghai/CRUD_RAG
 需要这些文件（从仓库 raw 下载）：
@@ -8,10 +8,10 @@
   - src/quest_eval/QuestAnswer2Docs_quest_gt_save.json
   - src/quest_eval/QuestAnswer3Docs_quest_gt_save.json
 
-产出：
-  - data/eval_corpus/crud_<task>/...               # 每篇文档一个文件
-  - data/eval_corpus/crud_<task>_gt.json           # 全量 GT
-  - data/eval_corpus/crud_<task>_gt_sample.json    # 抽样 GT（--sample-size）
+产出（1doc 沿用上游单数、2/3docs 复数，与 data/eval_corpus/ 既有目录一致）：
+  - data/eval_corpus/crud_{1doc,2docs,3docs}/            # 每篇文档一个文件
+  - data/eval_corpus/crud_{1doc,2docs,3docs}_gt.json     # 全量 GT
+  - ..._gt_sample.json                                   # 抽样 GT（--sample-size）
 
 用法：
     python scripts/import_crud_rag.py --src C:\\path\\to\\crud_rag
@@ -30,15 +30,16 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_OUT = PROJECT_ROOT / "data" / "eval_corpus"
 
+# (split_key, 文档字段, 上游 GT 文件, 产物名)；1doc 单数沿用上游 gt_1doc.json 与既有语料命名
 TASKS = {
-    "1docs": ("questanswer_1doc", ["news1"], "gt_1doc.json"),
-    "2docs": ("questanswer_2docs", ["news1", "news2"], "gt_2docs.json"),
-    "3docs": ("questanswer_3docs", ["news1", "news2", "news3"], "gt_3docs.json"),
+    "1docs": ("questanswer_1doc", ["news1"], "gt_1doc.json", "1doc"),
+    "2docs": ("questanswer_2docs", ["news1", "news2"], "gt_2docs.json", "2docs"),
+    "3docs": ("questanswer_3docs", ["news1", "news2", "news3"], "gt_3docs.json", "3docs"),
 }
 
 
 def _load(src: Path, task: str) -> tuple[list[dict], dict]:
-    split_key, fields, gt_file = TASKS[task]
+    split_key, _, gt_file, _ = TASKS[task]
     split = json.loads((src / "split_merged.json").read_text(encoding="utf-8"))
     gt = json.loads((src / gt_file).read_text(encoding="utf-8"))
     records = [r for r in split[split_key] if r.get("ID")]
@@ -51,9 +52,9 @@ def _doc_name(task: str, doc_id: str, slot: int) -> str:
 
 
 def build(src: Path, out_root: Path, sample_size: int, task: str) -> None:
-    _, fields, _ = TASKS[task]
+    _, fields, _, artifact = TASKS[task]
     records, gt = _load(src, task)
-    corpus_dir = out_root / f"crud_{task}"
+    corpus_dir = out_root / f"crud_{artifact}"
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     docs: dict[str, list[str]] = {
@@ -102,26 +103,26 @@ def build(src: Path, out_root: Path, sample_size: int, task: str) -> None:
         ),
         "cases": cases,
     }
-    (out_root / f"crud_{task}_gt.json").write_text(
+    (out_root / f"crud_{artifact}_gt.json").write_text(
         json.dumps(full, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     sample = dict(full)
     sample["name"] = f"crud-rag-{task}-sample"
     sample["cases"] = random.Random(20261008).sample(cases, min(sample_size, len(cases)))
-    (out_root / f"crud_{task}_gt_sample.json").write_text(
+    (out_root / f"crud_{artifact}_gt_sample.json").write_text(
         json.dumps(sample, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     total_chars = sum(len(t) for texts in docs.values() for t in texts)
     print(f"[{task}] 文档 {written} 篇 / {total_chars} 字符 → {corpus_dir}")
-    print(f"[{task}] 全量 GT {len(cases)} 问 → crud_{task}_gt.json")
-    print(f"[{task}] 抽样 GT {len(sample['cases'])} 问 → crud_{task}_gt_sample.json")
+    print(f"[{task}] 全量 GT {len(cases)} 问 → crud_{artifact}_gt.json")
+    print(f"[{task}] 抽样 GT {len(sample['cases'])} 问 → crud_{artifact}_gt_sample.json")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="导入 CRUD-RAG 1doc 作为评估语料")
-    ap.add_argument("--src", required=True, help="放着 split_merged.json 与 gt_1doc.json 的目录")
+    ap = argparse.ArgumentParser(description="导入 CRUD-RAG 1/2/3doc 问答集作为评估语料")
+    ap.add_argument("--src", required=True, help="放着 split_merged.json 与 gt_*.json 的目录")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help="输出目录（默认 data/eval_corpus）")
     ap.add_argument("--sample-size", type=int, default=300, help="抽样 GT 的题量")
     ap.add_argument("--task", default="1docs", choices=sorted(TASKS), help="任务类型")
