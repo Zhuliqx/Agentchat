@@ -117,6 +117,37 @@ python scripts/eval_rag.py --dataset ..\data\eval_corpus\longbench_dureader_gt.j
 "段落N"直接标注；multifieldqa_zh 的支撑文档即该题自己的长文。命中判定走 `eval_rag` 的 source 模式。
 注：LongBench 部分段落的原文含 NUL（0x00）坏字符，PG 拒收——导入器已统一清洗。
 
+## 外部基准：XFUND 中文表单（图文双通道）
+
+[XFUND](https://github.com/doc-analysis/XFUND)（ACL 2021 多语言表单理解）中文子集：50 份真实中文扫描表单
+（zh.val）+ 字段键值标注。每份表单转单页 PDF 入库，验证 `IMAGE_DUAL_CHANNEL`（Chinese-CLIP 图片向量
+与文本通道融合）。图片与标注在 GitHub Releases v1.0（直连不稳时可给下载 URL 加 `https://gh-proxy.com/` 前缀）：
+
+```powershell
+# 下载 zh.val.zip / zh.val.json 并解压后：
+python scripts/import_xfund.py --json <...>\zh.val.json --images <...>\images
+# 摄入与评测都要开图片通道（默认关）；纯图片 PDF 走非批量路径
+$env:IMAGE_DUAL_CHANNEL="true"
+python scripts/ingest_docs.py ..\data\eval_corpus\xfund_zh --user docvqa_zh
+python scripts/eval_rag.py --dataset ..\data\eval_corpus\xfund_zh_title_gt.json --user docvqa_zh --top-k 6
+python scripts/eval_rag.py --dataset ..\data\eval_corpus\xfund_zh_gt.json --user docvqa_zh --top-k 6
+```
+
+实测（2026-10-08，top_k 6 + rerank 候选 12）：
+
+| 查询类型 | 规模 | MRR | Hit@1 | Hit@3 | Hit@5 |
+|---|---|---|---|---|---|
+| 表单标题/字段组合（语义查询） | 50 | 0.752 | 0.680 | 0.760 | 0.880 |
+| 字段名（"姓名:" 等，跨 50 份相似表单） | 300（抽样） | 0.206 | 0.113 | 0.250 | 0.380 |
+| 字段名（同一 300 条，图片通道关闭） | 300 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+结论与边界：
+- 图片通道对"纯图片文档"是**唯一通路**（关闭即 0 命中）；语义查询下 MRR 0.75，通道有效。
+- 细粒度"图内文字"检索偏弱（字段名跨表单天然歧义 + CLIP 不擅长细小文字）——这类场景应打开
+  `IMAGE_OCR_ENABLED`（图内文字抽成文本块）或加 VLM 描述，而不是只靠图片向量。
+- 工程注意：批量摄入对"纯图片 PDF"（无文本、OCR/VLM 关）会产出 0 块并**静默跳过**；
+  本次用非批量路径摄入。后续可让 `batch_ingest` 对纯图片文档也写图片向量。
+
 ## 语料与评估集设计
 
 - `data/kb/`：company（事实）/ products（套餐与价格表、对比、私有化部署要求）/ faq（试用/退款/客服/部署方式）/
