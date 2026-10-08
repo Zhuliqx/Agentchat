@@ -2,8 +2,8 @@
 
 用法：
     python scripts/eval_hallu.py --dataset ..\\data\\eval_corpus\\crud_hallu_gt_sample.json --user hallueval
-    python scripts/eval_hallu.py ... --no-retrieval --out data/eval_runs/hallu_no_retrieval.json  # 无 RAG 基线
-    python scripts/eval_hallu.py ... --input hallucinated --out ...                               # judge 灵敏度自查
+    python scripts/eval_hallu.py ... --no-retrieval --out hallu_no_retrieval.json   # 无 RAG 基线（相对路径落在 data/eval_runs/）
+    python scripts/eval_hallu.py ... --input hallucinated --out ...                 # judge 灵敏度自查
     python scripts/eval_hallu.py --compare A.json B.json
 
 说明：
@@ -100,7 +100,7 @@ async def eval_case(
             candidate = await _generate_corrected(case, docs)
         record["candidate"] = candidate
 
-        # 文本相似度与关键词指标（无 LLM，先算）
+        # 文本指标不依赖 LLM：judge 失败时这几项仍有分
         record["metrics.bleu_avg"] = round(
             metrics.char_bleu_avg(candidate, case.reference_corrected), 4
         )

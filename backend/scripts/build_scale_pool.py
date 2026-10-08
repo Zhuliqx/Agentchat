@@ -8,7 +8,7 @@
 用法：
     python scripts/build_scale_pool.py --src C:\\path\\crud_rag\\80000_docs \\
         --out C:\\path\\scale_pool --limit 1200 \\
-        --exclude-dir ..\\data\\eval_corpus\\crud_1docs
+        --exclude-dir <目标语料目录>（可多次）
     python scripts/build_scale_pool.py --src ... --out ...   # 不限量 = 全池
 """
 from __future__ import annotations

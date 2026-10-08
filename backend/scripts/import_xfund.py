@@ -10,8 +10,9 @@ GT 用字段键值对：问题 = 字段名（question 实体），答案 = 字�
 期望命中文档 = 该表单 PDF 的图片块（expected_images: "<pdf 绝对路径>#0"）。
 
 产出（--out，默认仓库根 data/eval_corpus）：
-  - xfund_zh/          # 每份表单一个单页 PDF
-  - xfund_zh_gt.json   # cases.expected_images 指向 PDF#0（eval_rag 图片命中判定）
+  - xfund_zh/                # 每份表单一个单页 PDF
+  - xfund_zh_gt.json         # 字段问答 GT（expected_images 指向 PDF#0）
+  - xfund_zh_title_gt.json   # 标题/字段组合语义查询 GT（每份表单 1 条）
 
 用法：
     python scripts/import_xfund.py --json C:\\...\\zh.val.json --images C:\\...\\images
@@ -92,7 +93,7 @@ def build(json_path: Path, images_dir: Path, out_root: Path) -> None:
                     "notes": "XFUND zh：扫描表单字段问答（图片通道命中判定）",
                 }
             )
-        # 标题语义查询（每份表单 1 条）：表头优先，回退为前 3 个字段名组合
+        # 标题语义查询（每份表单 1 条）：表头优先，否则用全部字段名拼接（截断 120 字）
         entities = doc.get("document") or []
         headers = [
             str(e.get("text") or "").strip()

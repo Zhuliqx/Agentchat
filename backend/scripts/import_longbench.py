@@ -82,10 +82,9 @@ def matching_files(texts: list[str], paths: list[str], answers: list[str]) -> li
 def best_matching_file(
     texts: list[str], paths: list[str], answers: list[str], min_lcs: int = 12
 ) -> str | None:
-    """LCS 兜底标注：答案与文章的最长公共子串 ≥ min_lcs 且严格大于次优才判定。
+    """LCS 兜底标注：≥ min_lcs 且严格大于次优才判定。
 
-    dureader 的参考答案是抽象式生成（措辞常与原文不同），精确子串会漏掉一半以上；
-    用最长公共子串找最贴近的文章，并要求与第二名有区分度，避免把噪声文章当成支撑。
+    dureader 答案是抽象式生成，精确子串会漏掉一半以上；加"严格大于次优"避免误标噪声文章。
     """
     probes = [p for p in (answer_probe(a, min_len=8) for a in answers) if p]
     if not probes:
