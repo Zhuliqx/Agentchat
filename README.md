@@ -6,7 +6,7 @@
 
 一个基于 **FastAPI + LangGraph + LangChain** 的多 Agent 平台，集成 **RAG**（向量检索问答）与 **MCP**（模型上下文协议工具），使用 **Milvus**（向量库）+ **PostgreSQL**（关系库），前端为 **Vue 3 + Vite + TypeScript + Tailwind CSS 4** 打造的现代深色主题界面。
 
-> 最后校验：2026-09-17（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-10-09（文档与当前代码同步；防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 评估与质量
 
@@ -20,7 +20,7 @@
 | 消融（每层价值） | CR：纯向量→混合→+rerank | 0.894 → 0.931 → **0.963** | 每加一层都有量化收益 |
 | Agent 编排 | route@1 / 危险操作拒绝 | **1.0 / 1.0** | 首次路由全对、危险操作全 HITL/拒绝 |
 | 性能（单 worker） | 检索 p50 / 吞吐 | 82ms / ~16 QPS | 单机满足小团队，扩展触发信号明确 |
-| 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
+| 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s（历史快照） | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型对比） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优 |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
 | 工程质量 | 单测 / 集成 / 前端 / E2E | 单测 **315** · 集成 **52** · 前端 **169** · E2E **5** · task-agent **144**（合计 **685**） | CI 五个 job 全绿：后端 Ruff+pytest、前端 lint/格式/类型/Vitest/E2E、容器沙箱、RAG 检索回归、LLM-judge 质量评估 |
@@ -71,7 +71,7 @@ FastAPI + LangGraph + LangChain 构建的知识问答平台：**RAG（混合检�
 - **知识库按用户隔离**：文档（Postgres + Milvus 向量）按 `user_id` 隔离，不同用户的知识库互不可见（上传/检索/删除/预览均校验归属）；`ingest_docs.py` 可用 `--user` 指定归属用户
 - **Prompt 注入防护**：检索/搜索外部内容按「不可信数据块」隔离；中英规则库检测命中即剔除+告警，用户 query 含注入指令直接拒绝（`INJECTION_DETECTION_ENABLED`）；可选 LLM 复核降误报（`INJECTION_LLM_REVIEW`）；输出侧泄露检测（系统提示词片段/密钥模式，`INJECTION_OUTPUT_FILTER`）
 - **会话数据分析**：`GET /api/sessions/{id}/stats` 返回消息数/回合数/Token 估算/平均回复长度/对话时长，以及**平均应答耗时、24 小时活跃分布（`tz_offset_min` 折算本地小时）、引用来源 Top 5 聚合**；前端「📊 分析」面板用环形图（消息构成）、条形对比（长度画像）、活跃时段柱状图与来源命中排行可视化
-- **定时 / 批处理任务**：后台 asyncio 调度器（无第三方依赖）按 `interval:<秒>` 或 `cron:<分钟>` 执行任务；内置重建知识库索引、清理孤儿 Checkpoint、清理失效文档三类任务，可手动触发、启停、删除（前端「⏱ 任务」面板）
+- **定时 / 批处理任务**：后台 asyncio 调度器（无第三方依赖）按 `interval:<秒>` 或 `cron:<分钟>` 执行任务；内置重建知识库索引、清理孤儿 Checkpoint、清理失效文档、向量对账（pending 补同步 + 幽灵清理）四类任务，可手动触发、启停、删除（前端「⏱ 任务」面板）
 - **增量摄入 / 去重**：文档分块按内容指纹（sha256）增量摄入，未变化的块不重复嵌入/写入，整篇无变化则零写入
 - **多模型路由**：`LLM_LIGHT_MODEL` 配置轻量模型后，Supervisor 用主模型、子 Agent（RAG/搜索/MCP）用轻量模型，成本更低
 - **统一错误响应**：所有异常统一返回 JSON `{"detail", "code"}`，前端可读、不出现 HTML 500
@@ -147,7 +147,8 @@ Agentchat/
 │   ├── tests/                # pytest 测试（unit/ 单元 + integration/ 集成）
 │   │   ├── unit/             # 纯逻辑单元测试（BM25 / 分块 / 评估 / RRF / 流式去重…）
 │   │   └── integration/      # 需 Postgres/Milvus（或 Redis）的集成测试
-│   ├── scripts/              # init_db / ingest_docs / smoke_test / eval_rag / check_docs_stale / MCP 服务器入口
+│   ├── scripts/              # 摄入(ingest_docs/ingest_url) / 评测(eval_rag/eval_hallu/eval_quality/benchmark 等)
+│   │                         #   外部语料导入(import_crud_*/import_longbench/import_xfund/build_scale_pool) / 文档检查 / MCP 入口
 │   └── .env.example
 ├── frontend-v2/              # 前端（Vue 3 + Vite + TS + Tailwind 4）
 ├── data/                     # 用户内容（知识库文档 / 上传文件）
@@ -160,6 +161,7 @@ Agentchat/
     ├── DEPLOYMENT.md         # 部署与扩展（单机取舍 / 演进）
     ├── OBSERVABILITY.md      # Langfuse 可观测性
     ├── REPRODUCIBLE_EVAL.md  # 可复现评估（示例语料 + 步骤）
+    ├── EVAL.md               # 评测资产索引（GT 清单 / 脚本对照 / CI 跑法）
     ├── EXPLAIN.md            # 项目详解（10 分钟总览）
     └── AGENT_TASK.md         # 项目2·自主任务 Agent 设计文档
 ```
@@ -215,12 +217,15 @@ python run.py
 | GET | `/api/sessions/{id}/checkpoints` | 会话 checkpoint 时间线（Time Travel）。**已验证**：`checkpoint_id` 可分叉且非破坏性；粒度细（每轮约 7 条、约 57% 为中间件步骤）+ 默认 `limit=30`，UI 展示前需按轮次聚合 |
 | GET | `/api/sessions/{id}/export` | 导出会话为 Markdown |
 | POST | `/api/sessions/batch-delete` | 批量删除会话（含消息与 checkpoint） |
+| POST | `/api/sessions/{id}/truncate` | 原子截断指定消息之后的会话历史（消息内分支用） |
 | GET/POST | `/api/tasks` | 定时任务列表（公开）/ 新建（需平台操作员权限） |
 | GET | `/api/models` | 可用模型列表 + 当前选择（运行时模型切换） |
 | PUT | `/api/models/current` | 切换当前模型（持久化 + 清缓存，立即生效） |
 | PATCH/DELETE | `/api/tasks/{id}` | 修改（启停/调度）/ 删除任务（需平台操作员权限） |
 | POST | `/api/tasks/{id}/run` | 立即执行一次任务（需平台操作员权限） |
 | GET | `/api/tasks/registry` | 可用任务类型 |
+| POST | `/api/agent-tasks/run` · `/run/stream` | 项目2 任务引擎：执行长任务 / SSE 事件流（引擎为独立包 `agentchat-task-agent`） |
+| POST | `/api/agent-tasks/confirm` | 任务 HITL 确认（proceed/edit/skip），从断点续跑 |
 | POST | `/api/rag/upload` | 上传文档（原始文件持久保存到 `data/uploads/`） |
 | POST | `/api/rag/search?query=` | 检索测试接口（混合检索 + 可选 rerank，与 RAG Agent 同路径） |
 | GET | `/api/rag/documents` | 文档列表（含 `has_file` 标识） |
@@ -288,7 +293,7 @@ pip install -r requirements-dev.txt
 .\venv\Scripts\python.exe -m pytest tests/unit -q
 ```
 
-覆盖：BM25 索引、SQL 只读校验、文档分块、RRF 融合、LLM 路由（`LLM_LIGHT_MODEL`）、内容指纹去重、JWT/密码哈希、调度表达式。
+覆盖：BM25 索引、SQL 只读校验、文档分块、RRF 融合、LLM 路由（`LLM_LIGHT_MODEL`）、内容指纹去重、JWT/密码哈希、调度表达式、批量摄入（分批提交 / 纯图片文档 / 生成器输入）、全命中覆盖口径（含图片期望）。
 
 API 集成测试（需运行中的 Postgres/Milvus/MCP 依赖；覆盖会话 CRUD + 批量删除、记忆 CRUD、RAG 上传/检索/删除、chat 与 HITL 中断/409；DB 不可达时自动跳过）：
 
@@ -327,8 +332,9 @@ RAG 检索评估（固定问题集 top-k 命中率，需 Postgres + Milvus 运�
 
 查询改写 A/B：`--rewrite rule|llm` 跑实验档，`--compare A.json B.json` 输出逐条对比（胜/负/平 + Hit@K + 改写对照）。
 
-CI（`.github/workflows/ci.yml`）：后端 Ruff（F/E7/E9）+ 文档同步检查 + Pyright（非阻塞）+ 单元测试；
-前端 ESLint + Prettier + vue-tsc + Vitest + Playwright E2E 冒烟。
+CI（`.github/workflows/ci.yml`）五个 job：后端 Ruff（F/E7/E9）+ 文档同步检查 + Pyright（非阻塞）+ 单元测试；
+前端 ESLint + Prettier + vue-tsc + Vitest + Playwright E2E 冒烟；RAG 检索回归（Postgres+Milvus+阈值断言）；
+RAG 质量评估（LLM-judge，10 条限成本）；代码沙箱（构建 runner 镜像 + 沙箱边界测试）。
 
 ## License
 

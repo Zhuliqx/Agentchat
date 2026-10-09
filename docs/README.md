@@ -2,7 +2,7 @@
 
 > 本仓库为**项目 1 · Agentchat** 主应用；**项目 2 · task-agent** 已拆为独立仓库
 > （发行名 `agentchat-task-agent`，地址见 [AGENT_TASK](AGENT_TASK.md)）。这里是主仓库的文档索引与**唯一基线数字**。
-> 最后校验：2026-09-16（防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-10-09（防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 文档类型速查
 
