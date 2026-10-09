@@ -73,6 +73,12 @@ python scripts/eval_hallu.py --user hallueval --no-retrieval --out hallu_no_retr
 局限：judge 与生成器同为 DeepSeek（同源偏好，相对变化可信、绝对值仅供参考）；抽样 200 条；
 本机 6GB 显存与后端共卡时 rerank 可能降级为未精排（正确续写命中率不受影响）。
 
+全量 1268 条（2026-10-09，`--no-rerank`，与抽样档同为"无精排"口径）：
+无检索基线 **1268/1268 完成**（纠正率 0.477 / 残留 0.146 / 坏词 0.221 / BLEU 0.197 / ROUGE-L 0.328）；
+有检索首轮 652/1268 有效（纠正率 0.818 / 残留 0.116 / 坏词 0.101 / 正确续写命中 0.888），
+剩余 616 条因账户余额不足（HTTP 402）中断，可用 `crud_hallu_gt_errors_retrieval.json` 续跑；
+DeepSeek 账户并发上限 5，多进程并行时需把总并发控制在 5 以内（否则 429）。
+
 文档池规模阶梯（1doc 检索；800 篇目标文档固定，池子由 `build_scale_pool.py` 生成并剔除与目标重复的新闻）：
 
 | 文档池（篇 / 块） | MRR | Hit@1 | Hit@3 | Hit@5 |
@@ -88,8 +94,11 @@ python scripts/ingest_docs.py <池>\p1200 --user scale1_2k --batch
 python scripts/eval_rag.py --dataset ..\data\eval_corpus\crud_1doc_gt_sample.json --user scale1_2k --top-k 6
 ```
 
-> 摄入注意：全池一次批量摄入（单事务约 8.5 万块）在本机出现 PG 写入卡死；拆成每批约 1 万块
-> （约 70s/批、零失败）稳定完成。建议后续给 `batch_ingest` 增加分批提交（每批 1-2 万行）。
+> 摄入注意（2026-10-09 更新）：`batch_ingest` 已内置 PG 分批提交（`PG_INSERT_BATCH = 1 万行`），
+> 全池一次 batch 摄入验证通过（63,620 篇 / 81,136 块 → PG 全 synced、Milvus 81,136 条）。
+> 若中途中断留下 pending，调度器的对账任务是逐 source 补写（8 万级过慢）；批量补同步思路：
+> 按 source 分组、每批约 1 万行（批量嵌入 → 一次 `add_chunks_multi` → 批量标 synced）。
+> 历史：单事务 8.5 万块的旧实现曾让 PG 写入卡死 20 分钟以上。
 
 ## 外部基准：LongBench 中文子集（长文档 / 多文档检索）
 
@@ -145,8 +154,9 @@ python scripts/eval_rag.py --dataset ..\data\eval_corpus\xfund_zh_gt.json --user
 - 图片通道对"纯图片文档"是**唯一通路**（关闭即 0 命中）；语义查询下 MRR 0.75，通道有效。
 - 细粒度"图内文字"检索偏弱（字段名跨表单天然歧义 + CLIP 不擅长细小文字）——这类场景应打开
   `IMAGE_OCR_ENABLED`（图内文字抽成文本块）或加 VLM 描述，而不是只靠图片向量。
-- 工程注意：批量摄入对"纯图片 PDF"（无文本、OCR/VLM 关）会产出 0 块并**静默跳过**；
-  本次用非批量路径摄入。后续可让 `batch_ingest` 对纯图片文档也写图片向量。
+- 工程注意：批量摄入已支持纯图片文档（图文双通道下保留空文本块计划、只写图片向量）。
+  验证：batch 摄入 50 份表单 → 50 篇 / 0 块 / 0 失败 + 50 张图片向量，标题 GT 检索结果与
+  非批量路径完全一致（MRR 0.752 / Hit@5 0.880）；此前 batch 会静默跳过这类文档（0 篇 / 0 块）。
 
 ## 语料与评估集设计
 
