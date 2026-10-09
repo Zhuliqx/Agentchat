@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Optional
 
 from langchain_core.documents import Document as LCDocument
@@ -22,6 +23,8 @@ from app.rag.postprocess import (
     _merge_multi,
 )
 from app.rag.rerank import rerank
+
+logger = logging.getLogger(__name__)
 
 
 def _expand_queries(query: str) -> list[str]:
@@ -154,7 +157,9 @@ class MilvusRetriever(BaseRetriever):
         # 上下文压缩管线：去重合并 → 近似去重 → 总字符预算 → 块截断
         hits = _dedupe_and_merge(hits, settings.rag_max_per_doc)
         hits = _dedupe_near_duplicate(hits)
+        before_budget = len(hits)
         hits = _apply_total_budget(hits, settings.rag_max_total_chars)
+        clipped = before_budget - len(hits)
         max_chars = settings.rag_max_chunk_chars
         if max_chars > 0:
             hits = [
@@ -174,6 +179,15 @@ class MilvusRetriever(BaseRetriever):
                 hits = [h for h in hits if (h.get("source"), h.get("image_index")) not in guard_keys]
                 hits = guard + hits
         hits = hits[:top_k]
+        # 上下文规模可观测：这一轮检索实际喂给 LLM 的块数与字符数（含是否被预算截断）
+        logger.info(
+            "检索上下文：user=%s 块数=%d 字符数=%d 预算=%d 被预算截断=%d",
+            self.user_id,
+            len(hits),
+            sum(len(h.get("text") or "") for h in hits),
+            settings.rag_max_total_chars,
+            clipped,
+        )
         return [
             LCDocument(
                 page_content=h["text"],

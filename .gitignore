@@ -17,6 +17,7 @@ models_cache/
 *.local.json
 data/uploads/
 data/kb_expand/
+data/eval_corpus/
 volumes/
 backend/data/
 
@@ -45,6 +46,8 @@ blob-report/
 .claude/
 .codex/
 .agents/
+.superpowers/
+AGENTS.md
 .playwright-cli/
 .dbclient/
 

@@ -23,7 +23,7 @@
 | 流式对话 | SSE TTFB / 总耗时 | ~19ms / ~5s | 首 token 即时，瓶颈在 LLM 生成 |
 | Embedding 选型 | Hit@1（4 模型对比） | **0.975**（bge-small） | “更大不更好”实证，现用模型最优 |
 | 数据驱动决策 | 查询改写 | **默认关** | 检索侧无增益 + 端到端微降，触发式启用 |
-| 工程质量 | 单测 / 集成 / 前端 / E2E | 单测 **261** · 集成 **51** · 前端 **169** · E2E **5** · task-agent **101**（合计 **587**） | CI 五个 job 全绿：后端 Ruff+pytest、前端 lint/格式/类型/Vitest/E2E、容器沙箱、RAG 检索回归、LLM-judge 质量评估 |
+| 工程质量 | 单测 / 集成 / 前端 / E2E | 单测 **311** · 集成 **52** · 前端 **169** · E2E **5** · task-agent **144**（合计 **681**） | CI 五个 job 全绿：后端 Ruff+pytest、前端 lint/格式/类型/Vitest/E2E、容器沙箱、RAG 检索回归、LLM-judge 质量评估 |
 | 可复现示例 | 示例语料检索基线 | **MRR 1.000 / Hit@1 1.000** | 仓库自带 5 文件语料 + 14 问评估集，clone 后可复现 |
 
 > 本表数字与 [docs/README 唯一基线](docs/README.md) 保持一致，由 `backend/scripts/check_docs_numbers.py` 在 CI 里校验（不一致直接失败）。

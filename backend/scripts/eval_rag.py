@@ -77,6 +77,37 @@ def _img_hit(expected_images: list[str], source: str, image_index: object) -> bo
     return False
 
 
+def _coverage(
+    mode: str, expected: list[str], hits: list[dict]
+) -> tuple[int | None, int | None]:
+    """覆盖进度：返回 (首次命中任一期望的排名, 集齐全部期望的排名)。
+
+    多文档题（expected 有 2-3 篇支撑文档）必须**集齐**才算真正答得出；
+    只命中其中一篇时 ``complete`` 为 None——这就是"全命中"口径与
+    eval_rag 原有"命中任一即算召回"口径的差别。
+    """
+    if not expected:
+        return None, None
+    covered: set[str] = set()
+    first: int | None = None
+    complete: int | None = None
+    for i, hit in enumerate(hits, start=1):
+        source = str(hit.get("source", ""))
+        text = str(hit.get("text", ""))
+        image_index = hit.get("image_index")
+        for exp in expected:
+            if exp in covered:
+                continue
+            if _hit(mode, [exp], source, text) or _img_hit([exp], source, image_index):
+                covered.add(exp)
+        if first is None and covered:
+            first = i
+        if len(covered) == len(expected):
+            complete = i
+            break
+    return first, complete
+
+
 def _eval_case(
     query: str,
     expected: list[str],
@@ -99,6 +130,8 @@ def _eval_case(
         ),
         None,
     )
+    # 全命中口径：多文档题要集齐全部支撑文档才算召回（与上面"命中任一"并存）
+    _, complete_rank = _coverage(mode, expected, hits)
     return {
         "query": query,
         "rewritten": rewrite_query(query) if settings.query_rewrite_enabled else None,
@@ -109,6 +142,11 @@ def _eval_case(
         "rank": rank,
         "hit_at": {f"hit@{k}": bool(rank is not None and rank <= k) for k in (1, 3, 5)},
         "mrr_contrib": 1.0 / rank if rank else 0.0,
+        "all_hit_at": {
+            f"all_hit@{k}": bool(complete_rank is not None and complete_rank <= k)
+            for k in (1, 3, 5)
+        },
+        "mrr_all_contrib": 1.0 / complete_rank if complete_rank else 0.0,
         "sources": [str(h.get("source", "")) for h in hits][:5],
         "first": str(hits[0].get("text", ""))[:60] if hits else "",
     }
@@ -202,9 +240,17 @@ def run_eval_graded(cases: list[dict], top_k: int, concurrency: int = 4) -> dict
 def _summarize(results: list[dict]) -> dict:
     total = len(results)
     mrr = sum(r["mrr_contrib"] for r in results) / total if total else 0.0
-    summary: dict[str, float | int | None] = {"total": total, "mrr": round(mrr, 4)}
+    mrr_all = sum(r.get("mrr_all_contrib", 0.0) for r in results) / total if total else 0.0
+    summary: dict[str, float | int | None] = {
+        "total": total,
+        "mrr": round(mrr, 4),
+        "mrr_all": round(mrr_all, 4),
+    }
     for k in ("hit@1", "hit@3", "hit@5"):
         vals = [bool(r["hit_at"].get(k, False)) for r in results]
+        summary[k] = round(sum(vals) / total, 4) if total else None
+    for k in ("all_hit@1", "all_hit@3", "all_hit@5"):
+        vals = [bool(r.get("all_hit_at", {}).get(k, False)) for r in results]
         summary[k] = round(sum(vals) / total, 4) if total else None
     return summary
 
@@ -241,6 +287,11 @@ def run_eval(cases: list[dict], mode: str, top_k: int) -> dict:
         f"\nMRR={summary['mrr']:.3f}  "
         f"Hit@1={summary['hit@1']:.3f}  Hit@3={summary['hit@3']:.3f}  "
         f"Hit@5={summary['hit@5']:.3f}"
+    )
+    print(
+        f"全命中口径：MRR={summary['mrr_all']:.3f}  "
+        f"All@1={summary['all_hit@1']:.3f}  All@3={summary['all_hit@3']:.3f}  "
+        f"All@5={summary['all_hit@5']:.3f}"
     )
     return {
         "timestamp": datetime.now().isoformat(timespec="seconds"),

@@ -142,6 +142,19 @@ def get_current_model_choice() -> dict | None:
     return None
 
 
+def current_model_fingerprint() -> str:
+    """当前 Supervisor 实际使用的模型标识（``provider:model``），用于图缓存键。
+
+    解析顺序与 ``get_llm("main")`` 保持一致：持久化的运行时选择优先，
+    否则用配置里的 provider + 主模型名。把它计入缓存键后，即使调用方忘了
+    调 ``clear_graph_cache()``，也不会复用旧模型构建的图。
+    """
+    choice = get_current_model_choice()
+    if choice is not None:
+        return f"{choice['provider']}:{choice['model']}"
+    return f"{settings.llm_provider}:{_model_name('main')}"
+
+
 def available_models() -> list[dict]:
     """可用模型列表（基于 .env 已配置的 API key），供前端下拉选择。
 

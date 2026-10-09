@@ -5,6 +5,7 @@
     python scripts/ingest_docs.py path/to/folder/
     python scripts/ingest_docs.py folder --pattern "*.md"
     python scripts/ingest_docs.py file.txt --user zhu   # 摄入到指定用户的知识库
+    python scripts/ingest_docs.py folder --batch        # 批量导入（首次大批量语料，快约 50×）
 
 支持: txt / md / pdf / docx / html
 """
@@ -12,11 +13,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.rag.ingestion import ingest_directory, ingest_file
+from app.rag.batch_ingest import discover_documents, ingest_paths_batch
 
 
 def main() -> None:
@@ -28,9 +31,31 @@ def main() -> None:
         default="default",
         help="知识库归属用户 id（默认 default=访客/未登录用户）",
     )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="批量模式：整批一次嵌入 + 两次提交（首次导入大语料用，约 50× 快；"
+        "已存在的 source 会整体替换，不做增量）",
+    )
     args = parser.parse_args()
 
     p = Path(args.path)
+    if args.batch:
+        paths = discover_documents(p) if p.is_dir() else [p]
+        if not paths:
+            print(f"没有匹配到支持的文档: {p}")
+            sys.exit(1)
+        t0 = time.perf_counter()
+        stats = ingest_paths_batch(paths, user_id=args.user)
+        elapsed = time.perf_counter() - t0
+        for f in stats["failed"]:
+            print(f"[失败] {f['filename']}: {f['error']}")
+        print(
+            f"\n批量完成: {stats['files']} 篇 / {stats['chunks']} 块"
+            f"（失败 {len(stats['failed'])}）用时 {elapsed:.1f}s"
+        )
+        return
+
     if p.is_dir():
         results = ingest_directory(p, args.pattern, user_id=args.user)
     elif p.is_file():

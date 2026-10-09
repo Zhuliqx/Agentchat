@@ -18,9 +18,13 @@ async def health() -> dict:
     # Postgres
     pg_ok = True
     pg_error = ""
+    doc_chunks = 0
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
+            doc_chunks = (
+                conn.execute(text("SELECT count(*) FROM documents")).scalar() or 0
+            )
     except Exception as exc:
         pg_ok = False
         pg_error = str(exc)
@@ -42,6 +46,8 @@ async def health() -> dict:
             else "degraded"
         ),
         "postgres": {"ok": pg_ok, "error": pg_error},
+        # 事实源是 Postgres；milvus.num_entities_cumulative 是累计插入数（删除不回落）
+        "documents_chunks": doc_chunks,
         "milvus": ms,
         "mcp_servers": mcp_names,
         "redis": redis,

@@ -7,6 +7,15 @@
 - **失败不裁剪**：摘要模型调用失败或返回空时本轮跳过压缩、保留完整历史，
   避免框架默认行为（失败仍裁剪并用错误文本占位）造成上下文丢失。
 
+**上游耦合（升级 LangChain 前先读这里）**：``before_model`` / ``abefore_model``
+是基类实现的逐行复制，依赖上游的 5 个类级钩子（``_ensure_message_ids`` /
+``_should_summarize`` / ``_determine_cutoff_index`` / ``_partition_messages`` /
+``_trim_messages_for_summary``）、实例属性 ``token_counter``，以及
+``trigger`` / ``keep`` / ``summary_prompt`` / ``trim_tokens_to_summarize``
+四个构造参数。上游改动这些内部实现时本项目不会报错，只会静默偏离——
+``tests/unit/test_history_summary.py::test_upstream_summarization_hooks_still_exist``
+把这份依赖面钉住，升级后请先跑该文件。
+
 用法：``build_history_summary_middleware(model=get_llm("light"))``，关闭时返回
 ``None``（调用方过滤后不挂载）。
 """

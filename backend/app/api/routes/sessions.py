@@ -1,16 +1,20 @@
 """会话管理接口。"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.agents.graph import list_checkpoint_history
+from app.agents.graph import list_checkpoint_history, reset_thread_messages
 from app.api.deps import get_current_user_id
 from app.db import postgres
 from app.db.models import Message
 from app.db.postgres import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -154,7 +158,7 @@ def delete_message(
 
 
 @router.post("/{session_id}/truncate")
-def truncate_messages(
+async def truncate_messages(
     session_id: str,
     body: TruncateIn,
     user_id: str = Depends(get_current_user_id),
@@ -163,12 +167,25 @@ def truncate_messages(
 
     编辑重发用它替代"前端逐条删除"：既避免中途失败留下半截历史，
     也让删除范围由服务端按时间点界定，不受前端本地列表状态影响。
+
+    显示历史删掉后必须把图状态（Checkpointer）对齐到剩余消息，否则模型
+    仍会从旧 checkpoint 恢复出被删掉的对话——"分支/编辑重发"只是看起来生效。
     """
     _owned_or_404(session_id, user_id)
     try:
-        deleted = postgres.truncate_messages_from(session_id, body.message_id)
+        deleted = await anyio.to_thread.run_sync(
+            postgres.truncate_messages_from, session_id, body.message_id
+        )
     except ValueError:
         raise HTTPException(404, "消息不存在") from None
+    rows = await anyio.to_thread.run_sync(postgres.get_messages, session_id)
+    try:
+        await reset_thread_messages(session_id, [(m.role, m.content) for m in rows])
+    except Exception:  # noqa: BLE001 - 消息截断已生效，不应因状态重置失败返回 500
+        logger.warning("截断后重置图状态失败 session=%s", session_id, exc_info=True)
+    from app.api.routes.chat import invalidate_pending_cache  # 延迟导入防环
+
+    invalidate_pending_cache(session_id)
     return {"deleted": deleted}
 
 

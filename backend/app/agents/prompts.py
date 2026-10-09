@@ -71,7 +71,8 @@ def build_supervisor_prompt(
             "- remember_memory：把用户透露的重要信息/偏好保存到长期记忆（跨会话有效）。"
         )
         tool_lines.append(
-            "- recall_memory：读取该用户的长期记忆（背景、偏好、历史信息）。"
+            "- recall_memory：读取该用户的长期记忆（背景、偏好、历史信息）；"
+            "调用时传入与当前问题相关的关键词/问题作为 query。"
         )
     if settings.hitl_enabled and not settings.hitl_actions:
         tool_lines.append(

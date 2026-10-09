@@ -109,13 +109,26 @@ class Showcase:
             "/api/agent-tasks/run",
             {"goal": "介绍一下公司（知识库）并计算 1 到 100 所有质数的和"},
         )
-        if r.get("status") == "awaiting_confirm":
-            _dump("HITL：等待确认下一步", r.get("pending"))
-            sid = r["session_id"]
+        # HITL 开启时 task-agent 每一步都要确认，这里循环确认直到任务收敛
+        max_rounds = 10
+        for round_no in range(1, max_rounds + 1):
+            if r.get("status") != "awaiting_confirm":
+                break
+            pending = r.get("pending") or {}
+            _dump(
+                f"HITL 第 {round_no} 次确认：{pending.get('next_action', '')}",
+                pending,
+            )
+            sid = r.get("session_id") or self.last_task_session
+            if not sid:
+                print("缺少 session_id，无法继续确认——中断本场景。")
+                break
             r = self._post(
                 "/api/agent-tasks/confirm",
                 {"session_id": sid, "verb": "proceed"},
             )
+        else:
+            print(f"已达最大确认轮数 {max_rounds}，任务仍未收敛。")
         self.last_task_session = r.get("session_id") or self.last_task_session
         _dump("任务结果", r)
         print(f"\n最终交付：{(r.get('final_answer') or '')[:300]}")

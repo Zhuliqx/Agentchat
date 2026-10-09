@@ -36,3 +36,14 @@ def test_chunk_hash_deterministic():
     assert _chunk_hash("abc") == _chunk_hash("abc")
     assert _chunk_hash("abc") != _chunk_hash("abd")
     assert len(_chunk_hash("abc")) == 64  # sha256 hex
+
+
+def test_graph_cache_key_changes_with_model(monkeypatch):
+    """模型指纹必须进缓存键：否则切换模型后仍会复用旧模型构建的图。"""
+    from app.agents import graph
+
+    monkeypatch.setattr(graph, "current_model_fingerprint", lambda: "deepseek:a")
+    k1 = graph._graph_cache_key(True, True, True)
+    monkeypatch.setattr(graph, "current_model_fingerprint", lambda: "deepseek:b")
+    k2 = graph._graph_cache_key(True, True, True)
+    assert k1 != k2, "模型变了但缓存键没变，会复用旧模型构建的图"

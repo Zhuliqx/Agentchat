@@ -125,3 +125,16 @@ def test_sync_chunks_empty_doc_ids_is_noop(fake_milvus):
     assert vector_store.sync_chunks([], doc_ids=[], source="s", user_id="default") == []
     assert fake_milvus.deleted_filters == []
     assert fake_milvus.inserted == []
+
+
+def test_stats_names_row_count_as_cumulative(monkeypatch):
+    """row_count 是累计插入数（删除不回落），字段名必须体现这一点，避免被当存活数。"""
+
+    class _StatsClient:
+        def get_collection_stats(self, collection):  # noqa: ANN001
+            return {"row_count": 225}
+
+    monkeypatch.setattr(vector_store, "_client", lambda: _StatsClient())
+    s = vector_store.stats()
+    assert s["num_entities_cumulative"] == 225
+    assert "num_entities" not in s

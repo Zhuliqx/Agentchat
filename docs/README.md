@@ -27,6 +27,6 @@
 | Agent route@1 / 危险操作拒绝 | **1.0 / 1.0** | 17 条 × 3 采样 |
 | 检索 p50 / 吞吐（单 worker） | 82ms / ~16 QPS | 性能快照 |
 | Embedding Hit@1（4 模型对比） | **0.975**（bge-small-zh） | 来源级 |
-| 测试规模 | 单测 **261** · 集成 **51** · 前端 **169**（Vitest）· E2E **5**（Playwright）· task-agent **101** | pytest / vitest 收集数；覆盖率沿用既有快照（app 41% / task-agent 87%） |
+| 测试规模 | 单测 **311** · 集成 **52** · 前端 **169**（Vitest）· E2E **5**（Playwright）· task-agent **144** | pytest / vitest 收集数；覆盖率沿用既有快照（app 41% / task-agent 87%） |
 
 > 数字只在本表维护；各篇文档引用本表或标注为历史快照，不再各自维护当前基线。

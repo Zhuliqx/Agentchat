@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
 from langchain_core.tools import StructuredTool
 from langgraph.runtime import get_runtime
@@ -21,10 +20,10 @@ class _MemoryContent(BaseModel):
     content: str = Field(description="要长期记住的用户信息/偏好/事实（一句话）")
 
 
-class _NoArgs(BaseModel):
-    """无参工具占位模型。"""
+class _RecallQuery(BaseModel):
+    """recall_memory 工具入参：用当前问题检索相关记忆。"""
 
-    unused: Optional[str] = Field(default=None, description="")
+    query: str = Field(description="用于匹配相关记忆的当前问题或关键词")
 
 
 def build_remember_tool() -> StructuredTool:
@@ -77,9 +76,14 @@ def build_remember_tool() -> StructuredTool:
 
 
 def build_recall_tool() -> StructuredTool:
-    """读取当前用户的长期记忆（从 LangGraph Store 全量列出，最多 50 条）。"""
+    """读取当前用户的长期记忆。
 
-    async def _arun(unused: Optional[str] = None) -> str:
+    有语义索引时按 ``query`` 检索相关记忆（最多 ``memory_recall_limit`` 条），
+    避免把全部记忆倾倒进上下文；无索引（keyword 模式，不支持 query）时退回
+    全量列出（最多 50 条）。
+    """
+
+    async def _arun(query: str) -> str:
         try:
             rt = get_runtime()
             user = getattr(rt.context, "user_id", "default")
@@ -87,7 +91,18 @@ def build_recall_tool() -> StructuredTool:
                 return "长期记忆存储不可用（Store 未初始化）。"
             namespace = (user, "memories")
 
-            items = await safe_asearch(rt.store, namespace, limit=50) or []
+            if store_has_index():
+                items = (
+                    await safe_asearch(
+                        rt.store,
+                        namespace,
+                        query=query,
+                        limit=settings.memory_recall_limit,
+                    )
+                    or []
+                )
+            else:
+                items = await safe_asearch(rt.store, namespace, limit=50) or []
             if not items:
                 return "当前没有保存的长期记忆。"
             lines = [f"- {i.value.get('content', '')}" for i in items]
@@ -99,8 +114,9 @@ def build_recall_tool() -> StructuredTool:
     return StructuredTool(
         name="recall_memory",
         description=(
-            "读取当前用户的长期记忆。当回答涉及用户背景、偏好或历史信息时，先调用此工具。"
+            "读取当前用户的长期记忆。当回答涉及用户背景、偏好或历史信息时，先调用此工具；"
+            "调用时传入与当前问题相关的关键词/问题（query），而不是空调用。"
         ),
-        args_schema=_NoArgs,
+        args_schema=_RecallQuery,
         coroutine=_arun,
     )

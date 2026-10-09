@@ -36,7 +36,16 @@ def get(path: str) -> dict:
 def main() -> None:
     print("==> 1. 健康检查")
     h = get("/api/health")
-    print("   ", h.get("status"), "| MCP:", h.get("mcp_servers"), "| Milvus entities:", h.get("milvus", {}).get("num_entities"))
+    print(
+        "   ",
+        h.get("status"),
+        "| MCP:",
+        h.get("mcp_servers"),
+        "| Milvus 累计:",
+        h.get("milvus", {}).get("num_entities_cumulative"),
+        "| 文档块:",
+        h.get("documents_chunks"),
+    )
 
     print("==> 2. RAG 知识库问答")
     r = post("/api/chat", {"message": "示例科技公司有多少名员工？", "use_rag": True, "use_search": False})

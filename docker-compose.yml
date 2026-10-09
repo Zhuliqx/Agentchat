@@ -75,9 +75,9 @@ services:
 
   minio:
     container_name: milvus-minio
-    # Docker Hub 的 minio/minio 已下架（pull 报 repository does not exist），
-    # 换 MinIO 官方 registry；tag 仍与 Milvus 2.4.x 官方 compose 对齐
-    image: quay.io/minio/minio:RELEASE.2023-03-20T20-16-18Z
+    # minio/minio（Docker Hub）已下架、quay.io/minio/minio 已关匿名拉取（401）；
+    # 改用 Milvus 官方维护的镜像仓库（与 milvus-io/milvus master compose 对齐）
+    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
