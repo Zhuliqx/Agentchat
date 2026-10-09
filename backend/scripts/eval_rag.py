@@ -78,31 +78,46 @@ def _img_hit(expected_images: list[str], source: str, image_index: object) -> bo
 
 
 def _coverage(
-    mode: str, expected: list[str], hits: list[dict]
+    mode: str,
+    expected: list[str],
+    hits: list[dict],
+    expected_images: list[str] | None = None,
 ) -> tuple[int | None, int | None]:
     """覆盖进度：返回 (首次命中任一期望的排名, 集齐全部期望的排名)。
 
     多文档题（expected 有 2-3 篇支撑文档）必须**集齐**才算真正答得出；
     只命中其中一篇时 ``complete`` 为 None——这就是"全命中"口径与
     eval_rag 原有"命中任一即算召回"口径的差别。
+
+    ``expected_images``（``source#image_index``）与 ``expected`` 是**或**关系
+    （与 rank 判定一致）：来源组全齐或图片组全齐，任一组成即算 complete；
+    只有图片期望的题（如 XFUND）由此也能进入全命中口径。
     """
-    if not expected:
+    sources = list(expected)
+    images = list(expected_images or [])
+    if not sources and not images:
         return None, None
-    covered: set[str] = set()
+    covered_src: set[str] = set()
+    covered_img: set[str] = set()
     first: int | None = None
     complete: int | None = None
     for i, hit in enumerate(hits, start=1):
         source = str(hit.get("source", ""))
         text = str(hit.get("text", ""))
         image_index = hit.get("image_index")
-        for exp in expected:
-            if exp in covered:
-                continue
-            if _hit(mode, [exp], source, text) or _img_hit([exp], source, image_index):
-                covered.add(exp)
-        if first is None and covered:
+        for exp in sources:
+            if exp not in covered_src and (
+                _hit(mode, [exp], source, text) or _img_hit([exp], source, image_index)
+            ):
+                covered_src.add(exp)
+        for exp in images:
+            if exp not in covered_img and _img_hit([exp], source, image_index):
+                covered_img.add(exp)
+        if first is None and (covered_src or covered_img):
             first = i
-        if len(covered) == len(expected):
+        src_done = bool(sources) and len(covered_src) == len(sources)
+        img_done = bool(images) and len(covered_img) == len(images)
+        if src_done or img_done:
             complete = i
             break
     return first, complete
@@ -131,7 +146,7 @@ def _eval_case(
         None,
     )
     # 全命中口径：多文档题要集齐全部支撑文档才算召回（与上面"命中任一"并存）
-    _, complete_rank = _coverage(mode, expected, hits)
+    _, complete_rank = _coverage(mode, expected, hits, exp_imgs)
     return {
         "query": query,
         "rewritten": rewrite_query(query) if settings.query_rewrite_enabled else None,
