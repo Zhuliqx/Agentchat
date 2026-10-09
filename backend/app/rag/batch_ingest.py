@@ -2,8 +2,10 @@
 """批量摄入：把"每文件一套流程"压成"整批一套流程"。
 
 对比 ``ingest_file``（逐文件）：本模块对一批文件只做
-**一次嵌入调用 + 两次 Postgres 提交 + 一次签名失效**，
-Postgres 提交次数是逐文件路径的主要成本（每文件 2 次 commit）。
+**一次嵌入调用 + 少量分批 Postgres 提交 + 一次签名失效**。
+
+Postgres 单事务行数过大会长时间无进展（实测 8.5 万块卡死 20 分钟以上），
+所以新行按 ``PG_INSERT_BATCH`` 分批提交。
 
 适用场景：首次批量导入语料（评估集、大语料）。
 **不做增量对比**——已存在的 source 会被整体替换（语义等同 force_reingest）；
@@ -41,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_SUFFIXES = (".txt", ".md", ".markdown", ".pdf", ".docx", ".html", ".htm")
 
+# 单批 PG 插入行数：单事务过大时 PG 长时间无进展（实测 8.5 万块卡死）
+PG_INSERT_BATCH = 10_000
+
 
 def discover_documents(directory: Path) -> list[Path]:
     """目录下所有支持的文档（后缀集合与 ingest_directory 保持一致）。"""
@@ -72,6 +77,14 @@ def _plan_file(path: Path) -> _FilePlan | None:
     chunks += _build_image_chunks(doc["images"], source)
     chunks += _build_vlm_chunks(doc["images"], source)
     if not chunks:
+        # 纯图片文档（OCR/VLM 都关）没有文本块，但图文双通道仍需要写图片向量
+        if doc.get("images") and settings.image_dual_channel:
+            return _FilePlan(
+                source=source,
+                filename=Path(path).name,
+                chunks=[],
+                images=doc["images"],
+            )
         return None
     for idx, chunk in enumerate(chunks):
         if isinstance(chunk.get("metadata"), dict):
@@ -142,7 +155,7 @@ def ingest_paths_batch(
     if len(vectors) != len(texts):
         raise RuntimeError("嵌入返回数量与块数不一致")
 
-    # 3. 一次 Postgres 事务：整体替换各 source 的行（pending）
+    # 3. Postgres：整体替换各 source 的旧行（与首批插入同事务），其余行分批提交
     _progress(75, "写入关系库")
     sources = [p.source for p in plans]
     doc_ids: list[str] = [gen_uuid() for _ in texts]
@@ -175,8 +188,12 @@ def ingest_paths_batch(
         db.query(Document).filter(
             Document.user_id == user_id, Document.source.in_(sources)
         ).delete(synchronize_session=False)
-        db.add_all(rows)
+        db.add_all(rows[:PG_INSERT_BATCH])
         db.commit()
+    for start in range(PG_INSERT_BATCH, len(rows), PG_INSERT_BATCH):
+        with SessionLocal() as db:
+            db.add_all(rows[start : start + PG_INSERT_BATCH])
+            db.commit()
 
     # 4. Milvus：每个 source 删旧（重导入要清），随后**整批一次 insert**
     _progress(85, "写入向量库")
