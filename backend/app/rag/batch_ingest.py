@@ -106,6 +106,7 @@ def ingest_paths_batch(
 ) -> dict[str, Any]:
     """批量摄入一组文件，返回 {files, chunks, failed}。
 
+    paths 支持任意可迭代对象（含生成器）：内部先物化，避免进度回调把生成器消费掉。
     失败语义与 ``ingest_file`` 一致：Postgres 先写 pending，Milvus 同步成功后才标
     synced；Milvus 失败的行保持 pending，交给对账任务补写。
     """
@@ -113,6 +114,10 @@ def ingest_paths_batch(
     def _progress(percent: int, stage: str) -> None:
         if progress_cb:
             progress_cb(percent, stage)
+
+    # 物化一次：生成器会被 len(list(paths)) 这类操作消费，只剩首个文件
+    paths = list(paths)
+    total = len(paths)
 
     # 1. 解析 + 分块（纯 CPU，失败的文件跳过并记录）
     _progress(5, "解析与分块")
@@ -128,7 +133,7 @@ def ingest_paths_batch(
         if plan is not None:
             plans.append(plan)
         if i % 50 == 0:
-            _progress(5 + int(25 * i / max(1, len(list(paths)))), "解析与分块")
+            _progress(5 + int(25 * i / max(1, total)), "解析与分块")
 
     if not plans:
         return {"files": 0, "chunks": 0, "failed": failed}

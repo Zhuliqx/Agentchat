@@ -140,3 +140,15 @@ def test_ingest_paths_batch_writes_image_vectors_for_image_only_plan(monkeypatch
     assert calls == ["/s/form.pdf"]
     assert stats["files"] == 1
     assert stats["chunks"] == 0
+
+
+def test_ingest_paths_batch_accepts_generator_input(monkeypatch):
+    """生成器输入不能被进度回调消费：3 篇都要处理（回归 Codex 评审 P2）。"""
+    log: list[tuple[str, int]] = []
+    plans = [_plan(f"/s/{i}.txt", 10) for i in range(3)]
+    batches = _install_fakes(monkeypatch, plans, log, dual=False)
+    stats = batch_ingest.ingest_paths_batch(
+        (Path(f"/p{i}.txt") for i in range(3)), user_id="u"
+    )
+    assert stats == {"files": 3, "chunks": 30, "failed": []}
+    assert {s for batch in batches for s in batch} == {f"/s/{i}.txt" for i in range(3)}
