@@ -155,7 +155,8 @@ def ingest_paths_batch(
     if len(vectors) != len(texts):
         raise RuntimeError("嵌入返回数量与块数不一致")
 
-    # 3. Postgres：整体替换各 source 的旧行（与首批插入同事务），其余行分批提交
+    # 3. Postgres：整体替换各 source 的旧行（与首批插入同事务），其余行分批提交。
+    #    批次按 source 对齐（同一 source 的行不跨批），中断时不会留下"半篇"文档。
     _progress(75, "写入关系库")
     sources = [p.source for p in plans]
     doc_ids: list[str] = [gen_uuid() for _ in texts]
@@ -177,6 +178,20 @@ def ingest_paths_batch(
                 )
             )
             cursor += 1
+    batches: list[list[Document]] = []
+    current: list[Document] = []
+    offset = 0
+    for plan in plans:
+        n = len(plan.chunks)
+        if n == 0:
+            continue
+        if current and len(current) + n > PG_INSERT_BATCH:
+            batches.append(current)
+            current = []
+        current.extend(rows[offset : offset + n])
+        offset += n
+    if current:
+        batches.append(current)
     with SessionLocal() as db:
         existing_sources = {
             s
@@ -188,11 +203,11 @@ def ingest_paths_batch(
         db.query(Document).filter(
             Document.user_id == user_id, Document.source.in_(sources)
         ).delete(synchronize_session=False)
-        db.add_all(rows[:PG_INSERT_BATCH])
+        db.add_all(batches[0] if batches else [])
         db.commit()
-    for start in range(PG_INSERT_BATCH, len(rows), PG_INSERT_BATCH):
+    for batch in batches[1:]:
         with SessionLocal() as db:
-            db.add_all(rows[start : start + PG_INSERT_BATCH])
+            db.add_all(batch)
             db.commit()
 
     # 4. Milvus：每个 source 删旧（重导入要清），随后**整批一次 insert**
