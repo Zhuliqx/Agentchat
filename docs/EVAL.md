@@ -1,7 +1,7 @@
 # 评测总入口
 
 > 本页只做**索引与对照**：评测资产在哪、谁和谁配对、跑哪个脚本、数字以哪里为准。
-> 最后校验：2026-10-08（防漂移检查见 `backend/scripts/check_docs_stale.py`）
+> 最后校验：2026-10-09（防漂移检查见 `backend/scripts/check_docs_stale.py`）
 
 ## 1. 数字以哪里为准
 

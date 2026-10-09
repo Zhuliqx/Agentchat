@@ -55,11 +55,12 @@ python scripts/eval_quality.py --dataset ..\data\eval\ground_truth.json --max-ca
 python scripts/import_crud_rag.py  --src <上游目录> --task 1docs     # 2docs / 3docs 同理
 python scripts/import_crud_hallu.py --src <上游目录>
 python scripts/ingest_docs.py ..\data\eval_corpus\crud_hallu_db --user hallueval --batch
-python scripts/eval_hallu.py --user hallueval --top-k 6 --out hallu_retrieval_200.json
+python scripts/eval_hallu.py --user hallueval --top-k 6 --no-rerank --out hallu_retrieval_200.json
 python scripts/eval_hallu.py --user hallueval --no-retrieval --out hallu_no_retrieval_200.json
 ```
 
-幻觉纠正实测（2026-10-08，官方 prompt 模板，抽样 200/1268，top_k 6 + rerank 候选 12）：
+幻觉纠正实测（2026-10-08/09，官方 prompt 模板，抽样 200/1268，top_k 6；本机 6GB 显存与后端
+共卡时 rerank 会降级，以下数字为"无精排"口径）：
 
 | 指标 | 有检索 | 无检索基线 |
 |---|---|---|
@@ -71,7 +72,7 @@ python scripts/eval_hallu.py --user hallueval --no-retrieval --out hallu_no_retr
 分层证据：检索命中的 181 条上，纠正率 0.862、坏词残留 0.050（无检索同题 0.514 / 0.232）；
 检索未命中的 19 条掉回 0.526、残留虚假信息 0.421——收益集中在"检索到证据"的题上。
 局限：judge 与生成器同为 DeepSeek（同源偏好，相对变化可信、绝对值仅供参考）；抽样 200 条；
-本机 6GB 显存与后端共卡时 rerank 可能降级为未精排（正确续写命中率不受影响）。
+评测为"无精排"口径（本机 6GB 显存与后端共卡，rerank 会降级；正确续写命中率不受影响）。
 
 全量 1268 条（2026-10-09，`--no-rerank`，与抽样档同为"无精排"口径）：
 无检索基线 **1268/1268 完成**（纠正率 0.477 / 残留 0.146 / 坏词 0.221 / BLEU 0.197 / ROUGE-L 0.328）；
@@ -87,6 +88,7 @@ python scripts/eval_hallu.py --user hallueval --no-retrieval --out hallu_no_retr
 | 64,420 / 82,210（全池） | 0.444 | 0.380 | 0.490 | 0.547 |
 
 ```powershell
+$env:RERANK_CANDIDATE_K = "12"   # 与实测口径一致（.env.example 默认候选为 6）
 python scripts/build_scale_pool.py --src <上游>\80000_docs --out <池>\p1200 --limit 1200 --exclude-dir ..\data\eval_corpus\crud_1doc
 python scripts/ingest_docs.py <池>\p1200 --user scale1_2k --batch
 python scripts/eval_rag.py --dataset ..\data\eval_corpus\crud_1doc_gt_sample.json --user scale1_2k --top-k 6
@@ -105,6 +107,7 @@ python scripts/eval_rag.py --dataset ..\data\eval_corpus\crud_1doc_gt_sample.jso
 vcsum（会议摘要）没有单一支撑段落，不适用检索口径。
 
 ```powershell
+$env:RERANK_CANDIDATE_K = "12"   # 与实测口径一致（.env.example 默认候选为 6）
 python scripts/import_longbench.py --src <解压后的 data 目录>
 python scripts/ingest_docs.py ..\data\eval_corpus\longbench_dureader --user lb_dureader --batch
 python scripts/eval_rag.py --dataset ..\data\eval_corpus\longbench_dureader_gt.json --user lb_dureader --top-k 6
@@ -133,8 +136,9 @@ python scripts/eval_rag.py --dataset ..\data\eval_corpus\longbench_dureader_gt.j
 ```powershell
 # 下载 zh.val.zip / zh.val.json 并解压后：
 python scripts/import_xfund.py --json <...>\zh.val.json --images <...>\images
-# 摄入与评测都要开图片通道（默认关）；纯图片 PDF 走非批量路径
+# 摄入与评测都要开图片通道（默认关）；纯图片 PDF 批量/非批量均可（batch 已支持）
 $env:IMAGE_DUAL_CHANNEL="true"
+$env:RERANK_CANDIDATE_K = "12"   # 与实测口径一致（.env.example 默认候选为 6）
 python scripts/ingest_docs.py ..\data\eval_corpus\xfund_zh --user docvqa_zh
 python scripts/eval_rag.py --dataset ..\data\eval_corpus\xfund_zh_title_gt.json --user docvqa_zh --top-k 6
 python scripts/eval_rag.py --dataset ..\data\eval_corpus\xfund_zh_gt.json --user docvqa_zh --top-k 6
